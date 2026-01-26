@@ -10,6 +10,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Checkbox, Footer, Label, Select
 
 from kagan.data.builtin_agents import BUILTIN_AGENTS, list_builtin_agents
+from kagan.git_utils import get_current_branch, has_git_repo, list_local_branches
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -23,6 +24,8 @@ KAGAN_LOGO = """\
 ᘚᘛ  ██║  ██╗██║  ██║╚██████╔╝██║  ██║██║ ╚████║  ᘚᘛ
 ᘚᘛ  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝  ᘚᘛ"""
 
+DEFAULT_BASE_BRANCHES = ("main", "master", "develop", "trunk")
+
 
 class WelcomeScreen(Screen):
     """First-boot welcome and configuration screen."""
@@ -35,6 +38,33 @@ class WelcomeScreen(Screen):
         super().__init__()
         self.simple_mode = True
         self._agents = list_builtin_agents()
+        self._repo_root = Path.cwd()
+        self._has_git_repo = has_git_repo(self._repo_root)
+        self._branches = list_local_branches(self._repo_root) if self._has_git_repo else []
+        self._default_base_branch = self._get_default_base_branch(self._branches)
+        self._branch_options = self._build_branch_options(
+            self._branches,
+            self._default_base_branch,
+        )
+
+    def _build_branch_options(self, branches: list[str], default_branch: str) -> list[str]:
+        options: list[str] = []
+        for name in (default_branch, *branches, *DEFAULT_BASE_BRANCHES):
+            if name not in options:
+                options.append(name)
+        return options
+
+    def _get_default_base_branch(self, branches: list[str]) -> str:
+        if self._has_git_repo:
+            current = get_current_branch(self._repo_root)
+            if current:
+                return current
+            for candidate in DEFAULT_BASE_BRANCHES:
+                if candidate in branches:
+                    return candidate
+            if branches:
+                return branches[0]
+        return "main"
 
     def compose(self) -> ComposeResult:
         """Compose the welcome screen layout."""
@@ -42,6 +72,7 @@ class WelcomeScreen(Screen):
         agent_options = [
             (f"{a.config.name} ({a.author})", a.config.short_name) for a in self._agents
         ]
+        base_branch_options = [(name, name) for name in self._branch_options]
 
         with Vertical(id="welcome-container"):
             # Large ASCII art logo
@@ -83,6 +114,26 @@ class WelcomeScreen(Screen):
                 id="requirements-label",
             )
             yield Select(agent_options, value="claude", id="requirements-select", classes="hidden")
+
+            # Base branch selection
+            yield Label(
+                "Base branch for worktrees:",
+                classes="section-label",
+                id="base-branch-label",
+            )
+            yield Select(
+                base_branch_options,
+                value=self._default_base_branch,
+                id="base-branch-select",
+            )
+
+            if not self._has_git_repo:
+                yield Label(
+                    "No git repo detected. A fresh git repo will be initialized\n"
+                    "because Kagan requires git worktrees.",
+                    id="git-init-hint",
+                    classes="info-label",
+                )
 
             # Auto-start checkbox (enabled by default)
             yield Checkbox(
@@ -134,6 +185,8 @@ class WelcomeScreen(Screen):
     def _save_and_continue(self) -> None:
         """Save configuration and continue."""
         auto_start = self.query_one("#auto-start", Checkbox).value
+        base_branch_select = self.query_one("#base-branch-select", Select)
+        base_branch = str(base_branch_select.value) if base_branch_select.value else "main"
 
         if self.simple_mode:
             select = self.query_one("#agent-select", Select)
@@ -147,7 +200,7 @@ class WelcomeScreen(Screen):
             review = str(review_sel.value) if review_sel.value else "claude"
             requirements = str(req_sel.value) if req_sel.value else "claude"
 
-        self._write_config(worker, review, requirements, auto_start)
+        self._write_config(worker, review, requirements, auto_start, base_branch)
         self.app.pop_screen()
         self.app.call_later(self._notify_setup_complete)
 
@@ -156,7 +209,14 @@ class WelcomeScreen(Screen):
         if hasattr(self.app, "_continue_after_welcome"):
             self.app._continue_after_welcome()
 
-    def _write_config(self, worker: str, review: str, requirements: str, auto_start: bool) -> None:
+    def _write_config(
+        self,
+        worker: str,
+        review: str,
+        requirements: str,
+        auto_start: bool,
+        base_branch: str,
+    ) -> None:
         """Write config.toml file with correct ACP run commands."""
         kagan_dir = Path(".kagan")
         kagan_dir.mkdir(exist_ok=True)
@@ -178,6 +238,7 @@ active = true''')
 
 [general]
 auto_start = {str(auto_start).lower()}
+default_base_branch = "{base_branch}"
 default_worker_agent = "{worker}"
 default_review_agent = "{review}"
 default_requirements_agent = "{requirements}"

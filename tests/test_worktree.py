@@ -155,23 +155,24 @@ class TestWorktreeManagerRepoRoot:
         """Test that worktrees are created under the specified repo_root."""
         import os
 
-        # Change CWD to a different directory
+        # Change CWD to a different directory (not a parent of git_repo)
         original_cwd = os.getcwd()
-        try:
-            os.chdir(tempfile.gettempdir())
+        with tempfile.TemporaryDirectory() as other_dir:
+            try:
+                os.chdir(other_dir)
 
-            manager = WorktreeManager(repo_root=git_repo)
-            path = await manager.create("test-ticket", "Test title")
+                manager = WorktreeManager(repo_root=git_repo)
+                path = await manager.create("test-ticket", "Test title")
 
-            # Worktree should be under repo_root, not CWD
-            assert path.is_relative_to(git_repo)
-            assert not path.is_relative_to(Path.cwd())
-            assert path == git_repo / ".kagan" / "worktrees" / "test-ticket"
+                # Worktree should be under repo_root, not CWD
+                assert path.is_relative_to(git_repo)
+                assert not path.is_relative_to(Path.cwd())
+                assert path == git_repo / ".kagan" / "worktrees" / "test-ticket"
 
-            # Cleanup
-            await manager.delete("test-ticket")
-        finally:
-            os.chdir(original_cwd)
+                # Cleanup
+                await manager.delete("test-ticket")
+            finally:
+                os.chdir(original_cwd)
 
     async def test_repo_root_with_nested_project(self) -> None:
         """Test repo_root handling simulating KaganApp's initialization pattern."""

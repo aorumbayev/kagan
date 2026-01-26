@@ -6,7 +6,6 @@ from kagan.ui.modals.confirm import ConfirmModal
 from kagan.ui.modals.description_editor import DescriptionEditorModal
 from kagan.ui.modals.permission import PermissionModal
 from kagan.ui.modals.ticket_details import TicketDetailsModal
-from kagan.ui.modals.ticket_form import TicketFormModal
 
 __all__ = [
     "AgentOutputModal",
@@ -15,5 +14,4 @@ __all__ = [
     "ModalAction",
     "PermissionModal",
     "TicketDetailsModal",
-    "TicketFormModal",
 ]

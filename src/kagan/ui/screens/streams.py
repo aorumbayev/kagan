@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from textual import on
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Footer, RichLog, Static, TabbedContent, TabPane
 
+from kagan.acp import messages
+from kagan.agents.roles import AgentRole
 from kagan.ui.widgets.header import KaganHeader
 
 if TYPE_CHECKING:
@@ -101,6 +104,46 @@ class AgentStreamPane(TabPane):
         except Exception:
             return None
 
+    @on(messages.AgentUpdate)
+    def on_agent_update(self, message: messages.AgentUpdate) -> None:
+        if message.type == "terminal":
+            self.append_output(f"[bold yellow]{message.text}[/bold yellow]")
+        elif message.type == "terminal_output":
+            self.append_output(f"[dim]{message.text}[/dim]")
+        elif message.type == "terminal_exit":
+            self.append_output(message.text)
+        else:
+            self.append_output(message.text)
+
+    @on(messages.Thinking)
+    def on_agent_thinking(self, message: messages.Thinking) -> None:
+        self.append_output(message.text, style="dim italic")
+
+    @on(messages.ToolCall)
+    def on_tool_call(self, message: messages.ToolCall) -> None:
+        title = message.tool_call.get("title", "Tool call")
+        kind = message.tool_call.get("kind", "")
+        self.append_output(f"\n[bold cyan]> {title}[/bold cyan]")
+        if kind:
+            self.append_output(f"  [dim]({kind})[/dim]")
+
+    @on(messages.ToolCallUpdate)
+    def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
+        status = message.update.get("status")
+        if status:
+            style = "green" if status == "completed" else "yellow"
+            self.append_output(f"  [{style}]{status}[/{style}]")
+
+    @on(messages.AgentReady)
+    def on_agent_ready(self, message: messages.AgentReady) -> None:
+        self.append_output("[green]Agent ready[/green]\n")
+
+    @on(messages.AgentFail)
+    def on_agent_fail(self, message: messages.AgentFail) -> None:
+        self.append_output(f"[red bold]Error: {message.message}[/red bold]")
+        if message.details:
+            self.append_output(f"[red]{message.details}[/red]")
+
 
 class ReviewerPane(TabPane):
     """Fixed reviewer tab showing review agent activity."""
@@ -181,6 +224,46 @@ class ReviewerPane(TabPane):
         except Exception:
             return None
 
+    @on(messages.AgentUpdate)
+    def on_agent_update(self, message: messages.AgentUpdate) -> None:
+        if message.type == "terminal":
+            self._append_output(f"[bold yellow]{message.text}[/bold yellow]")
+        elif message.type == "terminal_output":
+            self._append_output(f"[dim]{message.text}[/dim]")
+        elif message.type == "terminal_exit":
+            self._append_output(message.text)
+        else:
+            self._append_output(message.text)
+
+    @on(messages.Thinking)
+    def on_agent_thinking(self, message: messages.Thinking) -> None:
+        self._append_output(f"[dim italic]{message.text}[/dim italic]")
+
+    @on(messages.ToolCall)
+    def on_tool_call(self, message: messages.ToolCall) -> None:
+        title = message.tool_call.get("title", "Tool call")
+        kind = message.tool_call.get("kind", "")
+        self._append_output(f"\n[bold cyan]> {title}[/bold cyan]")
+        if kind:
+            self._append_output(f"  [dim]({kind})[/dim]")
+
+    @on(messages.ToolCallUpdate)
+    def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
+        status = message.update.get("status")
+        if status:
+            style = "green" if status == "completed" else "yellow"
+            self._append_output(f"  [{style}]{status}[/{style}]")
+
+    @on(messages.AgentReady)
+    def on_agent_ready(self, message: messages.AgentReady) -> None:
+        self._append_output("[green]Agent ready[/green]\n")
+
+    @on(messages.AgentFail)
+    def on_agent_fail(self, message: messages.AgentFail) -> None:
+        self._append_output(f"[red bold]Error: {message.message}[/red bold]")
+        if message.details:
+            self._append_output(f"[red]{message.details}[/red]")
+
 
 class AgentStreamsScreen(Screen):
     """Full-screen tabbed view of agent output streams."""
@@ -198,6 +281,7 @@ class AgentStreamsScreen(Screen):
         super().__init__(**kwargs)
         self._agent_panes: dict[str, AgentStreamPane] = {}
         self._reviewer_pane: ReviewerPane | None = None
+        self._subscribed_agents: set[str] = set()
 
     @property
     def kagan_app(self) -> KaganApp:
@@ -228,6 +312,19 @@ class AgentStreamsScreen(Screen):
         header = self.query_one(KaganHeader)
         header.update_count(len(self._agent_panes))
 
+    def on_unmount(self) -> None:
+        """Unsubscribe from agent streams."""
+        manager = self.kagan_app.agent_manager
+        for agent_id in list(self._subscribed_agents):
+            role = manager.get_role(agent_id)
+            if role == AgentRole.REVIEWER:
+                if self._reviewer_pane:
+                    manager.unsubscribe(agent_id, self._reviewer_pane)
+            else:
+                if pane := self._agent_panes.get(agent_id):
+                    manager.unsubscribe(agent_id, pane)
+        self._subscribed_agents.clear()
+
     def _refresh_agent_tabs(self) -> None:
         """Refresh tabs based on active agents.
 
@@ -237,22 +334,31 @@ class AgentStreamsScreen(Screen):
         try:
             manager = self.kagan_app.agent_manager
             active_ids = set(manager.list_active())
+            known_ids = manager.list_known()
 
             tabbed = self.query_one("#streams-tabs", TabbedContent)
 
-            # Add new tabs for new agents
-            for agent_id in active_ids:
-                if agent_id not in self._agent_panes:
-                    agent = manager.get(agent_id)
-                    # Create short title from agent_id
-                    short_title = agent_id[:8] if len(agent_id) > 8 else agent_id
-                    pane = AgentStreamPane(
-                        agent_id=agent_id,
-                        agent=agent,
-                        title=short_title,
-                    )
-                    self._agent_panes[agent_id] = pane
-                    tabbed.add_pane(pane)
+            # Add new tabs for known agents (including inactive ones with logs)
+            for agent_id in known_ids:
+                role = manager.get_role(agent_id)
+                if role == AgentRole.REVIEWER:
+                    if agent_id not in self._subscribed_agents and self._reviewer_pane:
+                        manager.subscribe(agent_id, self._reviewer_pane)
+                        self._subscribed_agents.add(agent_id)
+                    continue
+                if agent_id in self._agent_panes:
+                    continue
+                agent = manager.get(agent_id)
+                short_title = agent_id[:8] if len(agent_id) > 8 else agent_id
+                pane = AgentStreamPane(
+                    agent_id=agent_id,
+                    agent=agent,
+                    title=short_title,
+                )
+                self._agent_panes[agent_id] = pane
+                tabbed.add_pane(pane)
+                manager.subscribe(agent_id, pane)
+                self._subscribed_agents.add(agent_id)
 
             # Update status for existing panes
             for agent_id, pane in self._agent_panes.items():
@@ -263,7 +369,7 @@ class AgentStreamsScreen(Screen):
             # Update header with agent count
             header = self.query_one(KaganHeader)
             header.update_agents(
-                len(active_ids),
+                manager.count_active(AgentRole.WORKER),
                 self.kagan_app.config.general.max_concurrent_agents,
             )
 

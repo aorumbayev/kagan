@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
+from shutil import which
 
 from textual.app import App
 from textual.binding import Binding
 from textual.message import Message
 
 from kagan.agents import AgentManager, Scheduler, WorktreeManager
-from kagan.config import KaganConfig
+from kagan.config import KaganConfig, get_os_value
 from kagan.constants import DEFAULT_CONFIG_PATH, DEFAULT_DB_PATH, DEFAULT_LOCK_PATH
+from kagan.data.builtin_agents import get_builtin_agent
 from kagan.database import KnowledgeBase, StateManager
+from kagan.git_utils import has_git_repo, init_git_repo
 from kagan.lock import InstanceLock, exit_if_already_running
 from kagan.theme import KAGAN_THEME
+from kagan.ui.screens.agent_missing import AgentMissingScreen, MissingAgentInfo
 from kagan.ui.screens.kanban import KanbanScreen
 
 
@@ -102,9 +107,22 @@ class KaganApp(App):
         self.config = KaganConfig.load(self.config_path)
         self.log("Config loaded", path=str(self.config_path))
 
+        missing_agents = self._get_missing_agents()
+        if missing_agents:
+            await self.push_screen(AgentMissingScreen(missing_agents))
+            return
+
         auto_start = self.config.general.auto_start
         max_agents = self.config.general.max_concurrent_agents
         self.log.debug("Config settings", auto_start=auto_start, max_agents=max_agents)
+
+        project_root = self.config_path.parent.parent
+        if not has_git_repo(project_root):
+            base_branch = self.config.general.default_base_branch
+            if init_git_repo(project_root, base_branch):
+                self.log("Initialized git repository", base_branch=base_branch)
+            else:
+                self.log.warning("Failed to initialize git repository", path=str(project_root))
 
         self._state_manager = StateManager(self.db_path)
         await self._state_manager.initialize()
@@ -114,7 +132,6 @@ class KaganApp(App):
 
         self._agent_manager = AgentManager()
         # Project root is the parent of .kagan directory (where config lives)
-        project_root = self.config_path.parent.parent
         self._worktree_manager = WorktreeManager(repo_root=project_root)
 
         self._scheduler = Scheduler(
@@ -162,6 +179,51 @@ class KaganApp(App):
             await self._state_manager.close()
         if self._instance_lock:
             self._instance_lock.release()
+
+    def _get_missing_agents(self) -> list[MissingAgentInfo]:
+        selected = [
+            self.config.general.default_worker_agent,
+            self.config.general.default_review_agent,
+            self.config.general.default_requirements_agent,
+        ]
+
+        missing: list[MissingAgentInfo] = []
+        seen: set[str] = set()
+
+        for agent_name in selected:
+            if agent_name in seen:
+                continue
+            seen.add(agent_name)
+
+            agent_config = self.config.get_agent(agent_name)
+            if agent_config is None:
+                continue
+
+            run_command = get_os_value(agent_config.run_command)
+            if not run_command:
+                missing.append(
+                    MissingAgentInfo(
+                        name=agent_config.name,
+                        short_name=agent_config.short_name,
+                        run_command="",
+                        install_command=None,
+                    )
+                )
+                continue
+
+            command_parts = shlex.split(run_command)
+            if not command_parts or which(command_parts[0]) is None:
+                builtin = get_builtin_agent(agent_name)
+                missing.append(
+                    MissingAgentInfo(
+                        name=agent_config.name,
+                        short_name=agent_config.short_name,
+                        run_command=run_command,
+                        install_command=builtin.install_command if builtin else None,
+                    )
+                )
+
+        return missing
 
 
 def run() -> None:

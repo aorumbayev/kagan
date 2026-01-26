@@ -9,13 +9,13 @@ from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widgets import Footer, Static
 
+from kagan.agents.roles import AgentRole
 from kagan.constants import COLUMN_ORDER
 from kagan.database.models import Ticket, TicketCreate, TicketStatus, TicketUpdate
 from kagan.ui.modals import (
     ConfirmModal,
     ModalAction,
     TicketDetailsModal,
-    TicketFormModal,
 )
 from kagan.ui.screens.chat import ChatScreen
 from kagan.ui.widgets.card import TicketCard
@@ -121,7 +121,7 @@ class KanbanScreen(Screen):
 
     def _update_active_cards(self) -> None:
         """Update agent active state and iteration info for all cards."""
-        active_ids = set(self.kagan_app.agent_manager.list_active())
+        active_ids = set(self.kagan_app.agent_manager.list_active(role=AgentRole.WORKER))
 
         # Update header with agent count
         header = self.query_one(KaganHeader)
@@ -218,36 +218,35 @@ class KanbanScreen(Screen):
 
     def action_new_ticket(self) -> None:
         """Open modal to create a new ticket."""
-        self.app.push_screen(TicketFormModal(), callback=self._on_new_ticket_result)
+        self.app.push_screen(TicketDetailsModal(), callback=self._on_ticket_modal_result)
 
-    async def _on_new_ticket_result(
-        self, result: Ticket | TicketCreate | TicketUpdate | None
+    async def _on_ticket_modal_result(
+        self, result: ModalAction | TicketCreate | TicketUpdate | None
     ) -> None:
-        """Handle new ticket form result."""
+        """Handle ticket modal result (create, edit, delete actions)."""
         if isinstance(result, TicketCreate):
             await self.kagan_app.state_manager.create_ticket(result)
             await self._refresh_board()
             self.notify(f"Created ticket: {result.title}")
+        elif isinstance(result, TicketUpdate) and self._editing_ticket_id is not None:
+            await self.kagan_app.state_manager.update_ticket(
+                self._editing_ticket_id, result
+            )
+            await self._refresh_board()
+            self.notify("Ticket updated")
+            self._editing_ticket_id = None
+        elif result == ModalAction.DELETE:
+            self.action_delete_ticket()
 
     def action_edit_ticket(self) -> None:
-        """Open modal to edit the selected ticket."""
+        """Open modal to edit the selected ticket (directly in edit mode)."""
         card = self._get_focused_card()
         if card and card.ticket:
             self._editing_ticket_id = card.ticket.id
             self.app.push_screen(
-                TicketFormModal(ticket=card.ticket),
-                callback=self._on_edit_ticket_result,
+                TicketDetailsModal(ticket=card.ticket, start_editing=True),
+                callback=self._on_ticket_modal_result,
             )
-
-    async def _on_edit_ticket_result(
-        self, result: Ticket | TicketCreate | TicketUpdate | None
-    ) -> None:
-        """Handle edit ticket form result."""
-        if isinstance(result, TicketUpdate) and self._editing_ticket_id is not None:
-            await self.kagan_app.state_manager.update_ticket(self._editing_ticket_id, result)
-            await self._refresh_board()
-            self.notify("Ticket updated")
-            self._editing_ticket_id = None
 
     def action_delete_ticket(self) -> None:
         """Delete the selected ticket with confirmation."""
@@ -294,17 +293,11 @@ class KanbanScreen(Screen):
         """View details of selected ticket."""
         card = self._get_focused_card()
         if card and card.ticket:
+            self._editing_ticket_id = card.ticket.id
             self.app.push_screen(
                 TicketDetailsModal(ticket=card.ticket),
-                callback=self._on_details_action,
+                callback=self._on_ticket_modal_result,
             )
-
-    def _on_details_action(self, action: ModalAction | None) -> None:
-        """Handle action from ticket details modal."""
-        if action == ModalAction.EDIT:
-            self.action_edit_ticket()
-        elif action == ModalAction.DELETE:
-            self.action_delete_ticket()
 
     def action_open_streams(self) -> None:
         """Open the agent streams screen."""
@@ -358,7 +351,7 @@ class KanbanScreen(Screen):
             else:
                 agent_config = agent_result[1]
 
-        agent = await manager.spawn(ticket.id, agent_config, wt_path)
+        agent = await manager.spawn(ticket.id, agent_config, wt_path, role=AgentRole.WORKER)
         self.notify(f"Started agent for {ticket.id}")
 
         # Run the agent loop in a background worker

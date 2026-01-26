@@ -235,115 +235,6 @@ TicketCard .card-iteration {
     text-style: italic;
 }
 
-/* Modal styles */
-TicketFormModal {
-    align: center middle;
-}
-
-TicketFormModal > Container,
-TicketFormModal #ticket-form-container {
-    width: 70;
-    height: auto;
-    max-height: 85%;
-    border: thick $primary;
-    background: $surface;
-    padding: 1 2;
-    overflow-y: auto;
-}
-
-TicketFormModal .modal-title {
-    text-align: center;
-    text-style: bold;
-    width: 100%;
-    padding-bottom: 1;
-    border-bottom: solid $border;
-    margin-bottom: 1;
-    color: $secondary;
-}
-
-TicketFormModal .form-field {
-    width: 100%;
-    height: auto;
-    margin-bottom: 1;
-}
-
-TicketFormModal .form-label {
-    width: auto;
-    height: 1;
-    padding-bottom: 0;
-    color: $text-muted;
-}
-
-TicketFormModal Input {
-    width: 100%;
-    background: $background;
-    color: $text;
-    border: solid $border;
-}
-
-TicketFormModal Input:focus {
-    border: solid $primary;
-}
-
-TicketFormModal TextArea {
-    width: 100%;
-    height: 10;
-    min-height: 6;
-    background: $background;
-    color: $text;
-    border: solid $border;
-}
-
-TicketFormModal TextArea:focus {
-    border: solid $primary;
-}
-
-TicketFormModal Select {
-    width: 100%;
-}
-
-TicketFormModal .button-row {
-    width: 100%;
-    height: auto;
-    padding-top: 1;
-    align: center middle;
-}
-
-TicketFormModal Button {
-    margin: 0 1;
-}
-
-/* Horizontal field row for Priority/Agent */
-TicketFormModal .field-row {
-    width: 100%;
-    height: auto;
-    margin-bottom: 1;
-}
-
-TicketFormModal .field-half {
-    width: 1fr;
-    margin-right: 1;
-}
-
-TicketFormModal .field-half:last-child {
-    margin-right: 0;
-}
-
-/* Description header with expand button */
-TicketFormModal .description-header {
-    width: 100%;
-    height: 1;
-}
-
-TicketFormModal .header-spacer {
-    width: 1fr;
-}
-
-TicketFormModal .expand-hint {
-    width: auto;
-    color: $primary;
-}
-
 /* Ticket details modal */
 TicketDetailsModal {
     align: center middle;
@@ -467,6 +358,68 @@ TicketDetailsModal .button-row {
 
 TicketDetailsModal Button {
     margin: 0 1;
+}
+
+/* Edit mode styles for TicketDetailsModal */
+TicketDetailsModal .edit-fields {
+    display: none;
+}
+
+TicketDetailsModal .form-field {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+
+TicketDetailsModal .form-label {
+    width: auto;
+    height: 1;
+    padding-bottom: 0;
+    color: $text-muted;
+}
+
+TicketDetailsModal Input {
+    width: 100%;
+    background: $background;
+    color: $text;
+    border: solid $border;
+}
+
+TicketDetailsModal Input:focus {
+    border: solid $primary;
+}
+
+TicketDetailsModal TextArea {
+    width: 100%;
+    height: 10;
+    min-height: 6;
+    background: $background;
+    color: $text;
+    border: solid $border;
+}
+
+TicketDetailsModal TextArea:focus {
+    border: solid $primary;
+}
+
+TicketDetailsModal Select {
+    width: 100%;
+}
+
+/* Horizontal field row for Priority/Agent in edit mode */
+TicketDetailsModal .field-row {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+
+TicketDetailsModal .field-half {
+    width: 1fr;
+    margin-right: 1;
+}
+
+TicketDetailsModal .field-half:last-child {
+    margin-right: 0;
 }
 
 /* Full-screen description editor modal */
@@ -855,6 +808,41 @@ WelcomeScreen {
     color: $text-muted;
 }
 
+/* Missing Agent Screen */
+#agent-missing-container {
+    width: 100%;
+    height: 1fr;
+    align: center middle;
+}
+
+#agent-missing-card {
+    width: 70;
+    height: auto;
+    border: thick $error;
+    background: $surface;
+    padding: 2 4;
+}
+
+#agent-missing-title {
+    text-align: center;
+    text-style: bold;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+#agent-missing-message {
+    text-align: center;
+    width: 100%;
+    color: $text-muted;
+}
+
+#agent-missing-hint {
+    text-align: center;
+    width: 100%;
+    padding-top: 1;
+    color: $text-muted;
+}
+
 #welcome-container {
     width: 95%;
     max-width: 70;
@@ -972,6 +960,21 @@ AgentCard .card-desc {
 
 #auto-start {
     margin: 1 0;
+}
+
+#base-branch-select {
+    width: 100%;
+    margin: 0 0 1 0;
+}
+
+.info-label {
+    color: $text-muted;
+}
+
+#git-init-hint {
+    text-align: center;
+    margin: 1 0 0 0;
+    width: 100%;
 }
 
 #buttons {

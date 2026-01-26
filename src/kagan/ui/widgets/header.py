@@ -91,7 +91,7 @@ class KaganHeader(Widget):
     def _update_agents_display(self) -> None:
         with suppress(NoMatches):
             label = self.query_one("#header-agents", Label)
-            label.update(f"Agents: {self.active_agents}/{self.max_agents}")
+            label.update(f"Worker Agents: {self.active_agents}/{self.max_agents}")
             # Update style based on utilization
             label.remove_class("agents-idle", "agents-working", "agents-full")
             if self.active_agents == 0:

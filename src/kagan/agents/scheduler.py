@@ -10,6 +10,7 @@ from textual import log
 
 from kagan.agents.prompt import build_prompt
 from kagan.agents.reviewer import build_review_prompt, parse_review_signal
+from kagan.agents.roles import AgentRole
 from kagan.agents.signals import Signal, parse_signal
 from kagan.database.models import TicketStatus, TicketUpdate
 
@@ -225,7 +226,12 @@ class Scheduler:
 
             # Spawn review agent via manager with review-specific ID
             review_agent_id = f"{ticket.id}-review"
-            agent = await self._agents.spawn(review_agent_id, agent_config, wt_path)
+            agent = await self._agents.spawn(
+                review_agent_id,
+                agent_config,
+                wt_path,
+                role=AgentRole.REVIEWER,
+            )
 
             try:
                 await agent.wait_ready(timeout=60.0)
@@ -331,7 +337,7 @@ class Scheduler:
 
         # Spawn ACP agent via manager (so it's trackable by UI)
         log.info(f"Spawning ACP agent for {ticket.id} in {wt_path}")
-        agent = await self._agents.spawn(ticket.id, agent_config, wt_path)
+        agent = await self._agents.spawn(ticket.id, agent_config, wt_path, role=AgentRole.WORKER)
         log.debug(f"Agent spawned for {ticket.id}, waiting for ready...")
 
         try:

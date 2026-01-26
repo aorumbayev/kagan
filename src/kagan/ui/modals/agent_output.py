@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from textual import on, work
 from textual.binding import Binding
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from textual.app import ComposeResult
 
     from kagan.acp.agent import Agent
+    from kagan.app import KaganApp
 
 
 class AgentOutputModal(ModalScreen[None]):
@@ -56,11 +57,13 @@ class AgentOutputModal(ModalScreen[None]):
 
     def on_mount(self) -> None:
         """Set ourselves as the message target when mounted."""
-        self.agent.set_message_target(self)
+        kagan_app = cast("KaganApp", self.app)
+        kagan_app.agent_manager.subscribe(self.ticket_id, self)
 
     def on_unmount(self) -> None:
         """Clear ourselves as message target when unmounted."""
-        self.agent.set_message_target(None)
+        kagan_app = cast("KaganApp", self.app)
+        kagan_app.agent_manager.unsubscribe(self.ticket_id, self)
 
     def _status_text(self) -> str:
         """Get current status text."""

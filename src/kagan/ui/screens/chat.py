@@ -13,6 +13,7 @@ from textual.widgets import Footer, Input, Label, Markdown, RichLog, Static
 
 from kagan.acp import messages
 from kagan.agents.planner import build_planner_prompt, parse_ticket_from_response
+from kagan.agents.roles import AgentRole
 from kagan.config import AgentConfig
 from kagan.ui.widgets.header import KAGAN_LOGO
 
@@ -76,8 +77,8 @@ class ChatScreen(Screen):
         if existing:
             self._agent = existing
             self._is_running = True
-            # Set ourselves as message target to receive streaming updates
-            existing.set_message_target(self)
+            # Subscribe for streaming updates
+            manager.subscribe(PLANNER_SESSION_ID, self)
             self._update_status()
             return
 
@@ -99,7 +100,13 @@ class ChatScreen(Screen):
 
         try:
             # Pass self as message_target to receive streaming updates
-            self._agent = await manager.spawn(PLANNER_SESSION_ID, agent_config, cwd, self)
+            self._agent = await manager.spawn(
+                PLANNER_SESSION_ID,
+                agent_config,
+                cwd,
+                self,
+                role=AgentRole.PLANNER,
+            )
             self._is_running = True
             self._update_status()
         except ValueError:
@@ -107,6 +114,7 @@ class ChatScreen(Screen):
             self._agent = manager.get(PLANNER_SESSION_ID)
             if self._agent:
                 self._is_running = True
+                manager.subscribe(PLANNER_SESSION_ID, self)
                 self._update_status()
 
     def _update_status(self) -> None:
@@ -249,6 +257,6 @@ class ChatScreen(Screen):
 
     async def on_unmount(self) -> None:
         """Cleanup on screen exit - do not terminate the planner."""
-        # Clear ourselves as message target but keep the agent running for reuse
+        # Clear ourselves as subscriber but keep the agent running for reuse
         if self._agent:
-            self._agent.set_message_target(None)
+            self.kagan_app.agent_manager.unsubscribe(PLANNER_SESSION_ID, self)
