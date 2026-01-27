@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
 from textual.css.query import NoMatches
@@ -25,7 +25,7 @@ def _get_version() -> str:
     """Get package version, fallback to dev."""
     try:
         return version("kagan")
-    except Exception:
+    except PackageNotFoundError:
         return "dev"
 
 
@@ -44,7 +44,7 @@ async def _get_git_branch(repo_root: Path) -> str:
         stdout, _ = await proc.communicate()
         if proc.returncode == 0:
             return stdout.decode().strip()
-    except Exception:
+    except (OSError, FileNotFoundError):
         pass
     return ""
 

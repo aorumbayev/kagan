@@ -90,13 +90,6 @@ class KaganConfig(BaseModel):
         """Get hat configuration by name."""
         return self.hats.get(name)
 
-    def get_default_hat(self) -> tuple[str, HatConfig] | None:
-        """Get the first hat as default."""
-        if self.hats:
-            name = next(iter(self.hats))
-            return name, self.hats[name]
-        return None
-
     def get_agent(self, name: str) -> AgentConfig | None:
         """Get agent configuration by name."""
         return self.agents.get(name)
@@ -112,15 +105,17 @@ class KaganConfig(BaseModel):
         """Get the configured worker agent."""
         return self.get_agent(self.general.default_worker_agent)
 
-    def get_review_agent(self) -> AgentConfig | None:
-        """Get the configured review agent."""
-        return self.get_agent(self.general.default_review_agent)
-
-    def get_requirements_agent(self) -> AgentConfig | None:
-        """Get the configured requirements agent."""
-        return self.get_agent(self.general.default_requirements_agent)
-
 
 def load_config() -> KaganConfig:
     """Load configuration from default location."""
     return KaganConfig.load()
+
+
+def get_fallback_agent_config() -> AgentConfig:
+    """Get fallback agent config when none configured."""
+    return AgentConfig(
+        identity="anthropic.claude",
+        name="Claude",
+        short_name="claude",
+        run_command={"*": "claude"},
+    )

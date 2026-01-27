@@ -99,7 +99,7 @@ class TerminalRunner:
             # Give it a moment to start
             await asyncio.sleep(0.1)
             return self._process is not None
-        except Exception:
+        except OSError:
             return False
 
     async def _run(self) -> None:
@@ -125,7 +125,7 @@ class TerminalRunner:
                 env=environment,
                 cwd=work_dir,
             )
-        except Exception:
+        except OSError:
             self._return_code = 1
             self._exit_event.set()
             return
@@ -138,7 +138,7 @@ class TerminalRunner:
                 if not data:
                     break
                 self._record_output(data)
-        except Exception:
+        except (OSError, asyncio.CancelledError):
             pass
 
         self._return_code = await self._process.wait()
@@ -182,7 +182,7 @@ class TerminalRunner:
         return output_bytes.decode("utf-8", "replace"), truncated
 
     def kill(self) -> bool:
-        """Kill the terminal process.
+        """Kill the terminal process and cancel the read task.
 
         Returns:
             True if killed, False if no process.
@@ -193,13 +193,22 @@ class TerminalRunner:
             return False
         try:
             self._process.kill()
+            # Also cancel the task to prevent it from blocking on read
+            if self._task is not None and not self._task.done():
+                self._task.cancel()
             return True
-        except Exception:
+        except (OSError, ProcessLookupError):
             return False
 
     def release(self) -> None:
         """Release the terminal (no longer usable via ACP)."""
         self._released = True
+        # Cancel task if still running
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        # Clear output buffer to free memory
+        self._output.clear()
+        self._output_bytes_count = 0
 
     async def wait_for_exit(self) -> tuple[int, str | None]:
         """Wait for the process to exit.

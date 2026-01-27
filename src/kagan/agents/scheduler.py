@@ -225,12 +225,14 @@ class Scheduler:
             agent_config = agent_config[1]
 
             # Spawn review agent via manager with review-specific ID
+            # auto_approve=True allows reviewer to run autonomously
             review_agent_id = f"{ticket.id}-review"
             agent = await self._agents.spawn(
                 review_agent_id,
                 agent_config,
                 wt_path,
                 role=AgentRole.REVIEWER,
+                auto_approve=True,
             )
 
             try:
@@ -280,12 +282,14 @@ class Scheduler:
 
             except TimeoutError:
                 await self._update_ticket_status(ticket.id, TicketStatus.BACKLOG)
-            except Exception:
+            except (OSError, RuntimeError) as e:
+                log.warning(f"Review error for {ticket.id}: {e}")
                 await self._update_ticket_status(ticket.id, TicketStatus.BACKLOG)
             finally:
                 await self._agents.terminate(review_agent_id)
 
-        except Exception:
+        except (OSError, RuntimeError) as e:
+            log.warning(f"Review loop error for {ticket.id}: {e}")
             await self._update_ticket_status(ticket.id, TicketStatus.BACKLOG)
         finally:
             self._reviewing_tickets.discard(ticket.id)
@@ -303,7 +307,7 @@ class Scheduler:
             if not stdout:
                 return []
             return [line.strip() for line in stdout.split("\n") if line.strip()]
-        except Exception:
+        except (OSError, RuntimeError):
             return []
 
     async def _run_iteration(
@@ -336,8 +340,11 @@ class Scheduler:
         )
 
         # Spawn ACP agent via manager (so it's trackable by UI)
+        # auto_approve=True allows scheduler agents to run autonomously
         log.info(f"Spawning ACP agent for {ticket.id} in {wt_path}")
-        agent = await self._agents.spawn(ticket.id, agent_config, wt_path, role=AgentRole.WORKER)
+        agent = await self._agents.spawn(
+            ticket.id, agent_config, wt_path, role=AgentRole.WORKER, auto_approve=True
+        )
         log.debug(f"Agent spawned for {ticket.id}, waiting for ready...")
 
         try:

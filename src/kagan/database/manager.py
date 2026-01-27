@@ -69,6 +69,7 @@ class StateManager:
             priority=ticket.priority,
             status=ticket.status,
             assigned_hat=ticket.assigned_hat,
+            agent_backend=ticket.agent_backend,
             parent_id=ticket.parent_id,
         )
 
@@ -77,8 +78,8 @@ class StateManager:
                 """
                 INSERT INTO tickets
                     (id, title, description, status, priority,
-                     assigned_hat, parent_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     assigned_hat, agent_backend, parent_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     new_ticket.id,
@@ -91,6 +92,7 @@ class StateManager:
                     if isinstance(new_ticket.priority, TicketPriority)
                     else new_ticket.priority,
                     new_ticket.assigned_hat,
+                    new_ticket.agent_backend,
                     new_ticket.parent_id,
                     new_ticket.created_at.isoformat(),
                     new_ticket.updated_at.isoformat(),
@@ -157,6 +159,7 @@ class StateManager:
             if isinstance(update.status, TicketStatus)
             else update.status,
             "assigned_hat": update.assigned_hat,
+            "agent_backend": update.agent_backend,
             "parent_id": update.parent_id,
         }
 
@@ -212,6 +215,7 @@ class StateManager:
             status=TicketStatus(row["status"]),
             priority=TicketPriority(row["priority"]),
             assigned_hat=row["assigned_hat"],
+            agent_backend=row["agent_backend"],
             parent_id=row["parent_id"],
             created_at=datetime.fromisoformat(row["created_at"])
             if row["created_at"]

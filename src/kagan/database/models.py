@@ -41,6 +41,16 @@ class TicketPriority(int, Enum):
     MEDIUM = 1
     HIGH = 2
 
+    @property
+    def label(self) -> str:
+        """Short display label."""
+        return {self.LOW: "LOW", self.MEDIUM: "MED", self.HIGH: "HIGH"}[self]
+
+    @property
+    def css_class(self) -> str:
+        """CSS class name for styling."""
+        return {self.LOW: "low", self.MEDIUM: "medium", self.HIGH: "high"}[self]
+
 
 class Ticket(BaseModel):
     """Ticket model representing a Kanban card."""
@@ -64,11 +74,10 @@ class Ticket(BaseModel):
     @property
     def priority_label(self) -> str:
         """Return human-readable priority label."""
-        return {
-            TicketPriority.LOW: "LOW",
-            TicketPriority.MEDIUM: "MED",
-            TicketPriority.HIGH: "HIGH",
-        }[self.priority]
+        priority = self.priority
+        if isinstance(priority, int):
+            priority = TicketPriority(priority)
+        return priority.label
 
     model_config = ConfigDict(use_enum_values=True)
 

@@ -3,31 +3,30 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from textual import on
 from textual.binding import Binding
-from textual.containers import Horizontal, ScrollableContainer, Vertical
-from textual.screen import Screen
-from textual.widgets import Footer, Input, Label, Markdown, RichLog, Static
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Footer, Input, Label, Static
 
 from kagan.acp import messages
 from kagan.agents.planner import build_planner_prompt, parse_ticket_from_response
 from kagan.agents.roles import AgentRole
-from kagan.config import AgentConfig
+from kagan.config import get_fallback_agent_config
+from kagan.ui.screens.base import KaganScreen
+from kagan.ui.widgets import StreamingOutput
 from kagan.ui.widgets.header import KAGAN_LOGO
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
-    from textual.widgets.markdown import MarkdownStream
 
     from kagan.acp.agent import Agent
-    from kagan.app import KaganApp
 
 PLANNER_SESSION_ID = "planner"
 
 
-class ChatScreen(Screen):
+class ChatScreen(KaganScreen):
     """Chat screen for planner agent interaction."""
 
     BINDINGS = [
@@ -40,11 +39,6 @@ class ChatScreen(Screen):
         self._agent: Agent | None = None
         self._is_running = False
         self._accumulated_response: list[str] = []
-        self._markdown_stream: MarkdownStream | None = None
-
-    @property
-    def kagan_app(self) -> KaganApp:
-        return cast("KaganApp", self.app)
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="chat-header"):
@@ -53,18 +47,12 @@ class ChatScreen(Screen):
             yield Label("Planner Chat", classes="header-subtitle")
         with Vertical(id="chat-container"):
             yield Static("Status: Not started", id="chat-status")
-            with ScrollableContainer(id="chat-log-container"):
-                yield Markdown("", id="chat-log")
-            # Keep RichLog for status messages (tool calls, etc.)
-            yield RichLog(id="chat-status-log", wrap=True, highlight=True, markup=True)
+            yield StreamingOutput(show_status_log=True, id="chat-output")
             with Horizontal(id="chat-input-row"):
                 yield Input(placeholder="Describe your goal...", id="chat-input")
         yield Footer()
 
     async def on_mount(self) -> None:
-        # Initialize markdown stream for streaming agent output
-        markdown = self.query_one("#chat-log", Markdown)
-        self._markdown_stream = Markdown.get_stream(markdown)
         await self._start_planner()
         self.query_one("#chat-input", Input).focus()
 
@@ -87,13 +75,7 @@ class ChatScreen(Screen):
         agent_config = config.get_worker_agent()
 
         if agent_config is None:
-            # Fallback to default AgentConfig for claude
-            agent_config = AgentConfig(
-                identity="anthropic.claude",
-                name="Claude Planner",
-                short_name="claude",
-                run_command={"*": "claude"},
-            )
+            agent_config = get_fallback_agent_config()
 
         # Spawn in current directory (no worktree for planner)
         cwd = Path.cwd()
@@ -128,22 +110,9 @@ class ChatScreen(Screen):
         else:
             status.update("Status: [bold blue]STOPPED[/]")
 
-    async def _append_streaming_text(self, text: str) -> None:
-        """Append streaming text to markdown widget."""
-        if self._markdown_stream:
-            await self._markdown_stream.write(text)
-            # Scroll to bottom
-            container = self.query_one("#chat-log-container", ScrollableContainer)
-            container.scroll_end(animate=False)
-
-    def _append_status(self, text: str, style: str = "") -> None:
-        """Append status text to the status log (non-streaming content)."""
-        log = self.query_one("#chat-status-log", RichLog)
-        if style:
-            log.write(f"[{style}]{text}[/{style}]")
-        else:
-            log.write(text)
-        log.scroll_end(animate=False)
+    def _get_output(self) -> StreamingOutput:
+        """Get the streaming output widget."""
+        return self.query_one("#chat-output", StreamingOutput)
 
     # Message handlers for ACP agent events
 
@@ -151,22 +120,23 @@ class ChatScreen(Screen):
     async def on_agent_update(self, message: messages.AgentUpdate) -> None:
         """Handle agent text output."""
         self._accumulated_response.append(message.text)
-        await self._append_streaming_text(message.text)
+        await self._get_output().write(message.text)
 
     @on(messages.Thinking)
     async def on_agent_thinking(self, message: messages.Thinking) -> None:
         """Handle agent thinking/reasoning."""
-        # Thinking goes to status log with dim styling
-        self._append_status(message.text, style="dim italic")
+        # Thinking can be chunked, so use main stream with italic formatting
+        await self._get_output().write(f"*{message.text}*")
 
     @on(messages.ToolCall)
     def on_tool_call(self, message: messages.ToolCall) -> None:
         """Handle tool call start."""
+        output = self._get_output()
         title = message.tool_call.get("title", "Tool call")
         kind = message.tool_call.get("kind", "")
-        self._append_status(f"\n[bold cyan]> {title}[/bold cyan]")
+        output.write_status(f"\n[bold cyan]> {title}[/bold cyan]")
         if kind:
-            self._append_status(f"  [dim]({kind})[/dim]")
+            output.write_status(f"  [dim]({kind})[/dim]")
 
     @on(messages.ToolCallUpdate)
     def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
@@ -174,21 +144,22 @@ class ChatScreen(Screen):
         status = message.update.get("status")
         if status:
             style = "green" if status == "completed" else "yellow"
-            self._append_status(f"  [{style}]{status}[/{style}]")
+            self._get_output().write_status(f"  [{style}]{status}[/{style}]")
 
     @on(messages.AgentReady)
     def on_agent_ready(self, message: messages.AgentReady) -> None:
         """Handle agent ready."""
-        self._append_status("[green]Agent ready[/green]\n")
+        self._get_output().write_status("[green]Agent ready[/green]\n")
 
     @on(messages.AgentFail)
     def on_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""
         self._is_running = False
         self._update_status()
-        self._append_status(f"[red bold]Error: {message.message}[/red bold]")
+        output = self._get_output()
+        output.write_status(f"[red bold]Error: {message.message}[/red bold]")
         if message.details:
-            self._append_status(f"[red]{message.details}[/red]")
+            output.write_status(f"[red]{message.details}[/red]")
 
     async def _try_create_ticket_from_response(self) -> None:
         """Parse accumulated response and create ticket if found."""
@@ -207,10 +178,12 @@ class ChatScreen(Screen):
                 f"Created ticket [{ticket.short_id}]: {ticket.title[:50]}",
                 severity="information",
             )
-            self._append_status(f"\n[bold green]✓ Created ticket {ticket.short_id}[/bold green]\n")
+            self._get_output().write_status(
+                f"\n[bold green]✓ Created ticket {ticket.short_id}[/bold green]\n"
+            )
         except Exception as e:
             self.notify(f"Failed to create ticket: {e}", severity="error")
-            self._append_status(f"[red]Failed to create ticket: {e}[/red]")
+            self._get_output().write_status(f"[red]Failed to create ticket: {e}[/red]")
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle user input submission."""
@@ -220,8 +193,8 @@ class ChatScreen(Screen):
 
         event.input.value = ""
 
-        # Write user input to markdown stream
-        await self._append_streaming_text(f"\n\n**You:** {text}\n\n")
+        # Write user input to streaming output
+        await self._get_output().write(f"\n\n**You:** {text}\n\n")
 
         if self._agent and self._is_running:
             # Use send_prompt for ACP agents
@@ -243,7 +216,7 @@ class ChatScreen(Screen):
                 # After prompt completes, try to create ticket from response
                 await self._try_create_ticket_from_response()
             except Exception as e:
-                self._append_status(f"[red]Error sending prompt: {e}[/red]")
+                self._get_output().write_status(f"[red]Error sending prompt: {e}[/red]")
 
     async def action_interrupt(self) -> None:
         """Send cancel signal to planner."""

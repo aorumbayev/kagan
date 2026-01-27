@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
 
 from textual.app import App
 from textual.binding import Binding
-from textual.message import Message
+from textual.timer import Timer
 
 from kagan.agents import AgentManager, Scheduler, WorktreeManager
 from kagan.config import KaganConfig, get_os_value
@@ -18,16 +17,10 @@ from kagan.data.builtin_agents import get_builtin_agent
 from kagan.database import KnowledgeBase, StateManager
 from kagan.git_utils import has_git_repo, init_git_repo
 from kagan.lock import InstanceLock, exit_if_already_running
+from kagan.messages import TicketChanged
 from kagan.theme import KAGAN_THEME
 from kagan.ui.screens.agent_missing import AgentMissingScreen, MissingAgentInfo
 from kagan.ui.screens.kanban import KanbanScreen
-
-
-@dataclass
-class TicketChanged(Message):
-    """Posted when a ticket status changes, to trigger UI refresh."""
-
-    pass
 
 
 class KaganApp(App):
@@ -61,6 +54,7 @@ class KaganApp(App):
         self._agent_manager: AgentManager | None = None
         self._worktree_manager: WorktreeManager | None = None
         self._scheduler: Scheduler | None = None
+        self._scheduler_timer: Timer | None = None
         self._instance_lock: InstanceLock | None = None
         self.config: KaganConfig = KaganConfig()
 
@@ -139,12 +133,12 @@ class KaganApp(App):
             agent_manager=self._agent_manager,
             worktree_manager=self._worktree_manager,
             config=self.config,
-            on_ticket_changed=self._on_ticket_changed,
+            on_ticket_changed=self._notify_ticket_changed_to_screen,
         )
 
         if self.config.general.auto_start:
             self.log("auto_start enabled, starting scheduler interval")
-            self.set_interval(2.0, self._scheduler_tick)
+            self._scheduler_timer = self.set_interval(5.0, self._scheduler_tick)
 
         await self.push_screen(KanbanScreen())
         self.log("KanbanScreen pushed, app ready")
@@ -161,9 +155,14 @@ class KaganApp(App):
         """Called periodically to run scheduler tick."""
         await self.scheduler.tick()
 
-    def _on_ticket_changed(self) -> None:
-        """Called by scheduler when a ticket status changes."""
-        # Post to the current screen so it receives the message
+    def _notify_ticket_changed_to_screen(self) -> None:
+        """Called by scheduler when a ticket status changes.
+
+        Posts TicketChanged message to the current screen for UI refresh.
+        Note: This is a callback, NOT a Textual message handler. The name
+        intentionally avoids the 'on_<message>' pattern to prevent Textual
+        from treating it as a handler (which would cause infinite loops).
+        """
         if self.screen:
             self.screen.post_message(TicketChanged())
 
@@ -173,6 +172,10 @@ class KaganApp(App):
 
     async def cleanup(self) -> None:
         """Terminate all agents and close resources."""
+        # Stop scheduler timer
+        if self._scheduler_timer:
+            self._scheduler_timer.stop()
+            self._scheduler_timer = None
         if self._agent_manager:
             await self._agent_manager.terminate_all()
         if self._state_manager:

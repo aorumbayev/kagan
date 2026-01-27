@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,17 +11,14 @@ if TYPE_CHECKING:
     from kagan.database.models import Ticket
 
 TEMPLATE_PATH = Path(__file__).parent.parent / "prompts" / "iteration.md"
-_TEMPLATE: str | None = None
 
 
+@cache
 def _load_template() -> str:
-    global _TEMPLATE
-    if _TEMPLATE is None:
-        if TEMPLATE_PATH.exists():
-            _TEMPLATE = TEMPLATE_PATH.read_text()
-        else:
-            # Fallback inline template
-            _TEMPLATE = """# Iteration {iteration} of {max_iterations}
+    if TEMPLATE_PATH.exists():
+        return TEMPLATE_PATH.read_text()
+    # Fallback inline template
+    return """# Iteration {iteration} of {max_iterations}
 
 ## Task: {title}
 
@@ -37,7 +35,6 @@ Work on the task. At the END of your response, include exactly ONE signal:
 
 {hat_instructions}
 """
-    return _TEMPLATE
 
 
 def build_prompt(

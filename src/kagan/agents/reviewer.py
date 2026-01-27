@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,7 +20,6 @@ REVIEW_SIGNALS = {
 }
 
 TEMPLATE_PATH = Path(__file__).parent.parent / "prompts" / "review.md"
-_TEMPLATE: str | None = None
 
 
 @dataclass
@@ -31,15 +31,13 @@ class ReviewResult:
     reason: str  # rejection reason if not approved
 
 
+@cache
 def _load_template() -> str:
     """Load the review prompt template."""
-    global _TEMPLATE
-    if _TEMPLATE is None:
-        if TEMPLATE_PATH.exists():
-            _TEMPLATE = TEMPLATE_PATH.read_text()
-        else:
-            # Fallback inline template
-            _TEMPLATE = """# Code Review Request
+    if TEMPLATE_PATH.exists():
+        return TEMPLATE_PATH.read_text()
+    # Fallback inline template
+    return """# Code Review Request
 
 ## Ticket: {title}
 
@@ -60,7 +58,6 @@ Review the changes and end with exactly ONE signal:
 - `<approve summary="Brief summary"/>` - Changes are good
 - `<reject reason="What needs fixing"/>` - Changes need work
 """
-    return _TEMPLATE
 
 
 def parse_review_signal(output: str) -> ReviewResult:

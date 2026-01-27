@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import TYPE_CHECKING
 
 from textual import log
@@ -18,7 +19,7 @@ class AgentMessageBus:
 
     def __init__(self, buffer_limit: int = 500) -> None:
         self._buffer_limit = buffer_limit
-        self._messages: list[Message] = []
+        self._messages: deque[Message] = deque(maxlen=buffer_limit)
         self._subscribers: set[MessagePump] = set()
 
     def subscribe(self, target: MessagePump) -> None:
@@ -40,18 +41,25 @@ class AgentMessageBus:
 
     def post_message(self, message: Message) -> bool:
         """Post to subscribers and store if safe to replay."""
+        # deque with maxlen auto-trims, no manual slicing needed
         if self._should_buffer(message):
             self._messages.append(message)
-            if len(self._messages) > self._buffer_limit:
-                self._messages = self._messages[-self._buffer_limit :]
 
         posted = False
+        dead_subscribers: list[MessagePump] = []
         for target in list(self._subscribers):
             try:
                 target.post_message(message)
                 posted = True
-            except Exception:
+            except RuntimeError:
+                # Widget has been removed - mark for cleanup
+                dead_subscribers.append(target)
                 continue
+
+        # Remove dead subscribers to prevent iteration overhead
+        for dead in dead_subscribers:
+            self._subscribers.discard(dead)
+
         return posted
 
     def has_messages(self) -> bool:

@@ -31,6 +31,7 @@ dev = [
     "pytest-textual-snapshot>=1.0.0",
     "textual-dev>=1.8.0",
     "mkdocs>=1.6.0",
+    "pytest-cov>=7.0.0",
 ]
 
 [tool.ruff]
@@ -51,6 +52,7 @@ docstring-code-format = true
 
 [tool.pyrefly]
 project_includes = ["src", "tests"]
+search_path = ["src", "."]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -25,7 +25,7 @@ class TestChatScreen:
 
             screen = app.screen
             assert isinstance(screen, ChatScreen)
-            assert screen.query_one("#chat-log")
+            assert screen.query_one("#chat-output")  # StreamingOutput widget
             assert screen.query_one("#chat-input")
             assert screen.query_one("#chat-status")
 

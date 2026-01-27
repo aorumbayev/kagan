@@ -33,6 +33,7 @@ class AgentManager:
         cwd: Path,
         message_target: MessagePump | None = None,
         role: AgentRole = AgentRole.WORKER,
+        auto_approve: bool = False,
     ) -> Agent:
         """Spawn a new agent for a ticket.
 
@@ -42,6 +43,7 @@ class AgentManager:
             cwd: Working directory for the agent.
             message_target: Textual widget to receive agent messages.
             role: Agent role classification.
+            auto_approve: If True, auto-approve all permission requests.
 
         Returns:
             The spawned Agent instance.
@@ -66,6 +68,8 @@ class AgentManager:
 
         log.info("[AgentManager.spawn] Creating Agent instance...")
         agent = Agent(cwd, agent_config)
+        if auto_approve:
+            agent.set_auto_approve(True)
         log.info("[AgentManager.spawn] Calling agent.start()...")
         agent.start(bus)
         self._agents[ticket_id] = agent
@@ -94,15 +98,35 @@ class AgentManager:
         return [agent_id for agent_id in ids if self._roles.get(agent_id) == role]
 
     async def terminate(self, ticket_id: str) -> None:
-        """Terminate a specific agent."""
+        """Terminate a specific agent and clean up role tracking."""
         if agent := self._agents.pop(ticket_id, None):
             await agent.stop()
+        # Clean up role tracking (keep _buses for log replay)
+        self._roles.pop(ticket_id, None)
+
+    def cleanup(self, ticket_id: str) -> None:
+        """Fully clean up all resources for a ticket including message bus.
+
+        Call this when logs are no longer needed (e.g., ticket is done/deleted).
+        """
+        self._agents.pop(ticket_id, None)
+        self._roles.pop(ticket_id, None)
+        if bus := self._buses.pop(ticket_id, None):
+            # Clear subscribers to break reference cycles
+            bus._subscribers.clear()
+            bus._messages.clear()
 
     async def terminate_all(self) -> None:
-        """Terminate all agents."""
+        """Terminate all agents and clean up all resources."""
         for agent in list(self._agents.values()):
             await agent.stop()
         self._agents.clear()
+        self._roles.clear()
+        # Clear all buses to free memory
+        for bus in self._buses.values():
+            bus._subscribers.clear()
+            bus._messages.clear()
+        self._buses.clear()
 
     def list_active(self, role: AgentRole | None = None) -> list[str]:
         """List ticket_ids with active agents."""

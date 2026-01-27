@@ -42,26 +42,26 @@ class KanbanColumn(Widget):
     can_focus = False
 
     status: reactive[TicketStatus] = reactive(TicketStatus.BACKLOG)
-    tickets: reactive[list[Ticket]] = reactive(list, recompose=True)
 
     def __init__(self, status: TicketStatus, tickets: list[Ticket] | None = None, **kwargs) -> None:
         super().__init__(id=f"column-{status.value.lower()}", **kwargs)
         self.status = status
-        self.tickets = tickets or []
+        self._tickets: list[Ticket] = tickets or []
 
     def compose(self) -> ComposeResult:
         with _NSVertical():
             with _NSVertical(classes="column-header"):
                 yield _NSLabel(
-                    f"{STATUS_LABELS[self.status]} ({len(self.tickets)})",
+                    f"{STATUS_LABELS[self.status]} ({len(self._tickets)})",
+                    id=f"header-{self.status.value.lower()}",
                     classes="column-header-text",
                 )
-            with _NSScrollable(classes="column-content"):
-                if self.tickets:
-                    for ticket in self.tickets:
+            with _NSScrollable(classes="column-content", id=f"content-{self.status.value.lower()}"):
+                if self._tickets:
+                    for ticket in self._tickets:
                         yield TicketCard(ticket)
                 else:
-                    with _NSContainer(classes="column-empty"):
+                    with _NSContainer(classes="column-empty", id=f"empty-{self.status.value.lower()}"):
                         yield _NSLabel("No tickets", classes="empty-message")
 
     def get_cards(self) -> list[TicketCard]:
@@ -84,7 +84,59 @@ class KanbanColumn(Widget):
         return self.focus_card(0)
 
     def update_tickets(self, tickets: list[Ticket]) -> None:
-        self.tickets = [t for t in tickets if t.status == self.status]
+        """Update tickets with minimal DOM changes - no full recompose.
+
+        Only adds new cards and removes cards for tickets that moved out.
+        Existing cards are kept as-is since ticket metadata rarely changes
+        (status changes cause tickets to move between columns).
+        """
+        new_tickets = [t for t in tickets if t.status == self.status]
+        self._tickets = new_tickets
+
+        # Update header count
+        try:
+            header = self.query_one(f"#header-{self.status.value.lower()}", _NSLabel)
+            header.update(f"{STATUS_LABELS[self.status]} ({len(new_tickets)})")
+        except Exception:
+            pass
+
+        # Get current cards and build lookup
+        current_cards = {card.ticket.id: card for card in self.get_cards() if card.ticket}
+        new_ticket_ids = {t.id for t in new_tickets}
+        current_ids = set(current_cards.keys())
+
+        try:
+            content = self.query_one(f"#content-{self.status.value.lower()}", _NSScrollable)
+        except Exception:
+            return
+
+        # Remove cards for tickets no longer in this column
+        for ticket_id in current_ids - new_ticket_ids:
+            card = current_cards[ticket_id]
+            card.remove()
+
+        # Add new cards only (tickets that weren't here before)
+        for ticket in new_tickets:
+            if ticket.id not in current_ids:
+                content.mount(TicketCard(ticket))
+
+        # Handle empty state container
+        empty_id = f"empty-{self.status.value.lower()}"
+        has_empty = False
+        try:
+            empty_container = self.query_one(f"#{empty_id}", _NSContainer)
+            has_empty = True
+            if new_tickets:
+                # Have tickets now, remove empty state
+                empty_container.remove()
+        except Exception:
+            pass
+
+        # If no tickets and no empty container, add empty state
+        if not new_tickets and not has_empty:
+            empty = _NSContainer(classes="column-empty", id=empty_id)
+            content.mount(empty)
+            empty.mount(_NSLabel("No tickets", classes="empty-message"))
 
     def update_active_states(self, active_ids: set[str]) -> None:
         """Update active agent state for all cards in this column."""

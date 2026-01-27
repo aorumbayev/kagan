@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
+from textual import getters
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
-from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import Footer, Static
 
 from kagan.agents.roles import AgentRole
@@ -17,6 +18,7 @@ from kagan.ui.modals import (
     ModalAction,
     TicketDetailsModal,
 )
+from kagan.ui.screens.base import KaganScreen
 from kagan.ui.screens.chat import ChatScreen
 from kagan.ui.widgets.card import TicketCard
 from kagan.ui.widgets.column import KanbanColumn
@@ -26,7 +28,8 @@ if TYPE_CHECKING:
     from textual import events
     from textual.app import ComposeResult
 
-    from kagan.app import KaganApp, TicketChanged
+    from kagan.messages import TicketChanged
+
 
 # Minimum terminal size for proper display
 MIN_WIDTH = 80
@@ -38,7 +41,7 @@ SIZE_WARNING_MESSAGE = (
 )
 
 
-class KanbanScreen(Screen):
+class KanbanScreen(KaganScreen):
     """Main Kanban board screen with 4 columns."""
 
     BINDINGS = [
@@ -60,16 +63,14 @@ class KanbanScreen(Screen):
         Binding("c", "open_chat", "Chat"),
     ]
 
+    header = getters.query_one(KaganHeader)
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._tickets: list[Ticket] = []
         self._pending_delete_ticket: Ticket | None = None
         self._editing_ticket_id: str | None = None
-
-    @property
-    def kagan_app(self) -> KaganApp:
-        """Get the typed KaganApp instance."""
-        return cast("KaganApp", self.app)
+        self._card_update_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the Kanban board layout."""
@@ -92,16 +93,21 @@ class KanbanScreen(Screen):
         self._check_screen_size()
         await self._refresh_board()
         self._focus_first_card()
-        self.set_interval(1.0, self._update_active_cards)
+        self._card_update_timer = self.set_interval(1.0, self._update_active_cards)
 
         # Fetch git branch for header
         from kagan.ui.widgets.header import _get_git_branch
 
-        header = self.query_one(KaganHeader)
         config_path = self.kagan_app.config_path
         repo_root = config_path.parent.parent
         branch = await _get_git_branch(repo_root)
-        header.update_branch(branch)
+        self.header.update_branch(branch)
+
+    def on_unmount(self) -> None:
+        """Clean up timers on unmount."""
+        if self._card_update_timer:
+            self._card_update_timer.stop()
+            self._card_update_timer = None
 
     def on_resize(self, event: events.Resize) -> None:
         """Handle terminal resize."""
@@ -124,8 +130,9 @@ class KanbanScreen(Screen):
         active_ids = set(self.kagan_app.agent_manager.list_active(role=AgentRole.WORKER))
 
         # Update header with agent count
-        header = self.query_one(KaganHeader)
-        header.update_agents(len(active_ids), self.kagan_app.config.general.max_concurrent_agents)
+        self.header.update_agents(
+            len(active_ids), self.kagan_app.config.general.max_concurrent_agents
+        )
 
         # Build iteration info dict
         iterations: dict[str, str] = {}
@@ -146,7 +153,7 @@ class KanbanScreen(Screen):
         for status in COLUMN_ORDER:
             column = self.query_one(f"#column-{status.value.lower()}", KanbanColumn)
             column.update_tickets([t for t in self._tickets if t.status == status])
-        self.query_one(KaganHeader).update_count(len(self._tickets))
+        self.header.update_count(len(self._tickets))
 
     def _get_columns(self) -> list[KanbanColumn]:
         return [self.query_one(f"#column-{s.value.lower()}", KanbanColumn) for s in COLUMN_ORDER]
@@ -229,9 +236,7 @@ class KanbanScreen(Screen):
             await self._refresh_board()
             self.notify(f"Created ticket: {result.title}")
         elif isinstance(result, TicketUpdate) and self._editing_ticket_id is not None:
-            await self.kagan_app.state_manager.update_ticket(
-                self._editing_ticket_id, result
-            )
+            await self.kagan_app.state_manager.update_ticket(self._editing_ticket_id, result)
             await self._refresh_board()
             self.notify("Ticket updated")
             self._editing_ticket_id = None
@@ -339,15 +344,9 @@ class KanbanScreen(Screen):
         if agent_config is None:
             agent_result = config.get_default_agent()
             if agent_result is None:
-                # Create a default AgentConfig for claude
-                from kagan.config import AgentConfig
+                from kagan.config import get_fallback_agent_config
 
-                agent_config = AgentConfig(
-                    identity="anthropic.claude",
-                    name="Claude",
-                    short_name="claude",
-                    run_command={"*": "claude"},
-                )
+                agent_config = get_fallback_agent_config()
             else:
                 agent_config = agent_result[1]
 

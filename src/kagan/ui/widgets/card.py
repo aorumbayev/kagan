@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from textual.css.query import NoMatches
 from textual.message import Message
-from textual.reactive import reactive
+from textual.reactive import reactive, var
 from textual.widget import Widget
 from textual.widgets import Label
 
@@ -25,7 +26,7 @@ class TicketCard(Widget):
     can_focus = True
 
     ticket: reactive[Ticket | None] = reactive(None)
-    is_agent_active: reactive[bool] = reactive(False)
+    is_agent_active: var[bool] = var(False, toggle_class="agent-active")
     iteration_info: reactive[str] = reactive("")
     _dragging: bool = False
     _drag_start_x: int = 0
@@ -98,9 +99,9 @@ class TicketCard(Widget):
         if self.ticket is None:
             return "low"
         priority = self.ticket.priority
-        if isinstance(priority, TicketPriority):
-            priority = priority.value
-        return {0: "low", 1: "medium", 2: "high"}.get(priority, "medium")
+        if isinstance(priority, int):
+            priority = TicketPriority(priority)
+        return priority.css_class
 
     def _truncate_title(self, title: str, max_length: int) -> str:
         """Truncate title if too long."""
@@ -145,21 +146,25 @@ class TicketCard(Widget):
             column_width = screen_width // 4
             column_index = min(3, max(0, screen_x // column_width))
             return COLUMN_ORDER[column_index]
-        except Exception:
+        except (NoMatches, IndexError, ZeroDivisionError):
             return None
 
     def watch_is_agent_active(self, active: bool) -> None:
-        """React to agent active state changes."""
+        """Start/stop pulse animation timer when agent state changes."""
         if active:
-            self.add_class("agent-active")
             self._pulse_timer = self.set_interval(0.6, self._toggle_pulse)
         else:
             if self._pulse_timer is not None:
                 self._pulse_timer.stop()
                 self._pulse_timer = None
-            self.remove_class("agent-active")
             self.remove_class("agent-pulse")
 
     def _toggle_pulse(self) -> None:
         """Toggle the pulse class for animation effect."""
         self.toggle_class("agent-pulse")
+
+    def on_unmount(self) -> None:
+        """Clean up timer when card is removed."""
+        if self._pulse_timer is not None:
+            self._pulse_timer.stop()
+            self._pulse_timer = None

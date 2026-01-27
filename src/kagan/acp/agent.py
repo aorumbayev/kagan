@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections import deque
 from copy import deepcopy
 from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import TYPE_CHECKING, Any, cast
@@ -63,17 +64,19 @@ class Agent:
         self._terminal_count: int = 0
         self._terminals: dict[str, TerminalRunner] = {}
 
-        # Response accumulation
-        self._response_text: list[str] = []
+        # Response accumulation - use deque for efficient bounded storage
+        self._response_text: deque[str] = deque(maxlen=10000)
 
-        # Message buffer for when no target is connected
-        # Stores (message, is_blocking) tuples - blocking messages need special handling
-        self._message_buffer: list[Message] = []
-        self._buffer_limit = 500  # Keep last N messages
+        # Message buffer for when no target is connected - deque auto-trims
+        self._buffer_limit = 500
+        self._message_buffer: deque[Message] = deque(maxlen=self._buffer_limit)
 
         # Events
         self._ready_event = asyncio.Event()
         self._done_event = asyncio.Event()
+
+        # Auto-approval mode (for scheduler-spawned agents)
+        self._auto_approve = False
 
     @property
     def command(self) -> str | None:
@@ -103,6 +106,19 @@ class Agent:
             for msg in self._message_buffer:
                 target.post_message(msg)
             self._message_buffer.clear()
+
+    def set_auto_approve(self, enabled: bool) -> None:
+        """Enable or disable auto-approval of permission requests.
+
+        When enabled, the agent will automatically approve all permission
+        requests without waiting for UI interaction. This is useful for
+        scheduler-spawned agents running autonomously.
+
+        Args:
+            enabled: True to enable auto-approval.
+        """
+        self._auto_approve = enabled
+        log.debug(f"Auto-approve mode: {enabled}")
 
     def start(self, message_target: MessagePump | None = None) -> None:
         """Start the agent subprocess.
@@ -262,11 +278,9 @@ class Agent:
             return self._message_target.post_message(message)
 
         # Buffer non-blocking messages for replay when target connects
+        # deque with maxlen auto-trims, no manual slicing needed
         if buffer and not isinstance(message, messages.RequestPermission):
             self._message_buffer.append(message)
-            # Trim buffer if too large
-            if len(self._message_buffer) > self._buffer_limit:
-                self._message_buffer = self._message_buffer[-self._buffer_limit :]
         return False
 
     # --- Exposed RPC endpoints (Agent calls these) ---
@@ -389,9 +403,10 @@ class Agent:
                     new_call[key] = value
             self.tool_calls[tool_call_id] = cast("protocol.ToolCall", new_call)
 
-        # If no UI is connected, auto-approve with first "allow" option
-        if self._message_target is None:
-            log.info("[RPC] session/request_permission: no UI, auto-approving")
+        # Auto-approve if enabled or no UI is connected
+        if self._auto_approve or self._message_target is None:
+            reason = "auto_approve enabled" if self._auto_approve else "no UI"
+            log.info(f"[RPC] session/request_permission: {reason}, auto-approving")
             for opt in options:
                 if "allow" in opt.get("kind", ""):
                     log.debug(
@@ -724,7 +739,9 @@ class Agent:
         """
         log.info(f"Sending prompt to agent (len={len(prompt)})")
         log.debug(f"Prompt content: {prompt[:500]}...")
+        # Clear accumulated state from previous prompts to prevent memory growth
         self._response_text.clear()
+        self.tool_calls.clear()
         content: list[protocol.ContentBlock] = [{"type": "text", "text": prompt}]
 
         with self.request():
@@ -765,7 +782,18 @@ class Agent:
         return True
 
     async def stop(self) -> None:
-        """Gracefully stop the agent."""
+        """Gracefully stop the agent and clean up resources."""
+        # Kill and clean up all terminals
+        for terminal in list(self._terminals.values()):
+            terminal.kill()
+            terminal.release()
+        self._terminals.clear()
+
+        # Clear buffers to free memory
+        self._message_buffer.clear()
+        self._response_text.clear()
+
+        # Terminate process
         if self._process and self._process.returncode is None:
             try:
                 self._process.terminate()

@@ -1,10 +1,39 @@
 /* Kagan TUI Styles - Khagan Night Theme */
 /* Uses Textual design tokens for theme compatibility */
 
+/* =============================================================================
+   CSS VARIABLES
+   ============================================================================= */
+
+/* Priority colors - semantic aliases for consistency */
+$priority-high: $error;
+$priority-high-text: $text;
+$priority-medium: $warning;
+$priority-medium-text: $background;
+$priority-low: $border;
+$priority-low-text: $text-muted;
+
+/* Common spacing */
+$modal-padding: 1 2;
+$card-margin: 0 0 1 0;
+
+/* Common border styles */
+$border-standard: solid $border;
+$border-focused: solid $primary;
+$border-modal: thick $primary;
+
+/* =============================================================================
+   GLOBAL STYLES
+   ============================================================================= */
+
 /* Global app styles */
 Screen {
     background: $background;
 }
+
+/* =============================================================================
+   HEADER & FOOTER
+   ============================================================================= */
 
 /* Custom KaganHeader styles - Khagan Night theme */
 KaganHeader {
@@ -112,6 +141,10 @@ FooterKey > .footer-key--description {
     color: $text-disabled;
 }
 
+/* =============================================================================
+   KANBAN BOARD
+   ============================================================================= */
+
 /* Kanban board styles */
 .board-container {
     width: 100%;
@@ -171,6 +204,10 @@ KanbanColumn .empty-message {
     padding: 2;
 }
 
+/* =============================================================================
+   TICKET CARDS
+   ============================================================================= */
+
 /* Card styles */
 TicketCard {
     width: 100%;
@@ -211,15 +248,15 @@ TicketCard .card-desc {
 }
 
 TicketCard .card-desc.high {
-    color: $error;
+    color: $priority-high;
 }
 
 TicketCard .card-desc.medium {
-    color: $warning;
+    color: $priority-medium;
 }
 
 TicketCard .card-desc.low {
-    color: $text-muted;
+    color: $priority-low-text;
 }
 
 TicketCard .card-meta {
@@ -234,6 +271,10 @@ TicketCard .card-iteration {
     color: $success;
     text-style: italic;
 }
+
+/* =============================================================================
+   MODALS
+   ============================================================================= */
 
 /* Ticket details modal */
 TicketDetailsModal {
@@ -275,18 +316,18 @@ TicketDetailsModal .badge {
 }
 
 TicketDetailsModal .badge-priority-high {
-    background: $error;
-    color: $text;
+    background: $priority-high;
+    color: $priority-high-text;
 }
 
 TicketDetailsModal .badge-priority-medium {
-    background: $warning;
-    color: $background;
+    background: $priority-medium;
+    color: $priority-medium-text;
 }
 
 TicketDetailsModal .badge-priority-low {
-    background: $border;
-    color: $text-muted;
+    background: $priority-low;
+    color: $priority-low-text;
 }
 
 TicketDetailsModal .badge-status {
@@ -362,6 +403,32 @@ TicketDetailsModal Button {
 
 /* Edit mode styles for TicketDetailsModal */
 TicketDetailsModal .edit-fields {
+    display: none;
+}
+
+TicketDetailsModal.editing .edit-fields {
+    display: block;
+}
+
+TicketDetailsModal .view-only {
+    display: block;
+}
+
+TicketDetailsModal.editing .view-only {
+    display: none;
+}
+
+/* Status field only shown in create mode during editing */
+TicketDetailsModal #status-field {
+    display: none;
+}
+
+TicketDetailsModal.editing.create-mode #status-field {
+    display: block;
+}
+
+/* Meta row hidden during editing */
+TicketDetailsModal.editing #meta-row {
     display: none;
 }
 
@@ -504,6 +571,10 @@ DescriptionEditorModal #line-count {
     padding: 2;
 }
 
+/* =============================================================================
+   SCREENS
+   ============================================================================= */
+
 /* KanbanScreen styles */
 KanbanScreen {
     layout: vertical;
@@ -625,27 +696,23 @@ ChatScreen {
     padding-bottom: 1;
 }
 
-#chat-log-container {
+#chat-output {
     width: 100%;
-    height: 2fr;
+    height: 1fr;
     background: $surface;
     border: round $border;
+}
+
+#chat-output > ScrollableContainer {
+    height: 1fr;
     padding: 0 1;
     scrollbar-gutter: stable;
 }
 
-#chat-log {
-    width: 100%;
+#chat-output > RichLog {
     height: auto;
-    padding: 1;
-}
-
-#chat-status-log {
-    width: 100%;
-    height: 1fr;
     max-height: 10;
-    background: $surface;
-    border: round $border;
+    border-top: solid $border;
     padding: 0 1;
     scrollbar-gutter: stable;
 }
@@ -755,10 +822,24 @@ AgentStreamsScreen {
     height: 1fr;
 }
 
-AgentStreamPane RichLog, ReviewerPane RichLog {
+AgentStreamPane StreamingOutput, ReviewerPane StreamingOutput {
     height: 1fr;
     background: $surface;
     border: round $border;
+}
+
+AgentStreamPane StreamingOutput > ScrollableContainer,
+ReviewerPane StreamingOutput > ScrollableContainer {
+    height: 1fr;
+    border: none;
+    scrollbar-gutter: stable;
+}
+
+AgentStreamPane StreamingOutput > RichLog,
+ReviewerPane StreamingOutput > RichLog {
+    height: auto;
+    max-height: 10;
+    border-top: solid $border;
     scrollbar-gutter: stable;
 }
 
@@ -766,6 +847,10 @@ AgentStreamPane RichLog, ReviewerPane RichLog {
     background: $primary;
     color: $background;
 }
+
+/* =============================================================================
+   WELCOME SCREEN
+   ============================================================================= */
 
 /* Welcome Screen Styles */
 WelcomeScreen {
