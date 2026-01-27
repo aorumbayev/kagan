@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from kagan.acp.agent import Agent
+    from kagan.agents.prompt_loader import PromptLoader
     from kagan.database.models import Ticket
 
 # Review signal patterns
@@ -89,6 +90,7 @@ def build_review_prompt(
     ticket: Ticket,
     commits: list[str],
     diff_summary: str,
+    prompt_loader: PromptLoader | None = None,
 ) -> str:
     """Build the review prompt from template.
 
@@ -96,13 +98,17 @@ def build_review_prompt(
         ticket: The ticket being reviewed.
         commits: List of commit messages/hashes.
         diff_summary: Summary of the diff changes.
+        prompt_loader: Optional prompt loader for custom templates.
 
     Returns:
         Formatted prompt string.
     """
     commits_text = "\n".join(f"- {c}" for c in commits) if commits else "(No commits)"
 
-    return _load_template().format(
+    # Load template: prompt_loader > builtin
+    template = prompt_loader.get_reviewer_prompt() if prompt_loader else _load_template()
+
+    return template.format(
         title=ticket.title,
         ticket_id=ticket.id,
         description=ticket.description or "No description provided.",
@@ -116,6 +122,7 @@ async def run_review(
     ticket: Ticket,
     commits: list[str],
     diff: str,
+    prompt_loader: PromptLoader | None = None,
 ) -> ReviewResult:
     """Run a code review using the agent.
 
@@ -124,11 +131,12 @@ async def run_review(
         ticket: The ticket being reviewed.
         commits: List of commit messages.
         diff: The diff summary to review.
+        prompt_loader: Optional prompt loader for custom templates.
 
     Returns:
         ReviewResult with approval status and details.
     """
-    prompt = build_review_prompt(ticket, commits, diff)
+    prompt = build_review_prompt(ticket, commits, diff, prompt_loader)
 
     try:
         await agent.send_prompt(prompt)

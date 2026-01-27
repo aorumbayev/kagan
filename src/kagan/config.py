@@ -50,6 +50,15 @@ class HatConfig(BaseModel):
     agent_command: str = Field(default="claude")
     args: list[str] = Field(default_factory=list)
     system_prompt: str = Field(default="")
+    prompt_file: str = Field(default="")  # Path to .md file in .kagan/prompts/roles/
+
+
+class PromptsConfig(BaseModel):
+    """Configuration for prompt customization."""
+
+    worker_system_prompt: str = Field(default="")
+    reviewer_system_prompt: str = Field(default="")
+    planner_system_prompt: str = Field(default="")
 
 
 class AgentConfig(BaseModel):
@@ -70,6 +79,7 @@ class KaganConfig(BaseModel):
     """Root configuration model."""
 
     general: GeneralConfig = Field(default_factory=GeneralConfig)
+    prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     hats: dict[str, HatConfig] = Field(default_factory=dict)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
 

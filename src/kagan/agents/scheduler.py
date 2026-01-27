@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from textual import log
 
 from kagan.agents.prompt import build_prompt
+from kagan.agents.prompt_loader import PromptLoader
 from kagan.agents.reviewer import build_review_prompt, parse_review_signal
 from kagan.agents.roles import AgentRole
 from kagan.agents.signals import Signal, parse_signal
@@ -44,6 +45,7 @@ class Scheduler:
         self._iteration_counts: dict[str, int] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._on_ticket_changed = on_ticket_changed
+        self._prompt_loader = PromptLoader(config)
 
     def _notify_ticket_changed(self) -> None:
         """Notify that a ticket has changed status."""
@@ -215,7 +217,7 @@ class Scheduler:
             )
 
             # Build review prompt
-            prompt = build_review_prompt(ticket, commits, files_summary)
+            prompt = build_review_prompt(ticket, commits, files_summary, self._prompt_loader)
 
             # Get agent config for review
             agent_config = self._config.get_default_agent()
@@ -324,7 +326,9 @@ class Scheduler:
 
         # Get hat config for prompt building (backward compat)
         hat = self._config.get_hat(ticket.assigned_hat) if ticket.assigned_hat else None
-        prompt = build_prompt(ticket, iteration, max_iterations, scratchpad, hat)
+        prompt = build_prompt(
+            ticket, iteration, max_iterations, scratchpad, hat, self._prompt_loader
+        )
         log.debug(f"Built prompt for {ticket.id}, length={len(prompt)}")
 
         # Use the default agent config if none provided

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from kagan.agents.prompt_loader import PromptLoader
     from kagan.config import HatConfig
     from kagan.database.models import Ticket
 
@@ -24,16 +25,19 @@ def _load_template() -> str:
 
 {description}
 
+{hat_instructions}
+
 ## Your Progress So Far
 {scratchpad}
 
-## Instructions
-Work on the task. At the END of your response, include exactly ONE signal:
-- `<complete/>` - Task fully done
-- `<continue/>` - Made progress, need more iterations
-- `<blocked reason="..."/>` - Need human help
+## CRITICAL: Response Signal Required
 
-{hat_instructions}
+You MUST end your response with exactly ONE of these XML signals:
+- `<complete/>` - Task is FULLY DONE and verified working
+- `<continue/>` - Made progress, need another iteration
+- `<blocked reason="why"/>` - Cannot proceed without human help
+
+**If you completed the task, output `<complete/>` as the last thing in your response.**
 """
 
 
@@ -43,13 +47,37 @@ def build_prompt(
     max_iterations: int,
     scratchpad: str,
     hat: HatConfig | None = None,
+    prompt_loader: PromptLoader | None = None,
 ) -> str:
-    """Build the prompt for an agent iteration."""
-    return _load_template().format(
+    """Build the prompt for an agent iteration.
+
+    Args:
+        ticket: The ticket to build the prompt for.
+        iteration: Current iteration number.
+        max_iterations: Maximum allowed iterations.
+        scratchpad: Previous progress notes.
+        hat: Optional hat configuration for role-specific instructions.
+        prompt_loader: Optional prompt loader for custom templates.
+
+    Returns:
+        The formatted prompt string.
+    """
+    # Load template: prompt_loader > builtin
+    if prompt_loader:
+        template = prompt_loader.get_worker_prompt()
+        hat_instructions = prompt_loader.get_hat_instructions(hat)
+    else:
+        template = _load_template()
+        hat_instructions = hat.system_prompt if hat and hat.system_prompt else ""
+
+    # Format hat instructions with header if present
+    hat_section = f"## Role\n{hat_instructions}" if hat_instructions else ""
+
+    return template.format(
         iteration=iteration,
         max_iterations=max_iterations,
         title=ticket.title,
         description=ticket.description or "No description provided.",
         scratchpad=scratchpad or "(No previous progress - this is iteration 1)",
-        hat_instructions=f"## Role\n{hat.system_prompt}" if hat and hat.system_prompt else "",
+        hat_instructions=hat_section,
     )

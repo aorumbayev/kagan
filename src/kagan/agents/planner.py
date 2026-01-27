@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from kagan.database.models import TicketCreate, TicketPriority
+
+if TYPE_CHECKING:
+    from kagan.agents.prompt_loader import PromptLoader
 
 # Pattern to extract ticket blocks from planner response
 TICKET_PATTERN = re.compile(
@@ -17,14 +21,26 @@ TICKET_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-PLANNER_SYSTEM_PROMPT = """\
+# Customizable preamble - users can modify this part
+PLANNER_PREAMBLE = """\
 You are a project planning assistant. Your job is to take user requests
 and create well-structured development tickets.
 
 When the user describes what they want to build or accomplish,
 analyze their request and create ONE detailed ticket.
 
-## Output Format
+## Guidelines
+1. Title should start with a verb (Create, Implement, Fix, Add, Update, etc.)
+2. Description should be thorough enough for a developer to understand the task
+3. Include acceptance criteria as bullet points
+4. If the request is vague, make reasonable assumptions and note them
+
+After outputting the ticket, briefly explain what you created and any assumptions you made.
+"""
+
+# Fixed output format - DO NOT let users modify this, parsing depends on it
+PLANNER_OUTPUT_FORMAT = """\
+## Output Format (Required)
 
 You MUST output your ticket in this exact XML format:
 
@@ -44,15 +60,10 @@ Detailed description including:
 - low: Nice to have, no deadline
 - medium: Normal priority (default)
 - high: Urgent or blocking other work
-
-## Guidelines
-1. Title should start with a verb (Create, Implement, Fix, Add, Update, etc.)
-2. Description should be thorough enough for a developer to understand the task
-3. Include acceptance criteria as bullet points
-4. If the request is vague, make reasonable assumptions and note them
-
-After outputting the ticket, briefly explain what you created and any assumptions you made.
 """
+
+# Combined prompt for backward compatibility
+PLANNER_SYSTEM_PROMPT = PLANNER_PREAMBLE + "\n" + PLANNER_OUTPUT_FORMAT
 
 
 @dataclass
@@ -96,16 +107,28 @@ def parse_ticket_from_response(response: str) -> ParsedTicket | None:
     return ParsedTicket(ticket=ticket, raw_match=match.group(0))
 
 
-def build_planner_prompt(user_input: str) -> str:
+def build_planner_prompt(
+    user_input: str,
+    prompt_loader: PromptLoader | None = None,
+) -> str:
     """Build the initial prompt for the planner agent.
 
     Args:
         user_input: The user's natural language request.
+        prompt_loader: Optional prompt loader for custom templates.
 
     Returns:
         Formatted prompt for the planner.
     """
-    return f"""{PLANNER_SYSTEM_PROMPT}
+    # Load preamble: prompt_loader > hardcoded default
+    # Note: We always append PLANNER_OUTPUT_FORMAT to ensure parsing works
+    preamble = (
+        prompt_loader.get_planner_prompt() if prompt_loader else PLANNER_PREAMBLE
+    )
+
+    return f"""{preamble}
+
+{PLANNER_OUTPUT_FORMAT}
 
 ## User Request
 

@@ -12,6 +12,7 @@ from textual.widgets import Footer, Input, Label, Static
 
 from kagan.acp import messages
 from kagan.agents.planner import build_planner_prompt, parse_ticket_from_response
+from kagan.agents.prompt_loader import PromptLoader
 from kagan.agents.roles import AgentRole
 from kagan.config import get_fallback_agent_config
 from kagan.ui.screens.base import KaganScreen
@@ -208,8 +209,9 @@ class ChatScreen(KaganScreen):
             # Clear accumulated response before sending new prompt
             self._accumulated_response.clear()
 
-            # Build planner prompt with system instructions
-            prompt = build_planner_prompt(text)
+            # Build planner prompt with system instructions using PromptLoader
+            prompt_loader = PromptLoader(self.kagan_app.config)
+            prompt = build_planner_prompt(text, prompt_loader)
 
             try:
                 await self._agent.send_prompt(prompt)
