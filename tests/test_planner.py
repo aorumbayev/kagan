@@ -82,8 +82,16 @@ class TestPlannerScreen:
 
     async def test_input_submission_triggers_planner(self, app_with_mock_planner: KaganApp):
         """Test submitting input triggers planner agent."""
+        from kagan.acp import messages
+
         async with app_with_mock_planner.run_test(size=(120, 40)) as pilot:
             await app_with_mock_planner.push_screen(PlannerScreen())
+            await pilot.pause()
+
+            # Trigger agent ready to enable input
+            screen = app_with_mock_planner.screen
+            assert isinstance(screen, PlannerScreen)
+            await screen.on_agent_ready(messages.AgentReady())
             await pilot.pause()
 
             # Type and submit input
@@ -93,8 +101,6 @@ class TestPlannerScreen:
             await pilot.pause(0.5)  # Wait for async processing
 
             # Verify agent was spawned and prompt sent
-            screen = app_with_mock_planner.screen
-            assert isinstance(screen, PlannerScreen)
             agent = screen._agent
             assert agent is not None
             assert getattr(agent, "sent_prompts", [])

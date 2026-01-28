@@ -19,6 +19,7 @@ from tests.helpers.pages import (
 
 if TYPE_CHECKING:
     from kagan.app import KaganApp
+    from kagan.ui.screens.planner import PlannerScreen
 
 
 class TestVimNavigation:
@@ -363,15 +364,25 @@ class TestPlannerScreen:
             assert len(headers) == 1, "Planner screen should have KaganHeader"
 
     async def test_planner_input_is_focused(self, e2e_app_with_tickets: KaganApp):
-        """Planner input should be focused on mount."""
+        """Planner input should be focused after agent is ready."""
         from textual.widgets import Input
+
+        from kagan.acp import messages
 
         async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             await pilot.press("c")  # Open planner
             await pilot.pause()
             assert is_on_screen(pilot, "PlannerScreen")
-            # Input should be focused
+
+            # Trigger agent ready state
+            screen = cast("PlannerScreen", pilot.app.screen)
+            await screen.on_agent_ready(messages.AgentReady())
+            await pilot.pause()
+
+            # Input should now be enabled and focused
+            input_widget = screen.query_one("#planner-input", Input)
+            assert not input_widget.disabled, "Input should be enabled"
             focused = pilot.app.focused
             assert isinstance(focused, Input), "Input should be focused"
             assert focused.id == "planner-input"

@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 class SearchBar(Widget):
     """A search bar widget for filtering tickets on the Kanban board."""
 
+    # Start hidden and non-focusable
+    can_focus = False
+
     search_query: reactive[str] = reactive("")
     is_visible: reactive[bool] = reactive(False)
 
@@ -31,6 +34,11 @@ class SearchBar(Widget):
     def compose(self) -> ComposeResult:
         """Compose the search bar layout."""
         yield Input(placeholder="Search tickets...", id="search-input")
+
+    def on_mount(self) -> None:
+        """Disable focus on the input when mounted (hidden by default)."""
+        with suppress(NoMatches):
+            self.query_one("#search-input", Input).can_focus = False
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handle input text changes."""
@@ -48,11 +56,15 @@ class SearchBar(Widget):
         """Show the search bar and focus the input."""
         self.is_visible = True
         with suppress(NoMatches):
-            self.query_one("#search-input", Input).focus()
+            inp = self.query_one("#search-input", Input)
+            inp.can_focus = True
+            inp.focus()
 
     def hide(self) -> None:
         """Hide the search bar and clear the query."""
         self.is_visible = False
+        with suppress(NoMatches):
+            self.query_one("#search-input", Input).can_focus = False
         self.clear()
 
     def clear(self) -> None:

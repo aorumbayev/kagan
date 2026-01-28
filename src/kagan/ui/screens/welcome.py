@@ -106,16 +106,10 @@ class WelcomeScreen(Screen):
                 )
 
             # AUTO Mode Settings section
-            yield Label("AUTO Mode Settings:", classes="section-label settings-header")
+            yield Label("Agent Settings:", classes="section-label settings-header")
             with Horizontal(classes="toggle-row"):
-                yield Switch(value=False, id="auto-run-switch")
-                yield Label("Auto-run tickets in IN_PROGRESS", classes="toggle-text")
-            with Horizontal(classes="toggle-row"):
-                yield Switch(value=False, id="auto-approve-switch")
-                yield Label("Auto-approve agent permissions", classes="toggle-text")
-            with Horizontal(classes="toggle-row"):
-                yield Switch(value=False, id="auto-merge-switch")
-                yield Label("Auto-merge completed tickets", classes="toggle-text")
+                yield Switch(value=False, id="auto-mode-switch")
+                yield Label("Would you like to enable auto mode for agents?", classes="toggle-text")
 
             # Continue button
             with Center(id="buttons"):
@@ -142,13 +136,13 @@ class WelcomeScreen(Screen):
         agent = str(select.value) if select.value else "claude"
         worker = agent
 
-        # Read toggle values
-        auto_run_switch = self.query_one("#auto-run-switch", Switch)
-        auto_approve_switch = self.query_one("#auto-approve-switch", Switch)
-        auto_merge_switch = self.query_one("#auto-merge-switch", Switch)
-        auto_start = auto_run_switch.value
-        auto_approve = auto_approve_switch.value
-        auto_merge = auto_merge_switch.value
+        # Read toggle value
+        auto_mode_switch = self.query_one("#auto-mode-switch", Switch)
+        auto_mode = auto_mode_switch.value
+        # Set all automation flags based on single toggle
+        auto_start = auto_mode
+        auto_approve = auto_mode
+        auto_merge = auto_mode
 
         self._write_config(worker, auto_start, auto_approve, auto_merge, base_branch)
         self.app.pop_screen()

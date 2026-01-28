@@ -19,7 +19,7 @@ from kagan.constants import PLANNER_TITLE_MAX_LENGTH
 from kagan.limits import AGENT_TIMEOUT
 from kagan.ui.screens.approval import ApprovalScreen
 from kagan.ui.screens.base import KaganScreen
-from kagan.ui.widgets import StreamingOutput
+from kagan.ui.widgets import EmptyState, StatusBar, StreamingOutput
 from kagan.ui.widgets.header import KaganHeader
 
 if TYPE_CHECKING:
@@ -43,18 +43,38 @@ class PlannerScreen(KaganScreen):
         self._agent: Agent | None = None
         self._is_running = False
         self._accumulated_response: list[str] = []
+        self._agent_ready = False
+        self._has_agent_output = False
 
     def compose(self) -> ComposeResult:
         """Compose the planner screen layout."""
         yield KaganHeader()
         with Vertical(id="planner-container"):
-            yield Static("What do you want to build?", id="planner-header")
+            yield Static(
+                "AI Planner\n"
+                "Describe your feature in natural language. "
+                "The AI will analyze, ask questions, and generate tickets.",
+                id="planner-header",
+            )
+            yield EmptyState()
             yield StreamingOutput(id="planner-output")
-            yield Input(placeholder="Describe your feature or task...", id="planner-input")
+            yield StatusBar()
+            yield Input(
+                placeholder="Describe your feature or task...", id="planner-input", disabled=True
+            )
         yield Footer()
 
     async def on_mount(self) -> None:
         """Start planner agent and focus input on mount."""
+        from contextlib import suppress
+
+        from textual.css.query import NoMatches
+
+        # Update status bar to show initialization
+        with suppress(NoMatches):
+            status_bar = self.query_one(StatusBar)
+            status_bar.update_status("initializing", "Initializing agent...")
+
         await self._start_planner()
         self.query_one("#planner-input", Input).focus()
 
@@ -88,6 +108,20 @@ class PlannerScreen(KaganScreen):
     @on(messages.AgentUpdate)
     async def on_agent_update(self, message: messages.AgentUpdate) -> None:
         """Handle agent text output."""
+        from contextlib import suppress
+
+        from textual.css.query import NoMatches
+
+        # On first update, hide EmptyState and show output
+        if not self._has_agent_output:
+            self._has_agent_output = True
+            with suppress(NoMatches):
+                empty_state = self.query_one(EmptyState)
+                empty_state.add_class("hidden")
+            with suppress(NoMatches):
+                output = self._get_output()
+                output.add_class("visible")
+
         self._accumulated_response.append(message.text)
         await self._get_output().write(message.text)
 
@@ -119,13 +153,47 @@ class PlannerScreen(KaganScreen):
     @on(messages.AgentReady)
     async def on_agent_ready(self, message: messages.AgentReady) -> None:
         """Handle agent ready."""
+        from contextlib import suppress
+
+        from textual.css.query import NoMatches
+
+        self._agent_ready = True
+
+        # Enable input
+        input_widget = self.query_one("#planner-input", Input)
+        input_widget.disabled = False
+
+        # Update status bar
+        with suppress(NoMatches):
+            status_bar = self.query_one(StatusBar)
+            status_bar.update_status("ready", "Press H for help")
+
+        # Focus input
+        input_widget.focus()
+
+        # Write to output
         await self._get_output().write("**Agent ready** ✓\n")
 
     @on(messages.AgentFail)
     async def on_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""
+        from contextlib import suppress
+
+        from textual.css.query import NoMatches
+
         self._is_running = False
         self._update_status()
+
+        # Update status bar to error state
+        with suppress(NoMatches):
+            status_bar = self.query_one(StatusBar)
+            status_bar.update_status("error", f"Error: {message.message}")
+
+        # Disable input
+        input_widget = self.query_one("#planner-input", Input)
+        input_widget.disabled = True
+
+        # Write error to output
         output = self._get_output()
         await output.write(f"**Error:** {message.message}")
         if message.details:
@@ -187,11 +255,24 @@ class PlannerScreen(KaganScreen):
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle user input submission."""
+        from contextlib import suppress
+
+        from textual.css.query import NoMatches
+
+        # Only submit if agent is ready
+        if not self._agent_ready:
+            return
+
         text = event.value.strip()
         if not text:
             return
 
         event.input.value = ""
+
+        # Update status bar to thinking state
+        with suppress(NoMatches):
+            status_bar = self.query_one(StatusBar)
+            status_bar.update_status("thinking", "Processing...")
 
         # Write user input to streaming output
         await self._get_output().write(f"\n\n**You:** {text}\n\n")

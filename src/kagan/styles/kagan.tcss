@@ -185,16 +185,16 @@ KanbanColumn .empty-message {
 TicketCard {
     width: 100%;
     height: auto;
-    max-height: 7;
+    max-height: 10;
     margin: 0 0 1 0;
-    padding: 0;
+    padding: 0 1;
     border: solid $border;
     background: $background;
     color: $text;
 }
 
 TicketCard:focus {
-    border: double $primary;
+    border: solid $primary;
     background: $panel;
 }
 
@@ -207,7 +207,68 @@ TicketCard.dragging {
     opacity: 0.7;
 }
 
+/* ============================================
+   SESSION & AGENT STATE INDICATORS
+   ============================================ */
+
+/* tmux session active - steady GREEN border (entire border) */
+TicketCard.session-active {
+    border: solid $success;
+}
+
+TicketCard.session-active:focus {
+    border: solid $success;
+}
+
+TicketCard.session-active:hover {
+    border: solid $success;
+    background: $panel;
+}
+
+/* Agent actively working - entire card pulses */
+TicketCard.agent-active {
+    border: solid $secondary;
+}
+
+TicketCard.agent-active:focus {
+    border: solid $secondary;
+}
+
+/* Pulse state A - bright/highlighted (toggle ON) */
+TicketCard.agent-pulse {
+    border: solid $warning;
+    background: $panel;
+}
+
+TicketCard.agent-pulse:focus {
+    border: solid $warning;
+    background: $panel;
+}
+
+/* Combined: session + agent active - agent pulse takes precedence */
+TicketCard.session-active.agent-active {
+    border: solid $secondary;
+}
+
+TicketCard.session-active.agent-pulse {
+    border: solid $warning;
+    background: $panel;
+}
+
+/* ============================================
+   CARD CONTENT STYLES
+   ============================================ */
+
 TicketCard .card-title {
+    width: 100%;
+    height: 1;
+    text-style: bold;
+    color: $text;
+    padding: 0;
+}
+
+/* Second line of title (for long titles) */
+TicketCard .card-title-continued {
     width: 100%;
     height: 1;
     text-style: bold;
@@ -253,8 +314,8 @@ TicketCard .card-checks {
 TicketCard .card-iteration {
     width: 100%;
     height: 1;
-    color: $success;
-    text-style: italic;
+    color: $warning;
+    text-style: bold;
 }
 
 /* =============================================================================
@@ -758,17 +819,25 @@ PlannerScreen {
 
 #planner-header {
     width: 100%;
-    height: 1;
-    color: $text;
-    padding-bottom: 1;
+    height: auto;
+    max-height: 3;
+    color: $text-muted;
+    padding-bottom: 2;
     text-style: bold;
 }
 
 #planner-output {
     width: 100%;
-    height: 1fr;
+    height: auto;
+    min-height: 10;
+    max-height: 1fr;
     background: $surface;
     border: round $border;
+    display: none;
+}
+
+#planner-output.visible {
+    display: block;
 }
 
 #planner-output > ScrollableContainer {
@@ -792,6 +861,92 @@ PlannerScreen {
 
 #planner-input:blur {
     text-opacity: 50%;
+}
+
+#planner-input:disabled {
+    text-opacity: 40%;
+    border: solid $border;
+}
+
+/* EmptyState widget */
+.empty-state {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    padding: 2;
+    margin-top: 2;
+}
+
+.empty-state-title {
+    width: 100%;
+    text-align: center;
+    text-style: bold underline;
+    color: $secondary;
+    padding-bottom: 3;
+}
+
+.empty-state-cards {
+    width: auto;
+    height: auto;
+    layout: horizontal;
+    align: center middle;
+}
+
+.empty-state-card {
+    min-width: 35;
+    width: auto;
+    height: auto;
+    border: round $border;
+    background: $surface;
+    padding: 1 2;
+    margin: 0 1;
+}
+
+.empty-state-tips {
+    width: 60;
+    height: auto;
+    border: solid $border;
+    background: $surface;
+    padding: 1;
+    margin-top: 2;
+}
+
+.empty-card-title {
+    text-style: bold underline;
+    color: $text-muted;
+    padding-bottom: 2;
+}
+
+.card-item {
+    color: $text;
+    padding: 0 0 1 2;
+}
+
+.empty-state-footer {
+    width: 100%;
+    text-align: center;
+    color: $text-muted;
+    text-style: italic;
+    padding-top: 2;
+}
+
+/* StatusBar widget */
+StatusBar {
+    height: 1;
+    background: $panel;
+    layout: horizontal;
+    padding: 0 1;
+}
+
+.status-left {
+    width: auto;
+    color: $text;
+}
+
+.status-right {
+    width: 1fr;
+    text-align: right;
+    color: $text-muted;
 }
 
 /* =============================================================================
@@ -1237,12 +1392,92 @@ SearchBar Input:focus {
     height: 1;
     background: $warning;
     color: $background;
-    text-align: center;
+    text-align: left;
     text-style: bold;
     display: none;
     layer: overlay;
+    padding: 0 1;
 }
 
 .leader-hint.visible {
     display: block;
+}
+
+/* =============================================================================
+   SETTINGS MODAL
+   ============================================================================= */
+
+SettingsModal {
+    align: center middle;
+}
+
+#settings-container {
+    width: 70;
+    height: auto;
+    max-height: 90%;
+    background: $surface;
+    border: thick $primary;
+    padding: 1 2;
+    overflow-y: auto;
+}
+
+SettingsModal .modal-title {
+    text-align: center;
+    text-style: bold;
+    width: 100%;
+    padding-bottom: 1;
+    color: $primary;
+}
+
+SettingsModal .section-title {
+    text-style: bold;
+    color: $text-muted;
+    padding-top: 1;
+    padding-bottom: 1;
+}
+
+SettingsModal .setting-row {
+    width: 100%;
+    height: auto;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+SettingsModal .setting-label {
+    padding-left: 1;
+    color: $text;
+}
+
+SettingsModal .input-group {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+SettingsModal .input-label {
+    color: $text-muted;
+    padding-bottom: 0;
+}
+
+SettingsModal Input {
+    width: 100%;
+    background: $background;
+    color: $text;
+    border: solid $border;
+}
+
+SettingsModal Input:focus {
+    border: solid $primary;
+}
+
+SettingsModal .button-row {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    padding-top: 1;
+}
+
+SettingsModal .button-row Button {
+    margin: 0 1;
 }

@@ -62,6 +62,8 @@ class KanbanScreen(KaganScreen):
         Binding("h", "focus_left", "Left"),
         Binding("l", "focus_right", "Right"),
         Binding("n", "new_ticket", "New"),
+        Binding("v", "view_details", "View"),
+        Binding("e", "edit_ticket", "Edit"),
         Binding("enter", "open_session", "Open"),
         Binding("g", "activate_leader", "Go..."),
         Binding("slash", "toggle_search", "Search", key_display="/"),
@@ -72,16 +74,15 @@ class KanbanScreen(KaganScreen):
         Binding("right", "focus_right", show=False),
         Binding("down", "focus_down", show=False),
         Binding("up", "focus_up", show=False),
-        # Hidden CRUD
-        Binding("e", "edit_ticket", "Edit", show=False),
-        Binding("v", "view_details", "View", show=False),
-        # Hidden status movement
-        Binding("right_square_bracket", "move_forward", "Advance", key_display="]", show=False),
-        Binding("left_square_bracket", "move_backward", "Back", key_display="[", show=False),
+        # Hidden status movement (accessible via leader key 'g')
+        Binding("right_square_bracket", "move_forward", "Next", key_display="]", show=False),
+        Binding("left_square_bracket", "move_backward", "Prev", key_display="[", show=False),
         Binding("shift+right", "move_forward", show=False),
         Binding("shift+left", "move_backward", show=False),
+        # Ticket management
+        Binding("t", "toggle_type", "PAIR/AUTO"),
+        Binding("a", "start_agent", "Start"),
         # Hidden specialized (will move to leader key)
-        Binding("t", "toggle_type", "PAIR/AUTO", show=False),
         Binding("w", "watch_agent", "Watch", show=False),
         Binding("D", "view_diff", "Diff", show=False),
         Binding("r", "open_review", "Review", show=False),
@@ -90,6 +91,7 @@ class KanbanScreen(KaganScreen):
         # Hidden utility
         Binding("escape", "deselect", show=False),
         Binding("ctrl+c", "interrupt", show=False),
+        Binding("ctrl+comma", "open_settings", "Settings", show=False),
         Binding("ctrl+d", "delete_ticket_direct", "Delete", show=False),
         Binding("ctrl+m", "merge_direct", "Merge", show=False),
     ]
@@ -146,6 +148,14 @@ class KanbanScreen(KaganScreen):
                 ticket_type = TicketType(ticket_type)
             return True if ticket_type == TicketType.AUTO else None
 
+        if action == "start_agent":
+            if not ticket:
+                return None
+            ticket_type = ticket.ticket_type
+            if isinstance(ticket_type, str):
+                ticket_type = TicketType(ticket_type)
+            return True if ticket_type == TicketType.AUTO else None
+
         if action == "open_session":
             return True if ticket else None
 
@@ -160,7 +170,9 @@ class KanbanScreen(KaganScreen):
                     yield KanbanColumn(status=status, tickets=[])
         with Container(classes="size-warning"):
             yield Static(SIZE_WARNING_MESSAGE, classes="size-warning-text")
-        yield Static("g: c=Chat d=Diff r=Review w=Watch | Esc=Cancel", classes="leader-hint")
+        yield Static(
+            "g: [=Prev ]=Next c=Chat d=Diff r=Review w=Watch | Esc=Cancel", classes="leader-hint"
+        )
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -298,6 +310,8 @@ class KanbanScreen(KaganScreen):
 
         # Map leader key sequences
         leader_actions = {
+            "[": "move_backward",
+            "]": "move_forward",
             "c": "open_chat",
             "d": "view_diff",
             "r": "open_review",
@@ -534,12 +548,15 @@ class KanbanScreen(KaganScreen):
         else:
             await self._open_pair_session(ticket)
 
-    async def _open_auto_session(self, ticket: Ticket) -> None:
+    async def _open_auto_session(self, ticket: Ticket, manual: bool = False) -> None:
         scheduler = self.kagan_app.scheduler
         config = self.kagan_app.config
 
-        if not config.general.auto_start:
-            msg = "AUTO mode requires auto_start=true in .kagan/config.toml"
+        if not config.general.auto_start and not manual:
+            msg = (
+                "AUTO mode requires auto_start=true in .kagan/config.toml "
+                "(or use 'a' to start manually)"
+            )
             self.notify(msg, severity="warning")
             return
 
@@ -586,6 +603,18 @@ class KanbanScreen(KaganScreen):
     def action_open_chat(self) -> None:
         self.app.push_screen(PlannerScreen())
 
+    async def action_open_settings(self) -> None:
+        """Open settings modal."""
+        from kagan.ui.modals import SettingsModal
+
+        config = self.kagan_app.config
+        config_path = self.kagan_app.config_path
+        result = await self.app.push_screen(SettingsModal(config, config_path))
+        if result:
+            # Reload config after save
+            self.kagan_app.config = self.kagan_app.config.load(config_path)
+            self.notify("Settings saved")
+
     async def action_toggle_type(self) -> None:
         card = focus.get_focused_card(self)
         if not card or not card.ticket:
@@ -628,6 +657,22 @@ class KanbanScreen(KaganScreen):
         iteration = scheduler.get_iteration_count(ticket.id)
         modal = AgentOutputModal(ticket=ticket, agent=agent, iteration=iteration)
         await self.app.push_screen(modal)
+
+    async def action_start_agent(self) -> None:
+        """Manually start an AUTO agent (bypasses auto mode check)."""
+        card = focus.get_focused_card(self)
+        if not card or not card.ticket:
+            return
+
+        ticket = card.ticket
+        ticket_type = ticket.ticket_type
+        if isinstance(ticket_type, str):
+            ticket_type = TicketType(ticket_type)
+        if ticket_type != TicketType.AUTO:
+            self.notify("Start agent is only for AUTO tickets", severity="warning")
+            return
+
+        await self._open_auto_session(ticket, manual=True)
 
     async def action_merge(self) -> None:
         ticket = actions.get_review_ticket(self, focus.get_focused_card(self))

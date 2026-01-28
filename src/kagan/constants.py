@@ -12,8 +12,9 @@ from kagan.limits import (
 
 # UI Display Constants
 # Card widget truncation lengths
-CARD_TITLE_MAX_LENGTH = 16
-CARD_DESC_MAX_LENGTH = 15
+CARD_TITLE_MAX_LENGTH = 48  # Total chars for title (supports 2 lines)
+CARD_TITLE_LINE_WIDTH = 24  # Chars per line for word-wrapped titles
+CARD_DESC_MAX_LENGTH = 22
 CARD_REVIEW_MAX_LENGTH = 18
 CARD_HAT_MAX_LENGTH = 8
 CARD_ID_MAX_LENGTH = 4
@@ -68,15 +69,57 @@ PRIORITY_LABELS = {
     TicketPriority.HIGH: "High",
 }
 
+# Planner Screen Empty State
+PLANNER_EXAMPLE_PROMPTS = [
+    "Build a user authentication system with OAuth 2.0 support",
+    "Add dark mode toggle to the settings page",
+    "Create REST API endpoint for user dashboard data",
+    "Refactor database connection pooling for better performance",
+]
+
+PLANNER_PRO_TIPS = [
+    "Be specific about tech stack and requirements",
+    "Mention architectural constraints or patterns",
+    "Include acceptance criteria when possible",
+    "Press [Esc] to return to board",
+]
+
+# Box Drawing Characters
+BOX_DRAWING = {
+    "THICK_TL": "┏",
+    "THICK_TR": "┓",
+    "THICK_BL": "┗",
+    "THICK_BR": "┛",
+    "THICK_H": "━",
+    "THICK_V": "┃",
+    "THIN_TL": "┌",
+    "THIN_TR": "┐",
+    "THIN_BL": "└",
+    "THIN_BR": "┘",
+    "THIN_H": "─",
+    "THIN_V": "│",
+    "LIGHT_H": "─",
+    "HEAVY_H": "═",
+    "BULLET": "•",  # Simple bullet that renders everywhere
+    "DOT": "∙",
+    "ARROW_RIGHT": "→",
+    "ARROW_DOWN": "↓",
+    "SECTION": "─",
+    "DIVIDER_LIGHT": "─",
+    "DIVIDER_HEAVY": "═",
+}
+
 __all__ = [
     "AGENT_TIMEOUT",
     "AGENT_TIMEOUT_LONG",
     "APPROVAL_TITLE_MAX_LENGTH",
+    "BOX_DRAWING",
     "CARD_BACKEND_MAX_LENGTH",
     "CARD_DESC_MAX_LENGTH",
     "CARD_HAT_MAX_LENGTH",
     "CARD_ID_MAX_LENGTH",
     "CARD_REVIEW_MAX_LENGTH",
+    "CARD_TITLE_LINE_WIDTH",
     "CARD_TITLE_MAX_LENGTH",
     "COLUMN_ORDER",
     "DEFAULT_CONFIG_PATH",
@@ -89,6 +132,8 @@ __all__ = [
     "MIN_SCREEN_WIDTH",
     "MODAL_TITLE_MAX_LENGTH",
     "NOTIFICATION_TITLE_MAX_LENGTH",
+    "PLANNER_EXAMPLE_PROMPTS",
+    "PLANNER_PRO_TIPS",
     "PLANNER_TITLE_MAX_LENGTH",
     "PRIORITY_LABELS",
     "RESPONSE_BUFFER",
