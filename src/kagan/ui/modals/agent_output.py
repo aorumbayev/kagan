@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from textual import on
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Label, Rule
 
@@ -51,7 +51,7 @@ class AgentOutputModal(ModalScreen[None]):
         """Compose the modal layout."""
         with Vertical(id="agent-output-container"):
             yield Label(
-                f"⚡ AUTO: {self.ticket.title[:40]}",
+                f"AUTO: {self.ticket.title[:50]}",
                 classes="modal-title",
             )
             yield Label(
@@ -65,18 +65,19 @@ class AgentOutputModal(ModalScreen[None]):
                 "[c] Cancel Agent  [Esc] Close (agent continues)",
                 classes="modal-hint",
             )
-            with Vertical(classes="button-row"):
+            with Horizontal(classes="button-row"):
                 yield Button("Cancel Agent", variant="error", id="cancel-btn")
                 yield Button("Close", id="close-btn")
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """Set up agent message target when modal mounts."""
+        output = self._get_output()
         if self._agent:
             self._agent.set_message_target(self)
-            self._write_to_output("[green]Connected to agent stream[/green]\n")
+            await output.write("*Connected to agent stream*\n\n")
         else:
-            self._write_to_output("[yellow]No agent currently running[/yellow]\n")
+            await output.write("*No agent currently running*\n")
 
     def on_unmount(self) -> None:
         """Remove message target when modal closes."""
@@ -87,51 +88,52 @@ class AgentOutputModal(ModalScreen[None]):
         """Get the streaming output widget."""
         return self.query_one("#agent-output", StreamingOutput)
 
-    def _write_to_output(self, text: str) -> None:
+    async def _write_to_output(self, text: str) -> None:
         """Write text to the output widget."""
         output = self._get_output()
-        self.call_later(output.write, text)
+        await output.write(text)
 
     # ACP Message handlers
 
     @on(messages.AgentUpdate)
-    def on_agent_update(self, message: messages.AgentUpdate) -> None:
+    async def on_agent_update(self, message: messages.AgentUpdate) -> None:
         """Handle agent text output."""
-        self._write_to_output(message.text)
+        await self._write_to_output(message.text)
 
     @on(messages.Thinking)
-    def on_agent_thinking(self, message: messages.Thinking) -> None:
+    async def on_agent_thinking(self, message: messages.Thinking) -> None:
         """Handle agent thinking/reasoning."""
-        self._write_to_output(f"[dim italic]{message.text}[/dim italic]")
+        await self._write_to_output(f"*{message.text}*")
 
     @on(messages.ToolCall)
-    def on_tool_call(self, message: messages.ToolCall) -> None:
+    async def on_tool_call(self, message: messages.ToolCall) -> None:
         """Handle tool call start."""
         title = message.tool_call.get("title", "Tool call")
         kind = message.tool_call.get("kind", "")
-        self._write_to_output(f"\n[bold cyan]> {title}[/bold cyan]")
+        tool_text = f"\n**> {title}**"
         if kind:
-            self._write_to_output(f"  [dim]({kind})[/dim]")
+            tool_text += f" *({kind})*"
+        await self._write_to_output(tool_text)
 
     @on(messages.ToolCallUpdate)
-    def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
+    async def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
         """Handle tool call update."""
         status = message.update.get("status")
         if status:
-            style = "green" if status == "completed" else "yellow"
-            self._write_to_output(f"  [{style}]{status}[/{style}]")
+            symbol = " ✓" if status == "completed" else " ⋯"
+            await self._write_to_output(f"{symbol} {status}")
 
     @on(messages.AgentReady)
-    def on_agent_ready(self, message: messages.AgentReady) -> None:
+    async def on_agent_ready(self, message: messages.AgentReady) -> None:
         """Handle agent ready."""
-        self._write_to_output("[green]Agent ready[/green]\n")
+        await self._write_to_output("**Agent ready** ✓\n\n")
 
     @on(messages.AgentFail)
-    def on_agent_fail(self, message: messages.AgentFail) -> None:
+    async def on_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""
-        self._write_to_output(f"\n[red bold]Error: {message.message}[/red bold]")
+        await self._write_to_output(f"\n**Error:** {message.message}\n")
         if message.details:
-            self._write_to_output(f"\n[red]{message.details}[/red]")
+            await self._write_to_output(f"\n{message.details}\n")
 
     # Button handlers
 
@@ -151,7 +153,7 @@ class AgentOutputModal(ModalScreen[None]):
         """Send cancel signal to agent."""
         if self._agent:
             await self._agent.cancel()
-            self._write_to_output("\n[yellow]Cancel signal sent[/yellow]\n")
+            await self._write_to_output("\n*Cancel signal sent*\n")
             self.notify("Sent cancel request to agent")
         else:
             self.notify("No agent to cancel", severity="warning")

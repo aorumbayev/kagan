@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -50,11 +51,12 @@ class SessionManager:
         await self._write_context_files(ticket, worktree_path)
         await self._state.mark_session_active(ticket.id, True)
 
-        # Auto-launch the agent's interactive CLI in the session
+        # Auto-launch the agent's interactive CLI with the startup prompt
         agent_config = self._get_agent_config(ticket)
-        interactive_cmd = get_os_value(agent_config.interactive_command)
-        if interactive_cmd:
-            await run_tmux("send-keys", "-t", session_name, interactive_cmd, "Enter")
+        startup_prompt = self._build_startup_prompt(ticket)
+        launch_cmd = self._build_launch_command(agent_config, startup_prompt)
+        if launch_cmd:
+            await run_tmux("send-keys", "-t", session_name, launch_cmd, "Enter")
 
         return session_name
 
@@ -75,6 +77,27 @@ class SessionManager:
 
         # Priority 3: fallback
         return get_fallback_agent_config()
+
+    def _build_launch_command(self, agent_config: AgentConfig, prompt: str) -> str | None:
+        """Build CLI launch command with prompt for the agent."""
+        import shlex
+
+        base_cmd = get_os_value(agent_config.interactive_command)
+        if not base_cmd:
+            return None
+
+        escaped_prompt = shlex.quote(prompt)
+
+        # Agent-specific command formats
+        if agent_config.short_name == "claude":
+            # claude "prompt"
+            return f"{base_cmd} {escaped_prompt}"
+        elif agent_config.short_name == "opencode":
+            # opencode --prompt "prompt"
+            return f"{base_cmd} --prompt {escaped_prompt}"
+        else:
+            # Fallback: just run the base command (no auto-prompt)
+            return base_cmd
 
     def attach_session(self, ticket_id: str) -> None:
         """Attach to session (blocks until detach, then returns to TUI)."""
@@ -97,17 +120,86 @@ class SessionManager:
 
     async def _write_context_files(self, ticket: Ticket, worktree_path: Path) -> None:
         """Create context and configuration files in worktree."""
-        wt_kagan = worktree_path / ".kagan"
+        wt_kagan = worktree_path / ".kagan-context"
         wt_kagan.mkdir(exist_ok=True)
         (wt_kagan / "CONTEXT.md").write_text(build_context(ticket))
 
-        claude_dir = worktree_path / ".claude"
-        claude_dir.mkdir(exist_ok=True)
-        (claude_dir / "settings.local.json").write_text(
-            '{"mcpServers": {"kagan": {"command": "kagan", "args": ["mcp"]}}}'
-        )
+        # Create .mcp.json at worktree root (works for both Claude Code and OpenCode)
+        self._write_mcp_config(worktree_path)
+
+        # Create CLAUDE.md at worktree root with task instructions
+        # Claude Code auto-reads this file on startup
+        claude_md = worktree_path / "CLAUDE.md"
+        if not claude_md.exists():
+            claude_md.write_text(self._build_claude_md(ticket))
 
         agents_md = self._root / "AGENTS.md"
         wt_agents = worktree_path / "AGENTS.md"
         if agents_md.exists() and not wt_agents.exists():
             wt_agents.symlink_to(agents_md)
+
+    def _write_mcp_config(self, worktree_path: Path) -> None:
+        """Create .mcp.json at worktree root (works for both Claude Code and OpenCode)."""
+        mcp_config = {
+            "mcpServers": {
+                "kagan": {
+                    "command": "kagan",
+                    "args": ["mcp"],
+                }
+            }
+        }
+        (worktree_path / ".mcp.json").write_text(json.dumps(mcp_config, indent=2))
+
+    def _build_startup_prompt(self, ticket: Ticket) -> str:
+        """Build startup prompt for pair mode."""
+        desc = ticket.description or "No description provided."
+        return f"""Hello! I'm starting a pair programming session for ticket **{ticket.id}**.
+
+## Task Overview
+**Title:** {ticket.title}
+
+**Description:**
+{desc}
+
+## Setup Verification
+Please confirm you have access to the Kagan MCP tools by calling the `kagan_get_context` tool.
+Use ticket_id: `{ticket.id}`.
+
+After confirming MCP access, please:
+1. Summarize your understanding of this task
+2. Ask me if I'm ready to proceed with the implementation
+
+**Do not start making changes until I confirm I'm ready to proceed.**
+"""
+
+    def _build_claude_md(self, ticket: Ticket) -> str:
+        """Build CLAUDE.md content for automatic context injection."""
+        desc = ticket.description or "No description provided."
+        criteria = "\n".join(f"- {c}" for c in ticket.acceptance_criteria) or "- None specified"
+        return f"""# Task: {ticket.title}
+
+## Description
+{desc}
+
+## Acceptance Criteria
+{criteria}
+
+## Instructions
+1. Review this task and confirm you understand it
+2. Ask the user if they are ready to proceed before making changes
+3. Work in this worktree directory only
+4. **CRITICAL: Before completion, commit ALL changes with semantic commit messages**
+   - Use conventional commits: feat:, fix:, docs:, refactor:, test:, chore:
+   - Example: `git commit -m "feat: add user authentication endpoint"`
+5. When complete, call the `kagan_request_review` MCP tool to submit for review
+
+## MCP Tools Available
+- `kagan_get_context` - Refresh ticket details
+- `kagan_update_scratchpad` - Save progress notes
+- `kagan_request_review` - Submit work for review
+  **IMPORTANT**: Commit your changes BEFORE calling this tool!
+
+## Detach Instructions
+When finished working, the user can detach from this session:
+- Press `Ctrl+b` then `d` to detach and return to the Kagan board
+"""

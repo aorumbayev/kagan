@@ -10,7 +10,6 @@ import pytest
 
 from kagan.app import KaganApp
 from kagan.database.models import TicketStatus
-
 from tests.helpers.pages import (
     create_ticket_via_ui,
     focus_first_ticket,

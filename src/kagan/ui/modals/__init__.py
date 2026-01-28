@@ -5,6 +5,8 @@ from kagan.ui.modals.agent_output import AgentOutputModal
 from kagan.ui.modals.confirm import ConfirmModal
 from kagan.ui.modals.description_editor import DescriptionEditorModal
 from kagan.ui.modals.diff import DiffModal
+from kagan.ui.modals.rejection_input import RejectionInputModal
+from kagan.ui.modals.review import ReviewModal
 from kagan.ui.modals.ticket_details import TicketDetailsModal
 
 __all__ = [
@@ -13,5 +15,7 @@ __all__ = [
     "DescriptionEditorModal",
     "DiffModal",
     "ModalAction",
+    "RejectionInputModal",
+    "ReviewModal",
     "TicketDetailsModal",
 ]

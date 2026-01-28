@@ -6,12 +6,9 @@ These tests are fast and help quickly identify which keybinding broke.
 
 from __future__ import annotations
 
-import pytest
-
 from kagan.app import KaganApp
 from kagan.database.models import TicketStatus, TicketType
 from kagan.ui.widgets.card import TicketCard
-
 from tests.helpers.pages import (
     focus_first_ticket,
     get_focused_ticket,
@@ -199,3 +196,45 @@ class TestDeselect:
             assert pilot.app.focused is not None
             await pilot.press("escape")
             await pilot.pause()
+
+
+class TestPlannerScreen:
+    """Test planner screen interactions."""
+
+    async def test_planner_has_header(self, e2e_app_with_tickets: KaganApp):
+        """Planner screen should display the header widget."""
+        from kagan.ui.widgets.header import KaganHeader
+
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("c")  # Open planner
+            await pilot.pause()
+            assert is_on_screen(pilot, "PlannerScreen")
+            # Check header is present
+            headers = list(pilot.app.screen.query(KaganHeader))
+            assert len(headers) == 1, "Planner screen should have KaganHeader"
+
+    async def test_planner_input_is_focused(self, e2e_app_with_tickets: KaganApp):
+        """Planner input should be focused on mount."""
+        from textual.widgets import Input
+
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("c")  # Open planner
+            await pilot.pause()
+            assert is_on_screen(pilot, "PlannerScreen")
+            # Input should be focused
+            focused = pilot.app.focused
+            assert isinstance(focused, Input), "Input should be focused"
+            assert focused.id == "planner-input"
+
+    async def test_escape_from_planner_goes_to_board(self, e2e_app_with_tickets: KaganApp):
+        """Pressing escape on planner should navigate to board."""
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("c")  # Open planner
+            await pilot.pause()
+            assert is_on_screen(pilot, "PlannerScreen")
+            await pilot.press("escape")
+            await pilot.pause()
+            assert is_on_screen(pilot, "KanbanScreen")

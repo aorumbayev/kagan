@@ -12,14 +12,18 @@ from textual.widgets import Footer, Input, Static
 
 from kagan.acp import messages
 from kagan.acp.agent import Agent
-from kagan.agents.planner import build_planner_prompt, parse_ticket_from_response
+from kagan.agents.planner import build_planner_prompt, parse_plan
 from kagan.agents.prompt_loader import PromptLoader
 from kagan.config import get_fallback_agent_config
+from kagan.ui.screens.approval import ApprovalScreen
 from kagan.ui.screens.base import KaganScreen
 from kagan.ui.widgets import StreamingOutput
+from kagan.ui.widgets.header import KaganHeader
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
+
+    from kagan.database.models import TicketCreate
 
 PLANNER_SESSION_ID = "planner"
 
@@ -40,6 +44,7 @@ class PlannerScreen(KaganScreen):
 
     def compose(self) -> ComposeResult:
         """Compose the planner screen layout."""
+        yield KaganHeader()
         with Vertical(id="planner-container"):
             yield Static("What do you want to build?", id="planner-header")
             yield StreamingOutput(id="planner-output")
@@ -96,23 +101,23 @@ class PlannerScreen(KaganScreen):
         output = self._get_output()
         title = message.tool_call.get("title", "Tool call")
         kind = message.tool_call.get("kind", "")
-        await output.write(f"\n[bold cyan]> {title}[/bold cyan]")
+        await output.write(f"\n**> {title}**")
         if kind:
-            await output.write(f"  [dim]({kind})[/dim]")
+            await output.write(f" *({kind})*")
 
     @on(messages.ToolCallUpdate)
     async def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
         """Handle tool call update."""
         status = message.update.get("status")
         if status:
-            style = "green" if status == "completed" else "yellow"
+            symbol = "✓" if status == "completed" else "⋯"
             output = self._get_output()
-            await output.write(f"  [{style}]{status}[/{style}]")
+            await output.write(f" {symbol} {status}")
 
     @on(messages.AgentReady)
     async def on_agent_ready(self, message: messages.AgentReady) -> None:
         """Handle agent ready."""
-        await self._get_output().write("[green]Agent ready[/green]\n")
+        await self._get_output().write("**Agent ready** ✓\n")
 
     @on(messages.AgentFail)
     async def on_agent_fail(self, message: messages.AgentFail) -> None:
@@ -120,35 +125,57 @@ class PlannerScreen(KaganScreen):
         self._is_running = False
         self._update_status()
         output = self._get_output()
-        await output.write(f"[red bold]Error: {message.message}[/red bold]")
+        await output.write(f"**Error:** {message.message}")
         if message.details:
-            await output.write(f"[red]{message.details}[/red]")
+            await output.write(f"\n{message.details}")
 
     async def _try_create_ticket_from_response(self) -> None:
-        """Parse accumulated response and create ticket if found."""
+        """Parse accumulated response and show approval screen if plan found."""
         if not self._accumulated_response:
             return
 
         full_response = "".join(self._accumulated_response)
-        parsed = parse_ticket_from_response(full_response)
+        
+        # Parse as multi-ticket plan (only format supported)
+        tickets = parse_plan(full_response)
+        if tickets:
+            # Show approval screen for tickets
+            self.app.push_screen(
+                ApprovalScreen(tickets),
+                self._on_approval_result,
+            )
+        # If no <plan> block found, agent is still gathering info - continue conversation
 
-        if parsed is None:
+    async def _on_approval_result(self, result: list[TicketCreate] | str | None) -> None:
+        """Handle approval screen result."""
+        if result is None:
+            # Cancelled - clear and continue
+            self._accumulated_response.clear()
+            await self._get_output().clear()
+            await self._get_output().write("Plan cancelled. Describe what you want to build.\n\n")
             return
 
-        try:
-            ticket = await self.kagan_app.state_manager.create_ticket(parsed.ticket)
-            self.notify(
-                f"Created ticket [{ticket.short_id}]: {ticket.title[:50]}",
-                severity="information",
-            )
-            await self._get_output().write(
-                f"\n[bold green]✓ Created ticket {ticket.short_id}[/bold green]\n"
-            )
-            # After creating ticket, navigate to board
+        if result == "refine":
+            # User wants to refine - prompt agent to adjust
+            await self._get_output().write("\n**Refining plan...**\n\n")
+            self._accumulated_response.clear()
+            refine_prompt = "Please adjust the plan based on my feedback. What changes?"
+            await self._send_prompt(refine_prompt)
+            return
+
+        # Approved - create all tickets
+        created_count = 0
+        for ticket_data in result:
+            try:
+                ticket = await self.kagan_app.state_manager.create_ticket(ticket_data)
+                self.notify(f"Created: {ticket.title[:30]}", severity="information")
+                created_count += 1
+            except Exception as e:
+                self.notify(f"Failed to create ticket: {e}", severity="error")
+
+        if created_count > 0:
+            await self._get_output().write(f"\n**Created {created_count} ticket(s)**\n")
             await self.action_to_board()
-        except Exception as e:
-            self.notify(f"Failed to create ticket: {e}", severity="error")
-            await self._get_output().write(f"[red]Failed to create ticket: {e}[/red]")
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle user input submission."""
@@ -183,7 +210,7 @@ class PlannerScreen(KaganScreen):
                 # After prompt completes, try to create ticket from response
                 await self._try_create_ticket_from_response()
             except Exception as e:
-                await self._get_output().write(f"[red]Error sending prompt: {e}[/red]")
+                await self._get_output().write(f"**Error sending prompt:** {e}")
 
     async def action_cancel(self) -> None:
         """Send cancel signal to planner."""

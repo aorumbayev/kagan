@@ -650,8 +650,8 @@ AgentOutputModal {
 }
 
 #agent-output-container {
-    width: 90%;
-    height: 80%;
+    width: 95%;
+    height: 90%;
     background: $surface;
     border: thick $secondary;
     padding: 1 2;
@@ -681,10 +681,9 @@ AgentOutputModal .modal-hint {
 
 #agent-output {
     height: 1fr;
+    min-height: 15;
     background: $background;
     border: round $border;
-    padding: 0 1;
-    scrollbar-gutter: stable;
 }
 
 AgentOutputModal .button-row {
@@ -733,13 +732,19 @@ PlannerScreen {
 
 #planner-input {
     width: 100%;
-    padding-top: 1;
-    background: $background;
+    padding: 1;
+    background: transparent;
     border: solid $border;
+    height: auto;
+    min-height: 3;
 }
 
 #planner-input:focus {
     border: solid $primary;
+}
+
+#planner-input:blur {
+    text-opacity: 50%;
 }
 
 /* =============================================================================
@@ -885,4 +890,204 @@ WelcomeScreen Footer {
 
 .hidden {
     display: none;
+}
+
+/* =============================================================================
+   APPROVAL SCREEN
+   ============================================================================= */
+
+ApprovalScreen {
+    align: center middle;
+}
+
+ApprovalScreen #approval-container {
+    width: 80%;
+    max-width: 100;
+    height: auto;
+    max-height: 80%;
+    background: $surface;
+    border: thick $primary;
+    padding: 1 2;
+}
+
+ApprovalScreen #approval-title {
+    text-align: center;
+    text-style: bold;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+ApprovalScreen #approval-hint {
+    text-align: center;
+    color: $text-muted;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+ApprovalScreen #ticket-table {
+    height: auto;
+    max-height: 20;
+    margin-bottom: 1;
+}
+
+ApprovalScreen #approval-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    padding-top: 1;
+}
+
+ApprovalScreen #approval-buttons Button {
+    margin: 0 1;
+}
+
+/* =============================================================================
+   REVIEW MODAL
+   ============================================================================= */
+
+ReviewModal {
+    align: center middle;
+}
+
+#review-modal-container {
+    width: 95%;
+    height: 90%;
+    background: $surface;
+    border: thick $success;
+    padding: 1 2;
+}
+
+ReviewModal .modal-title {
+    text-align: center;
+    text-style: bold;
+    width: 100%;
+    padding-bottom: 1;
+    color: $secondary;
+}
+
+ReviewModal .section-title {
+    text-style: bold;
+    color: $text-muted;
+    padding-top: 1;
+    padding-bottom: 0;
+}
+
+/* Commits section - compact */
+#commits-section {
+    height: auto;
+    max-height: 10;
+}
+
+#commits-log {
+    height: auto;
+    max-height: 6;
+    background: $background;
+    border: round $border;
+    padding: 0 1;
+}
+
+/* Diff section - compact */
+#diff-section {
+    height: auto;
+}
+
+#diff-stats {
+    padding: 1;
+    background: $background;
+    border: round $border;
+    height: auto;
+    max-height: 6;
+}
+
+/* AI Review section - expandable, takes remaining space */
+#ai-review-section {
+    height: 1fr;
+    min-height: 12;
+}
+
+#ai-review-output {
+    height: 1fr;
+    min-height: 10;
+    background: $background;
+    border: round $border;
+}
+
+#ai-review-output.hidden {
+    display: none;
+    height: 0;
+    min-height: 0;
+}
+
+ReviewModal .hint-label {
+    text-align: center;
+    color: $text-muted;
+    padding-top: 1;
+}
+
+ReviewModal .button-row {
+    align: center middle;
+    padding-top: 1;
+    height: auto;
+}
+
+ReviewModal .button-row Button {
+    margin: 0 1;
+}
+
+/* =============================================================================
+   REJECTION INPUT MODAL
+   ============================================================================= */
+
+RejectionInputModal {
+    align: center middle;
+}
+
+#rejection-input-container {
+    width: 70;
+    height: auto;
+    background: $surface;
+    border: thick $error;
+    padding: 1 2;
+}
+
+RejectionInputModal .modal-title {
+    text-align: center;
+    text-style: bold;
+    width: 100%;
+    padding-bottom: 1;
+    color: $error;
+}
+
+RejectionInputModal .ticket-label {
+    color: $text-muted;
+}
+
+RejectionInputModal .prompt-label {
+    color: $text;
+    padding-top: 1;
+}
+
+#feedback-input {
+    height: 10;
+    background: $background;
+    border: solid $border;
+}
+
+#feedback-input:focus {
+    border: solid $primary;
+}
+
+RejectionInputModal .hint-label {
+    text-align: center;
+    color: $text-muted;
+    padding-top: 1;
+}
+
+RejectionInputModal .button-row {
+    align: center middle;
+    padding-top: 1;
+}
+
+RejectionInputModal .button-row Button {
+    margin: 0 1;
 }

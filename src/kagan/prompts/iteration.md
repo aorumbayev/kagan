@@ -16,7 +16,9 @@
 2. Continue working on the task
 3. Make incremental progress - don't try to do everything at once
 4. Run tests/builds to verify your changes work
-5. Commit your changes with descriptive messages
+5. **CRITICAL: Commit ALL changes before completing**
+   - Use semantic commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
+   - You CANNOT signal completion with uncommitted changes
 
 ## CRITICAL: Response Signal Required
 

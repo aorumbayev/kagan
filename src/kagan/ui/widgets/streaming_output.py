@@ -29,6 +29,12 @@ class StreamingOutput(Widget):
 
     StreamingOutput > ScrollableContainer {
         height: 1fr;
+        padding: 0 1;
+        scrollbar-gutter: stable;
+    }
+
+    StreamingOutput > ScrollableContainer > Markdown {
+        padding: 0;
     }
 
     StreamingOutput > RichLog {

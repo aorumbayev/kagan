@@ -51,7 +51,11 @@ class TestMCPTools:
         async def _checks(*_args) -> bool:
             return True
 
+        async def _no_uncommitted(*_args) -> bool:
+            return False  # No uncommitted changes
+
         monkeypatch.setattr(server, "_run_checks", _checks)
+        monkeypatch.setattr(server, "_check_uncommitted_changes", _no_uncommitted)
 
         result = await server.request_review(ticket.id, "Looks good")
 
@@ -70,7 +74,11 @@ class TestMCPTools:
         async def _checks(*_args) -> bool:
             return False
 
+        async def _no_uncommitted(*_args) -> bool:
+            return False  # No uncommitted changes
+
         monkeypatch.setattr(server, "_run_checks", _checks)
+        monkeypatch.setattr(server, "_check_uncommitted_changes", _no_uncommitted)
 
         result = await server.request_review(ticket.id, "Needs work")
 
@@ -80,3 +88,22 @@ class TestMCPTools:
         assert updated.status == TicketStatus.BACKLOG
         assert updated.review_summary == "Needs work"
         assert updated.checks_passed is False
+
+    async def test_request_review_blocks_uncommitted(self, state_manager, monkeypatch):
+        """request_review returns error when uncommitted changes exist."""
+        ticket = await state_manager.create_ticket(TicketCreate(title="Feature"))
+        server = KaganMCPServer(state_manager)
+
+        async def _has_uncommitted(*_args) -> bool:
+            return True  # Has uncommitted changes
+
+        monkeypatch.setattr(server, "_check_uncommitted_changes", _has_uncommitted)
+
+        result = await server.request_review(ticket.id, "Looks good")
+
+        assert result["status"] == "error"
+        assert "uncommitted" in result["message"].lower()
+        # Ticket should not have moved
+        updated = await state_manager.get_ticket(ticket.id)
+        assert updated is not None
+        assert updated.status == TicketStatus.BACKLOG

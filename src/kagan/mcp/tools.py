@@ -45,6 +45,15 @@ class KaganMCPServer:
         if ticket is None:
             raise ValueError(f"Ticket not found: {ticket_id}")
 
+        # Check for uncommitted changes before allowing review
+        has_uncommitted = await self._check_uncommitted_changes()
+        if has_uncommitted:
+            return {
+                "status": "error",
+                "message": "Cannot request review with uncommitted changes. "
+                "Please commit your work first.",
+            }
+
         checks_passed = await self._run_checks(ticket.check_command)
         update = TicketUpdate(review_summary=summary, checks_passed=checks_passed)
         if checks_passed:
@@ -61,6 +70,20 @@ class KaganMCPServer:
         process = await asyncio.create_subprocess_shell(
             command,
             cwd=Path.cwd(),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
         )
         return_code = await process.wait()
         return return_code == 0
+
+    async def _check_uncommitted_changes(self) -> bool:
+        """Check if there are uncommitted changes in the working directory."""
+        process = await asyncio.create_subprocess_shell(
+            "git status --porcelain",
+            cwd=Path.cwd(),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await process.communicate()
+        # If output is non-empty, there are uncommitted changes
+        return bool(stdout.strip())

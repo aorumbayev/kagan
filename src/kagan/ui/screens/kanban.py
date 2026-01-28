@@ -18,6 +18,8 @@ from kagan.ui.modals import (
     ConfirmModal,
     DiffModal,
     ModalAction,
+    RejectionInputModal,
+    ReviewModal,
     TicketDetailsModal,
 )
 from kagan.ui.screens.base import KaganScreen
@@ -63,7 +65,7 @@ class KanbanScreen(KaganScreen):
         Binding("w", "watch_agent", "Watch", show=False),
         Binding("m", "merge", "Merge", show=False),
         Binding("d", "view_diff", "View Diff", show=False),
-        Binding("r", "reject", "Reject", show=False),
+        Binding("R", "open_review", "Review", show=False),
         Binding("s", "rerun_checks", "Re-run checks", show=False),
         Binding("escape", "deselect", "Deselect", show=False),
         Binding("c", "open_chat", "Chat"),
@@ -335,12 +337,18 @@ class KanbanScreen(KaganScreen):
             )
 
     async def action_open_session(self) -> None:
-        """Open session for selected ticket (tmux for PAIR, modal for AUTO)."""
+        """Open session for selected ticket (tmux for PAIR, modal for AUTO, review for REVIEW)."""
         card = self._get_focused_card()
         if not card or not card.ticket:
             return
 
         ticket = card.ticket
+
+        # REVIEW tickets always open the review modal
+        if ticket.status == TicketStatus.REVIEW:
+            await self.action_open_review()
+            return
+
         raw_type = ticket.ticket_type
         ticket_type = TicketType(raw_type) if isinstance(raw_type, str) else raw_type
 
@@ -352,6 +360,15 @@ class KanbanScreen(KaganScreen):
     async def _open_auto_session(self, ticket: Ticket) -> None:
         """Handle Enter key for AUTO tickets - show agent output modal."""
         scheduler = self.kagan_app.scheduler
+        config = self.kagan_app.config
+
+        # Check if auto_start is enabled - if not, show helpful message
+        if not config.general.auto_start:
+            self.notify(
+                "AUTO mode requires auto_start=true in .kagan/config.toml",
+                severity="warning",
+            )
+            return
 
         # If in BACKLOG, move to IN_PROGRESS (scheduler will pick it up)
         if ticket.status == TicketStatus.BACKLOG:
@@ -370,7 +387,10 @@ class KanbanScreen(KaganScreen):
                 AgentOutputModal(ticket=ticket, agent=agent, iteration=iteration)
             )
         else:
-            self.notify("Agent not running yet. Will start on next tick.", severity="warning")
+            self.notify(
+                "Agent not running yet. Will start on next scheduler tick.",
+                severity="warning",
+            )
 
     async def _open_pair_session(self, ticket: Ticket) -> None:
         """Handle Enter key for PAIR tickets - open tmux session."""
@@ -494,14 +514,98 @@ class KanbanScreen(KaganScreen):
         title = f"Diff: {ticket.short_id} {ticket.title[:40]}"
         await self.app.push_screen(DiffModal(title=title, diff_text=diff_text))
 
-    async def action_reject(self) -> None:
-        """Reject a review ticket back to IN_PROGRESS."""
+    async def action_open_review(self) -> None:
+        """Open review modal for REVIEW ticket."""
         ticket = self._get_review_ticket()
         if not ticket:
             return
-        await self.kagan_app.state_manager.move_ticket(ticket.id, TicketStatus.IN_PROGRESS)
+
+        # Get agent config
+        from kagan.config import get_fallback_agent_config
+        from kagan.data.builtin_agents import get_builtin_agent
+
+        agent_config = None
+        default_agent = self.kagan_app.config.general.default_worker_agent
+        if builtin := get_builtin_agent(default_agent):
+            agent_config = builtin.config
+        if not agent_config:
+            agent_config = get_fallback_agent_config()
+
+        await self.app.push_screen(
+            ReviewModal(
+                ticket=ticket,
+                worktree_manager=self.kagan_app.worktree_manager,
+                agent_config=agent_config,
+                base_branch=self.kagan_app.config.general.default_base_branch,
+            ),
+            callback=self._on_review_result,
+        )
+
+    async def _on_review_result(self, result: str | None) -> None:
+        """Handle review modal result."""
+        ticket = self._get_review_ticket()
+        if not ticket:
+            return
+
+        if result == "approve":
+            await self._do_merge(ticket)
+        elif result == "reject":
+            await self._handle_reject_with_feedback(ticket)
+
+    async def _do_merge(self, ticket: Ticket) -> None:
+        """Merge ticket and move to DONE."""
+        worktree = self.kagan_app.worktree_manager
+        base = self.kagan_app.config.general.default_base_branch
+
+        success, message = await worktree.merge_to_main(ticket.id, base_branch=base)
+        if success:
+            await worktree.delete(ticket.id, delete_branch=True)
+            await self.kagan_app.session_manager.kill_session(ticket.id)
+            await self.kagan_app.state_manager.move_ticket(ticket.id, TicketStatus.DONE)
+            await self._refresh_board()
+            self.notify(f"Merged and completed: {ticket.title}")
+        else:
+            self.notify(message, severity="error")
+
+    async def _handle_reject_with_feedback(self, ticket: Ticket) -> None:
+        """Handle rejection based on ticket type."""
+        ticket_type = ticket.ticket_type
+        if isinstance(ticket_type, str):
+            ticket_type = TicketType(ticket_type)
+
+        if ticket_type == TicketType.AUTO:
+            # Show feedback modal for AUTO tickets
+            await self.app.push_screen(
+                RejectionInputModal(ticket.title),
+                callback=lambda feedback: self._apply_rejection_feedback(ticket, feedback),
+            )
+        else:
+            # PAIR: just move back (user handles via tmux)
+            await self.kagan_app.state_manager.move_ticket(ticket.id, TicketStatus.IN_PROGRESS)
+            await self._refresh_board()
+            self.notify(f"Moved back to IN_PROGRESS: {ticket.title}")
+
+    async def _apply_rejection_feedback(self, ticket: Ticket, feedback: str | None) -> None:
+        """Append feedback to description and move to IN_PROGRESS."""
+        if feedback:
+            from datetime import datetime
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+            # Append feedback to description with timestamp
+            new_description = ticket.description or ""
+            new_description += f"\n\n---\n**Review Feedback ({timestamp}):**\n{feedback}"
+
+            await self.kagan_app.state_manager.update_ticket(
+                ticket.id,
+                TicketUpdate(description=new_description, status=TicketStatus.IN_PROGRESS),
+            )
+        else:
+            # No feedback, just move back
+            await self.kagan_app.state_manager.move_ticket(ticket.id, TicketStatus.IN_PROGRESS)
+
         await self._refresh_board()
-        self.notify(f"Moved back to IN_PROGRESS: {ticket.title}")
+        self.notify(f"Rejected: {ticket.title}")
 
     async def action_rerun_checks(self) -> None:
         """Re-run acceptance checks for a review ticket."""

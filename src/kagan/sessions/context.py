@@ -27,7 +27,9 @@ def build_context(ticket: Ticket) -> str:
 - Only modify files within this worktree
 - Use `kagan_get_context` MCP tool to refresh ticket info
 - Use `kagan_update_scratchpad` to save progress notes
-- When complete: call `kagan_request_review` MCP tool
+- **IMPORTANT: Commit all changes before requesting review**
+  - Use semantic commits: feat:, fix:, docs:, refactor:, test:, chore:
+- When complete: commit your changes, then call `kagan_request_review` MCP tool
 
 ## Check Command
 {check_command}

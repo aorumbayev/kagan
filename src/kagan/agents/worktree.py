@@ -308,14 +308,14 @@ class WorktreeManager:
             return ""
 
     async def get_diff_stats(self, ticket_id: str, base_branch: str = "main") -> str:
-        """Get short diff stats for a ticket's worktree."""
+        """Get diff statistics (files changed, insertions, deletions)."""
         wt_path = await self.get_path(ticket_id)
         if wt_path is None:
             return ""
 
         try:
             stdout, _ = await self._run_git(
-                "diff", "--shortstat", f"{base_branch}..HEAD", cwd=wt_path, check=False
+                "diff", "--stat", f"{base_branch}..HEAD", cwd=wt_path, check=False
             )
             return stdout.strip()
         except WorktreeError:

@@ -3,139 +3,121 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from xml.etree import ElementTree as ET
 
 from kagan.database.models import TicketCreate, TicketPriority
 
 if TYPE_CHECKING:
     from kagan.agents.prompt_loader import PromptLoader
 
-# Pattern to extract ticket blocks from planner response
-TICKET_PATTERN = re.compile(r"<ticket>(?P<body>.*?)</ticket>", re.IGNORECASE | re.DOTALL)
+# Dialog-style prompt for interactive planning
+PLANNER_DIALOG_PROMPT = """\
+You are a planning assistant that creates development tickets in XML format.
 
-# Customizable preamble - users can modify this part
-PLANNER_PREAMBLE = """\
-You are a project planning assistant. Your job is to take user requests
-and create well-structured development tickets.
+## CRITICAL: Output Format
+When creating tickets, you MUST output them in this EXACT XML format:
 
-When the user describes what they want to build or accomplish,
-analyze their request and create ONE detailed ticket.
-
-## Guidelines
-1. Title should start with a verb (Create, Implement, Fix, Add, Update, etc.)
-2. Description should be thorough enough for a developer to understand the task
-3. Include acceptance criteria as bullet points
-4. If the request is vague, make reasonable assumptions and note them
-
-After outputting the ticket, briefly explain what you created and any assumptions you made.
-"""
-
-# Fixed output format - DO NOT let users modify this, parsing depends on it
-PLANNER_OUTPUT_FORMAT = """\
-## Output Format (Required)
-
-You MUST output your ticket in this exact XML format:
-
+<plan>
 <ticket>
-<title>Short, action-oriented title (max 100 chars)</title>
-<description>
-Detailed description including:
-- What needs to be done
-- Technical considerations
-- Any relevant context
-</description>
-<acceptance_criteria>
-  <criterion>List each acceptance criterion</criterion>
-</acceptance_criteria>
-<check_command>pytest tests/</check_command>
-<priority>medium</priority>
+  <title>Verb + clear objective</title>
+  <type>AUTO or PAIR</type>
+  <description>What to build and why</description>
+  <acceptance_criteria>
+    <criterion>Criterion 1</criterion>
+    <criterion>Criterion 2</criterion>
+  </acceptance_criteria>
+  <check_command>pytest tests/test_feature.py -v</check_command>
+  <priority>medium</priority>
 </ticket>
+</plan>
 
-## Priority Levels
-- low: Nice to have, no deadline
-- medium: Normal priority (default)
-- high: Urgent or blocking other work
+## Ticket Types - Assign Based on Task Nature
+
+**AUTO** - AI completes autonomously:
+- Bug fixes with clear steps
+- Adding logging/metrics
+- Writing tests
+- Code refactoring
+- Input validation
+- Dependency updates
+
+**PAIR** - Human collaboration needed:
+- New feature design
+- UX/UI decisions
+- API design
+- Architecture choices
+- Security changes
+
+## Your Workflow
+1. If request is clear, output <plan> immediately with tickets
+2. If unclear, ask 1-2 questions first, then output <plan>
+3. Break requests into 2-5 tickets
+4. Assign AUTO or PAIR based on task nature
+
+## Priority: low | medium | high
+
+IMPORTANT: Always output the actual <plan> XML block with tickets. Never just describe what tickets you would create.
 """
 
-# Combined prompt for backward compatibility
-PLANNER_SYSTEM_PROMPT = PLANNER_PREAMBLE + "\n" + PLANNER_OUTPUT_FORMAT
+# Alias for backward compatibility with prompt loader
+PLANNER_PREAMBLE = PLANNER_DIALOG_PROMPT
+PLANNER_SYSTEM_PROMPT = PLANNER_DIALOG_PROMPT
 
 
-@dataclass
-class ParsedTicket:
-    """Result of parsing a ticket from planner output."""
-
-    ticket: TicketCreate
-    raw_match: str
-
-
-def parse_ticket_from_response(response: str) -> ParsedTicket | None:
-    """Parse a ticket from the planner agent's response.
-
-    Args:
-        response: The full response text from the planner agent.
-
-    Returns:
-        ParsedTicket if a valid ticket was found, None otherwise.
+def parse_plan(response: str) -> list[TicketCreate]:
+    """Parse multiple tickets from agent response using stdlib XML parser.
+    
+    Returns empty list if no <plan> block found or parsing fails.
     """
-    match = TICKET_PATTERN.search(response)
+    
+    match = re.search(r"<plan>(.*?)</plan>", response, re.DOTALL | re.IGNORECASE)
     if not match:
-        return None
-
-    body = match.group("body")
-    title = _extract_tag(body, "title")
-    description = _extract_tag(body, "description")
-    if not title or not description:
-        return None
-    priority_str = (_extract_tag(body, "priority") or "medium").lower()
-    acceptance_criteria = _extract_acceptance_criteria(body)
-    check_command = _extract_tag(body, "check_command")
-
-    priority_map = {
-        "low": TicketPriority.LOW,
-        "medium": TicketPriority.MEDIUM,
-        "high": TicketPriority.HIGH,
-    }
-    priority = priority_map.get(priority_str, TicketPriority.MEDIUM)
-
-    ticket = TicketCreate(
-        title=title[:200],  # Enforce max length
-        description=description,
-        priority=priority,
-        acceptance_criteria=acceptance_criteria,
-        check_command=check_command,
-    )
-
-    return ParsedTicket(ticket=ticket, raw_match=match.group(0))
-
-
-def _extract_tag(body: str, tag: str) -> str | None:
-    """Extract a tag's content from the ticket body."""
-    match = re.search(rf"<{tag}>(?P<content>.*?)</{tag}>", body, flags=re.IGNORECASE | re.DOTALL)
-    if not match:
-        return None
-    return match.group("content").strip()
-
-
-def _extract_acceptance_criteria(body: str) -> list[str]:
-    """Extract acceptance criteria entries from ticket body."""
-    criteria_block = _extract_tag(body, "acceptance_criteria")
-    if not criteria_block:
         return []
-    entries = re.findall(
-        r"<criterion>(?P<content>.*?)</criterion>",
-        criteria_block,
-        flags=re.IGNORECASE | re.DOTALL,
+    
+    try:
+        root = ET.fromstring(f"<root>{match.group(1)}</root>")
+    except ET.ParseError:
+        return []
+    
+    return [_element_to_ticket(el) for el in root.findall("ticket")]
+
+
+def _element_to_ticket(el: ET.Element) -> TicketCreate:
+    """Convert XML element to TicketCreate. Pure function."""
+    from kagan.database.models import TicketType
+    
+    def text(tag: str, default: str = "") -> str:
+        child = el.find(tag)
+        return (child.text or "").strip() if child is not None else default
+    
+    def criteria() -> list[str]:
+        ac = el.find("acceptance_criteria")
+        if ac is None:
+            return []
+        return [c.text.strip() for c in ac.findall("criterion") if c.text]
+    
+    type_str = text("type", "PAIR").upper()
+    ticket_type = TicketType.AUTO if type_str == "AUTO" else TicketType.PAIR
+    
+    priority_map = {"low": TicketPriority.LOW, "high": TicketPriority.HIGH}
+    priority = priority_map.get(text("priority", "medium").lower(), TicketPriority.MEDIUM)
+    
+    return TicketCreate(
+        title=text("title", "Untitled")[:200],
+        description=text("description"),
+        ticket_type=ticket_type,
+        priority=priority,
+        acceptance_criteria=criteria(),
+        check_command=text("check_command") or None,
     )
-    return [entry.strip() for entry in entries if entry.strip()]
 
 
 def build_planner_prompt(
     user_input: str,
     prompt_loader: PromptLoader | None = None,
 ) -> str:
-    """Build the initial prompt for the planner agent.
+    """Build the prompt for the planner agent.
 
     Args:
         user_input: The user's natural language request.
@@ -144,17 +126,14 @@ def build_planner_prompt(
     Returns:
         Formatted prompt for the planner.
     """
-    # Load preamble: prompt_loader > hardcoded default
-    # Note: We always append PLANNER_OUTPUT_FORMAT to ensure parsing works
-    preamble = prompt_loader.get_planner_prompt() if prompt_loader else PLANNER_PREAMBLE
+    # Load prompt: prompt_loader > hardcoded default
+    prompt = prompt_loader.get_planner_prompt() if prompt_loader else PLANNER_DIALOG_PROMPT
 
-    return f"""{preamble}
-
-{PLANNER_OUTPUT_FORMAT}
+    return f"""{prompt}
 
 ## User Request
 
 {user_input}
 
-Please create a ticket for this request.
+Output the <plan> XML block with tickets now.
 """

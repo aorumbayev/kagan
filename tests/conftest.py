@@ -13,7 +13,6 @@ import pytest
 from kagan.app import KaganApp
 from kagan.database.manager import StateManager
 
-
 # =============================================================================
 # Existing Unit Test Fixtures
 # =============================================================================
