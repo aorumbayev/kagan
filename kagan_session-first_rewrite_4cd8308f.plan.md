@@ -180,9 +180,9 @@ async def test_open_session_creates_worktree_and_tmux(
 ```python
 # tests/test_mcp_tools.py
 async def test_request_review_moves_to_review(mock_state: StateManager):
-    """MCP request_review moves ticket to REVIEW when checks pass."""
+    """MCP request_review moves ticket to REVIEW."""
     ticket = await mock_state.create_ticket(
-        TicketCreate(title="Feature", check_command="true")
+        TicketCreate(title="Feature")
     )
     server = KaganMCPServer(mock_state)
 
@@ -245,7 +245,6 @@ async def test_request_review_moves_to_review(mock_state: StateManager):
 ```sql
 -- Ticket additions (no breaking changes)
 ALTER TABLE tickets ADD COLUMN acceptance_criteria TEXT;  -- JSON: ["Tests pass", "Lint clean"]
-ALTER TABLE tickets ADD COLUMN check_command TEXT;        -- e.g., "pytest && ruff check"
 ALTER TABLE tickets ADD COLUMN review_summary TEXT;       -- Filled by MCP request_review
 ALTER TABLE tickets ADD COLUMN checks_passed INTEGER;     -- NULL=not run, 0=fail, 1=pass
 ALTER TABLE tickets ADD COLUMN session_active INTEGER DEFAULT 0;  -- Is tmux session running?
@@ -257,7 +256,6 @@ ALTER TABLE tickets ADD COLUMN session_active INTEGER DEFAULT 0;  -- Is tmux ses
 class Ticket(BaseModel):
     # ... existing fields ...
     acceptance_criteria: list[str] = Field(default_factory=list)
-    check_command: str | None = None
     review_summary: str | None = None
     checks_passed: bool | None = None
     session_active: bool = False
@@ -485,8 +483,6 @@ class SessionManager:
 - Use `kagan_update_scratchpad` to save progress notes
 - When complete: call `kagan_request_review` MCP tool
 
-## Check Command
-{ticket.check_command or "pytest && ruff check ."}
 """
 
     async def attach_session(self, ticket_id: str) -> None:
@@ -667,7 +663,6 @@ class PlannerScreen(KaganScreen):
       <criterion>Callback handles token exchange</criterion>
       <criterion>Tests pass: pytest tests/test_auth.py</criterion>
     </acceptance_criteria>
-    <check_command>pytest tests/test_auth.py</check_command>
   </ticket>
 </plan>
 ```

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
 from pathlib import Path
 
 from kagan.constants import KAGAN_GENERATED_PATTERNS
@@ -28,7 +27,6 @@ class KaganMCPServer:
             "title": ticket.title,
             "description": ticket.description,
             "acceptance_criteria": ticket.acceptance_criteria,
-            "check_command": ticket.check_command,
             "scratchpad": scratchpad,
         }
 
@@ -43,7 +41,6 @@ class KaganMCPServer:
         """Mark ticket ready for review.
 
         For PAIR mode tickets, this moves the ticket to REVIEW status.
-        If a check_command is set on the ticket, it will be run first.
         AUTO mode tickets use agent-based review via the scheduler instead.
         """
         ticket = await self._state.get_ticket(ticket_id)
@@ -59,33 +56,13 @@ class KaganMCPServer:
                 "Please commit your work first.",
             }
 
-        # Run checks only if check_command is explicitly set
-        checks_passed = True
-        if ticket.check_command:
-            checks_passed = await self._run_checks(ticket.check_command)
-
-        update = TicketUpdate(review_summary=summary, checks_passed=checks_passed)
-        if checks_passed:
-            update.status = TicketStatus.REVIEW
-            await self._state.update_ticket(ticket_id, update)
-            return {"status": "review", "message": "Ready for merge"}
-
+        update = TicketUpdate(
+            review_summary=summary,
+            checks_passed=None,
+            status=TicketStatus.REVIEW,
+        )
         await self._state.update_ticket(ticket_id, update)
-        return {"status": "failed", "message": "Checks failed"}
-
-    async def _run_checks(self, check_command: str) -> bool:
-        """Run ticket acceptance checks in the current working directory."""
-        try:
-            process = await asyncio.create_subprocess_shell(
-                check_command,
-                cwd=Path.cwd(),
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            return_code = await process.wait()
-            return return_code == 0
-        except (OSError, subprocess.SubprocessError):
-            return False
+        return {"status": "review", "message": "Ready for merge"}
 
     async def _check_uncommitted_changes(self) -> bool:
         """Check if there are uncommitted changes in the working directory.

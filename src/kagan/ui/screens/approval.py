@@ -93,7 +93,6 @@ class ApprovalScreen(ModalScreen[list[TicketCreate] | str | None]):
                 parent_id=ticket.parent_id,
                 agent_backend=ticket.agent_backend,
                 acceptance_criteria=ticket.acceptance_criteria,
-                check_command=ticket.check_command,
                 review_summary=ticket.review_summary,
                 checks_passed=ticket.checks_passed,
                 session_active=ticket.session_active,

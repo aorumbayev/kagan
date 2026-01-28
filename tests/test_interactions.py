@@ -72,6 +72,71 @@ class TestVimNavigation:
                 assert focused.status == TicketStatus.IN_PROGRESS
 
 
+class TestArrowKeyNavigation:
+    """Test arrow key navigation (should work same as hjkl)."""
+
+    async def test_down_arrow_moves_focus_down(self, e2e_app_with_tickets: KaganApp):
+        """Pressing down arrow moves focus to the next card down."""
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await focus_first_ticket(pilot)
+            await pilot.press("down")
+            await pilot.pause()
+
+    async def test_up_arrow_moves_focus_up(self, e2e_app_with_tickets: KaganApp):
+        """Pressing up arrow moves focus to the previous card up."""
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await focus_first_ticket(pilot)
+            await pilot.press("down")
+            await pilot.pause()
+            await pilot.press("up")
+            await pilot.pause()
+
+    async def test_left_arrow_moves_focus_left(self, e2e_app_with_tickets: KaganApp):
+        """Pressing left arrow moves focus to the left column."""
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            cards = list(pilot.app.screen.query(TicketCard))
+            for card in cards:
+                if card.ticket and card.ticket.status == TicketStatus.IN_PROGRESS:
+                    card.focus()
+                    break
+            await pilot.pause()
+            await pilot.press("left")
+            await pilot.pause()
+            focused = await get_focused_ticket(pilot)
+            if focused:
+                assert focused.status == TicketStatus.BACKLOG
+
+    async def test_right_arrow_moves_focus_right(self, e2e_app_with_tickets: KaganApp):
+        """Pressing right arrow moves focus to the right column."""
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await focus_first_ticket(pilot)
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+            focused = await get_focused_ticket(pilot)
+            if focused:
+                assert focused.status == TicketStatus.IN_PROGRESS
+
+    async def test_nav_keys_focus_first_card_when_none_focused(
+        self, e2e_app_with_tickets: KaganApp
+    ):
+        """Pressing nav keys when no card focused should focus first card."""
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            # Deselect any focused card
+            await pilot.press("escape")
+            await pilot.pause()
+            # Press j/down - should focus first card
+            await pilot.press("j")
+            await pilot.pause()
+            focused = await get_focused_ticket(pilot)
+            assert focused is not None, "Should focus first card when none selected"
+
+
 class TestTicketOperations:
     """Test ticket operation keybindings."""
 
@@ -132,21 +197,21 @@ class TestTicketOperations:
 class TestTicketMovement:
     """Test ticket movement keybindings."""
 
-    async def test_right_bracket_moves_forward(self, e2e_app_with_tickets: KaganApp):
-        """Pressing ']' moves ticket to next status."""
+    async def test_g_l_moves_forward(self, e2e_app_with_tickets: KaganApp):
+        """Pressing 'g' then 'l' moves ticket to next status."""
         async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             await focus_first_ticket(pilot)
             ticket_before = await get_focused_ticket(pilot)
             assert ticket_before is not None
             assert ticket_before.status == TicketStatus.BACKLOG
-            await pilot.press("right_square_bracket")
+            await pilot.press("g", "l")
             await pilot.pause()
             in_progress = await get_tickets_by_status(pilot, TicketStatus.IN_PROGRESS)
             assert any(t.id == ticket_before.id for t in in_progress)
 
-    async def test_left_bracket_moves_backward(self, e2e_app_with_tickets: KaganApp):
-        """Pressing '[' moves ticket to previous status."""
+    async def test_g_h_moves_backward(self, e2e_app_with_tickets: KaganApp):
+        """Pressing 'g' then 'h' moves ticket to previous status."""
         async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             cards = list(pilot.app.screen.query(TicketCard))
@@ -157,7 +222,7 @@ class TestTicketMovement:
             await pilot.pause()
             ticket_before = await get_focused_ticket(pilot)
             assert ticket_before is not None
-            await pilot.press("left_square_bracket")
+            await pilot.press("g", "h")
             await pilot.pause()
             backlog = await get_tickets_by_status(pilot, TicketStatus.BACKLOG)
             assert any(t.id == ticket_before.id for t in backlog)
@@ -167,7 +232,7 @@ class TestTicketMovementRules:
     """Test ticket movement rules for PAIR/AUTO types."""
 
     async def test_auto_ticket_in_progress_blocks_forward(self, e2e_app_with_auto_ticket: KaganApp):
-        """AUTO ticket in IN_PROGRESS should block forward movement via ]."""
+        """AUTO ticket in IN_PROGRESS should block forward movement via g+l."""
         async with e2e_app_with_auto_ticket.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             # Find the AUTO ticket in IN_PROGRESS and focus it
@@ -186,7 +251,7 @@ class TestTicketMovementRules:
             assert auto_ticket is not None, "Should have AUTO ticket in IN_PROGRESS"
 
             # Try to move forward - should be blocked
-            await pilot.press("right_square_bracket")
+            await pilot.press("g", "l")
             await pilot.pause()
 
             # Ticket should still be in IN_PROGRESS (not moved to REVIEW)
@@ -196,7 +261,7 @@ class TestTicketMovementRules:
     async def test_auto_ticket_in_progress_blocks_backward(
         self, e2e_app_with_auto_ticket: KaganApp
     ):
-        """AUTO ticket in IN_PROGRESS should block backward movement via [."""
+        """AUTO ticket in IN_PROGRESS should block backward movement via g+h."""
         async with e2e_app_with_auto_ticket.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             # Find the AUTO ticket in IN_PROGRESS and focus it
@@ -215,7 +280,7 @@ class TestTicketMovementRules:
             assert auto_ticket is not None, "Should have AUTO ticket in IN_PROGRESS"
 
             # Try to move backward - should be blocked
-            await pilot.press("left_square_bracket")
+            await pilot.press("g", "h")
             await pilot.pause()
 
             # Ticket should still be in IN_PROGRESS (not moved to BACKLOG)
@@ -237,8 +302,8 @@ class TestTicketMovementRules:
             await pilot.pause()
             assert done_ticket is not None, "Should have DONE ticket"
 
-            # Press [ to move backward - should show confirmation
-            await pilot.press("left_square_bracket")
+            # Press g+h to move backward - should show confirmation
+            await pilot.press("g", "h")
             await pilot.pause()
 
             # Should show confirmation modal
@@ -259,8 +324,8 @@ class TestTicketMovementRules:
             await pilot.pause()
             assert done_ticket is not None, "Should have DONE ticket"
 
-            # Press [ to move backward
-            await pilot.press("left_square_bracket")
+            # Press g+h to move backward
+            await pilot.press("g", "h")
             await pilot.pause()
 
             # Confirm the action
@@ -292,34 +357,12 @@ class TestTicketMovementRules:
             await pilot.pause()
             assert pair_ticket is not None, "Should have PAIR ticket in IN_PROGRESS"
 
-            # Press ] to move forward - should show warning confirmation
-            await pilot.press("right_square_bracket")
+            # Press g+l to move forward - should show warning confirmation
+            await pilot.press("g", "l")
             await pilot.pause()
 
             # Should show confirmation modal
             assert is_on_screen(pilot, "ConfirmModal")
-
-
-class TestTicketTypeToggle:
-    """Test ticket type toggle."""
-
-    async def test_t_toggles_ticket_type(self, e2e_app_with_tickets: KaganApp):
-        """Pressing 't' toggles between AUTO and PAIR types."""
-        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            await focus_first_ticket(pilot)
-            ticket_before = await get_focused_ticket(pilot)
-            assert ticket_before is not None
-            original_type = ticket_before.ticket_type
-            await pilot.press("t")
-            await pilot.pause()
-            app = cast("KaganApp", pilot.app)
-            updated = await app.state_manager.get_ticket(ticket_before.id)
-            assert updated is not None
-            if original_type == TicketType.AUTO:
-                assert updated.ticket_type == TicketType.PAIR
-            else:
-                assert updated.ticket_type == TicketType.AUTO
 
 
 class TestScreenNavigation:

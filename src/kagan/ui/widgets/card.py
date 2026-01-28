@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from textual.css.query import NoMatches
 from textual.message import Message
 from textual.reactive import reactive, var
 from textual.widget import Widget
@@ -18,7 +17,6 @@ from kagan.constants import (
     CARD_ID_MAX_LENGTH,
     CARD_REVIEW_MAX_LENGTH,
     CARD_TITLE_LINE_WIDTH,
-    COLUMN_ORDER,
 )
 from kagan.database.models import Ticket, TicketPriority, TicketStatus, TicketType
 
@@ -36,9 +34,7 @@ class TicketCard(Widget):
     ticket: reactive[Ticket | None] = reactive(None, recompose=True)
     is_agent_active: var[bool] = var(False, toggle_class="agent-active")
     is_session_active: var[bool] = var(False, toggle_class="session-active")
-    iteration_info: reactive[str] = reactive("")
-    _dragging: bool = False
-    _drag_start_x: int = 0
+    iteration_info: reactive[str] = reactive("", recompose=True)
     _pulse_timer: Timer | None = None
 
     @dataclass
@@ -57,11 +53,6 @@ class TicketCard(Widget):
     @dataclass
     class DeleteRequested(Message):
         ticket: Ticket
-
-    @dataclass
-    class DragMove(Message):
-        ticket: Ticket
-        target_status: TicketStatus | None
 
     def __init__(self, ticket: Ticket, **kwargs) -> None:
         super().__init__(id=f"card-{ticket.id}", **kwargs)
@@ -98,7 +89,7 @@ class TicketCard(Widget):
         hat = getattr(self.ticket, "assigned_hat", None) or ""
         hat_display = hat[:CARD_HAT_MAX_LENGTH] if hat else ""
         ticket_id = f"#{self.ticket.short_id[:CARD_ID_MAX_LENGTH]}"
-        date_str = self.ticket.created_at.strftime("%m/%d")
+        date_str = self.ticket.created_at.strftime("%m.%d.%y")
         backend = getattr(self.ticket, "agent_backend", None) or ""
 
         # Build meta line with session indicator
@@ -211,46 +202,14 @@ class TicketCard(Widget):
             return "Checks: failed"
         return "Checks: not run"
 
-    def on_mouse_down(self, event: events.MouseDown) -> None:
-        """Start potential drag operation."""
-        self._drag_start_x = event.screen_x
-        self.capture_mouse()
-
-    def on_mouse_up(self, event: events.MouseUp) -> None:
-        """End drag operation or handle click."""
-        was_dragging = self._dragging
-        self._dragging = False
-        self.release_mouse()
-        self.remove_class("dragging")
-
-        if was_dragging and self.ticket:
-            # Calculate which column we're over based on screen position
-            target_status = self._get_target_status(event.screen_x)
-            if target_status and target_status != self.ticket.status:
-                self.post_message(self.DragMove(self.ticket, target_status))
-        elif self.ticket:
-            # Was a click, not a drag
+    def on_click(self, event: events.Click) -> None:
+        """Handle click: single-click focuses, double-click opens details."""
+        if event.chain == 1:
+            # Single click - just focus
+            self.focus()
+        elif event.chain >= 2 and self.ticket:
+            # Double click - open details
             self.post_message(self.Selected(self.ticket))
-
-    def on_mouse_move(self, event: events.MouseMove) -> None:
-        """Handle mouse movement during drag."""
-        if event.button != 0:
-            return
-        # Start drag if moved more than 5 pixels horizontally
-        if not self._dragging and abs(event.screen_x - self._drag_start_x) > 5:
-            self._dragging = True
-            self.add_class("dragging")
-
-    def _get_target_status(self, screen_x: int) -> TicketStatus | None:
-        """Determine target column based on screen X position."""
-        try:
-            screen_width = self.app.size.width
-            num_columns = len(COLUMN_ORDER)
-            column_width = screen_width // num_columns
-            column_index = min(num_columns - 1, max(0, screen_x // column_width))
-            return COLUMN_ORDER[column_index]
-        except (NoMatches, IndexError, ZeroDivisionError):
-            return None
 
     def watch_is_agent_active(self, active: bool) -> None:
         """Start/stop pulse animation timer when agent state changes."""

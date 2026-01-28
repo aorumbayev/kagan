@@ -111,6 +111,8 @@ class TicketDetailsModal(ModalScreen[ModalAction | TicketCreate | TicketUpdate |
                     current_type = self.ticket.ticket_type if self.ticket else TicketType.PAIR
                     if isinstance(current_type, str):
                         current_type = TicketType(current_type)
+                    # Disable type selector when editing existing ticket
+                    is_editing = self.ticket is not None
                     yield Select(
                         options=[
                             ("Pair (tmux)", TicketType.PAIR.value),
@@ -118,6 +120,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | TicketCreate | TicketUpdate |
                         ],
                         value=current_type.value,
                         id="type-select",
+                        disabled=is_editing,
                     )
 
                 with Vertical(classes="form-field field-third"):

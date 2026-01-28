@@ -63,7 +63,6 @@ class TestSessionManager:
                 title="Add login",
                 description="Implement OAuth",
                 acceptance_criteria=["Tests pass"],
-                check_command="pytest tests/",
             )
         )
         config = KaganConfig()

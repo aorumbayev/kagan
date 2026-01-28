@@ -266,8 +266,7 @@ class TestScratchpads:
 class TestTicketNewFields:
     """Tests for new ticket fields.
 
-    Fields: acceptance_criteria, check_command, review_summary,
-    checks_passed, session_active.
+    Fields: acceptance_criteria, review_summary, checks_passed, session_active.
     """
 
     async def test_create_ticket_with_new_fields(self, state_manager: StateManager):
@@ -275,14 +274,12 @@ class TestTicketNewFields:
         create = TicketCreate(
             title="Test ticket",
             acceptance_criteria=["All tests pass"],
-            check_command="pytest tests/",
             checks_passed=True,
             session_active=True,
         )
         ticket = await state_manager.create_ticket(create)
 
         assert ticket.acceptance_criteria == ["All tests pass"]
-        assert ticket.check_command == "pytest tests/"
         assert ticket.checks_passed is True
         assert ticket.session_active is True
         assert ticket.review_summary is None
@@ -292,7 +289,6 @@ class TestTicketNewFields:
         create = TicketCreate(
             title="Test",
             acceptance_criteria=["Criteria"],
-            check_command="cmd",
             review_summary="Looks good",
             checks_passed=True,
             session_active=False,
@@ -303,7 +299,6 @@ class TestTicketNewFields:
 
         assert ticket is not None
         assert ticket.acceptance_criteria == ["Criteria"]
-        assert ticket.check_command == "cmd"
         assert ticket.review_summary == "Looks good"
         assert ticket.checks_passed is True
         assert ticket.session_active is False
@@ -315,14 +310,12 @@ class TestTicketNewFields:
 
         update = TicketUpdate(
             acceptance_criteria=["New criteria"],
-            check_command="new command",
             checks_passed=True,
         )
         updated = await state_manager.update_ticket(ticket.id, update)
 
         assert updated is not None
         assert updated.acceptance_criteria == ["New criteria"]
-        assert updated.check_command == "new command"
         assert updated.checks_passed is True
         assert updated.session_active is False  # Default value
 
@@ -364,7 +357,6 @@ class TestTicketNewFields:
         ticket = await state_manager.create_ticket(create)
 
         assert ticket.acceptance_criteria == []
-        assert ticket.check_command is None
         assert ticket.review_summary is None
         assert ticket.checks_passed is None
         assert ticket.session_active is False
@@ -378,12 +370,12 @@ class TestTicketNewFields:
         )
         ticket = await state_manager.create_ticket(create)
 
-        update = TicketUpdate(check_command="new command")
+        update = TicketUpdate(review_summary="Looks good")
         updated = await state_manager.update_ticket(ticket.id, update)
 
         assert updated is not None
         assert updated.acceptance_criteria == ["Original"]  # Preserved
-        assert updated.check_command == "new command"  # Updated
+        assert updated.review_summary == "Looks good"  # Updated
         assert updated.checks_passed is True  # Preserved
 
 

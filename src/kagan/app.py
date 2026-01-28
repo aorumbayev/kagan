@@ -50,6 +50,7 @@ class KaganApp(App):
 
         # Pub/sub signal for ticket changes - screens subscribe to this
         self.ticket_changed_signal: Signal[str] = Signal(self, "ticket_changed")
+        self.iteration_changed_signal: Signal[tuple[str, int]] = Signal(self, "iteration_changed")
 
         self.db_path = Path(db_path)
         self.config_path = Path(config_path)
@@ -134,6 +135,9 @@ class KaganApp(App):
                 config=self.config,
                 session_manager=self._session_manager,
                 on_ticket_changed=lambda: self.ticket_changed_signal.publish(""),
+                on_iteration_changed=lambda tid, it: self.iteration_changed_signal.publish(
+                    (tid, it)
+                ),
             )
             # Start scheduler tick loop
             self.set_interval(TICK_INTERVAL, self._scheduler_tick)

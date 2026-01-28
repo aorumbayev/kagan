@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,8 @@ if TYPE_CHECKING:
     from kagan.config import AgentConfig, KaganConfig
     from kagan.database.manager import StateManager
     from kagan.database.models import Ticket
+
+log = logging.getLogger(__name__)
 
 
 class SessionManager:
@@ -86,9 +89,25 @@ class SessionManager:
             # Fallback: just run the base command (no auto-prompt)
             return base_cmd
 
-    def attach_session(self, ticket_id: str) -> None:
-        """Attach to session (blocks until detach, then returns to TUI)."""
-        subprocess.run(["tmux", "attach-session", "-t", f"kagan-{ticket_id}"])
+    def attach_session(self, ticket_id: str) -> bool:
+        """Attach to session (blocks until detach, then returns to TUI).
+
+        Returns:
+            True if attach was successful (user detached normally).
+            False if attach failed (session doesn't exist or tmux error).
+        """
+        session_name = f"kagan-{ticket_id}"
+        log.debug("Attaching to tmux session: %s", session_name)
+        result = subprocess.run(["tmux", "attach-session", "-t", session_name])
+        if result.returncode != 0:
+            log.warning(
+                "Failed to attach to session %s (exit code: %d)",
+                session_name,
+                result.returncode,
+            )
+            return False
+        log.debug("Detached from session: %s", session_name)
+        return True
 
     async def session_exists(self, ticket_id: str) -> bool:
         """Check if session exists."""
@@ -187,7 +206,7 @@ class SessionManager:
 
         This includes the task overview plus essential rules that were
         previously in CONTEXT.md. The agent gets full details (acceptance
-        criteria, check command, scratchpad) via the kagan_get_context MCP tool.
+        criteria and scratchpad) via the kagan_get_context MCP tool.
         """
         desc = ticket.description or "No description provided."
         return f"""Hello! I'm starting a pair programming session for ticket **{ticket.id}**.
@@ -205,7 +224,7 @@ class SessionManager:
 - When complete: commit your work, then call `kagan_request_review` MCP tool
 
 ## MCP Tools Available
-- `kagan_get_context` - Get full ticket details (acceptance criteria, check command, scratchpad)
+- `kagan_get_context` - Get full ticket details (acceptance criteria, scratchpad)
 - `kagan_update_scratchpad` - Save progress notes
 - `kagan_request_review` - Submit work for review (commit first!)
 

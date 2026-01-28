@@ -40,6 +40,7 @@ class Scheduler:
         config: KaganConfig,
         session_manager: SessionManager | None = None,
         on_ticket_changed: Callable[[], None] | None = None,
+        on_iteration_changed: Callable[[str, int], None] | None = None,
     ) -> None:
         self._state = state_manager
         self._worktrees = worktree_manager
@@ -50,6 +51,7 @@ class Scheduler:
         self._iteration_counts: dict[str, int] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._on_ticket_changed = on_ticket_changed
+        self._on_iteration_changed = on_iteration_changed
         self._prompt_loader = PromptLoader(config)
 
     def _notify_ticket_changed(self) -> None:
@@ -133,6 +135,8 @@ class Scheduler:
 
             for iteration in range(1, max_iterations + 1):
                 self._iteration_counts[ticket.id] = iteration
+                if self._on_iteration_changed:
+                    self._on_iteration_changed(ticket.id, iteration)
                 log.debug(f"Ticket {ticket.id} iteration {iteration}/{max_iterations}")
 
                 signal = await self._run_iteration(
@@ -165,6 +169,8 @@ class Scheduler:
             self._running_tickets.discard(ticket.id)
             self._agents.pop(ticket.id, None)
             self._iteration_counts.pop(ticket.id, None)
+            if self._on_iteration_changed:
+                self._on_iteration_changed(ticket.id, 0)
             log.info(f"Ticket loop ended for {ticket.id}")
 
     def _get_agent_config(self, ticket: Ticket) -> AgentConfig:

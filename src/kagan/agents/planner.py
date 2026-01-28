@@ -27,7 +27,6 @@ When creating tickets, you MUST output them in this EXACT XML format:
     <criterion>Criterion 1</criterion>
     <criterion>Criterion 2</criterion>
   </acceptance_criteria>
-  <check_command>pytest tests/test_feature.py -v</check_command>
   <priority>medium</priority>
 </ticket>
 </plan>
@@ -106,7 +105,6 @@ def _element_to_ticket(el: ET.Element) -> TicketCreate:
         ticket_type=ticket_type,
         priority=priority,
         acceptance_criteria=criteria(),
-        check_command=text("check_command") or None,
     )
 
 

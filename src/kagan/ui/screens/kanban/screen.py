@@ -59,34 +59,27 @@ class KanbanScreen(KaganScreen):
     BINDINGS = [
         # Visible bindings
         Binding("q", "quit", "Quit", priority=True),
-        Binding("h", "focus_left", "Left"),
-        Binding("l", "focus_right", "Right"),
         Binding("n", "new_ticket", "New"),
         Binding("v", "view_details", "View"),
         Binding("e", "edit_ticket", "Edit"),
         Binding("enter", "open_session", "Open"),
         Binding("g", "activate_leader", "Go..."),
         Binding("slash", "toggle_search", "Search", key_display="/"),
-        # Hidden navigation alternatives
+        # Hidden navigation (intuitive vim-style, no footer display but shown in palette)
+        Binding("h", "focus_left", "Left", show=False),
         Binding("j", "focus_down", "Down", show=False),
         Binding("k", "focus_up", "Up", show=False),
-        Binding("left", "focus_left", show=False),
-        Binding("right", "focus_right", show=False),
-        Binding("down", "focus_down", show=False),
-        Binding("up", "focus_up", show=False),
-        # Hidden status movement (accessible via leader key 'g')
-        Binding("right_square_bracket", "move_forward", "Next", key_display="]", show=False),
-        Binding("left_square_bracket", "move_backward", "Prev", key_display="[", show=False),
-        Binding("shift+right", "move_forward", show=False),
-        Binding("shift+left", "move_backward", show=False),
+        Binding("l", "focus_right", "Right", show=False),
+        Binding("left", "focus_left", "Left", show=False),
+        Binding("right", "focus_right", "Right", show=False),
+        Binding("down", "focus_down", "Down", show=False),
+        Binding("up", "focus_up", "Up", show=False),
         # Ticket management
-        Binding("t", "toggle_type", "PAIR/AUTO"),
         Binding("a", "start_agent", "Start"),
         # Hidden specialized (will move to leader key)
         Binding("w", "watch_agent", "Watch", show=False),
         Binding("D", "view_diff", "Diff", show=False),
         Binding("r", "open_review", "Review", show=False),
-        Binding("s", "rerun_checks", "Re-check", show=False),
         Binding("c", "open_chat", "Chat", show=False),
         # Hidden utility
         Binding("escape", "deselect", show=False),
@@ -110,6 +103,8 @@ class KanbanScreen(KaganScreen):
         # Leader key state
         self._leader_active: bool = False
         self._leader_timer: Timer | None = None
+        # Shift key state
+        self._shift_active: bool = False
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         card = focus.get_focused_card(self)
@@ -120,7 +115,6 @@ class KanbanScreen(KaganScreen):
             "delete_ticket",
             "delete_ticket_direct",
             "view_details",
-            "toggle_type",
         ):
             return True if ticket else None
 
@@ -135,7 +129,7 @@ class KanbanScreen(KaganScreen):
                     return None
             return True
 
-        if action in ("merge", "merge_direct", "view_diff", "open_review", "rerun_checks"):
+        if action in ("merge", "merge_direct", "view_diff", "open_review"):
             if not ticket:
                 return None
             return True if ticket.status == TicketStatus.REVIEW else None
@@ -171,7 +165,8 @@ class KanbanScreen(KaganScreen):
         with Container(classes="size-warning"):
             yield Static(SIZE_WARNING_MESSAGE, classes="size-warning-text")
         yield Static(
-            "g: [=Prev ]=Next c=Chat d=Diff r=Review w=Watch | Esc=Cancel", classes="leader-hint"
+            "g: h=Ticket← l=Ticket→ c=Chat d=Diff r=Review w=Watch | Esc=Cancel",
+            classes="leader-hint",
         )
         yield Footer()
 
@@ -180,6 +175,8 @@ class KanbanScreen(KaganScreen):
         await self._refresh_board()
         focus.focus_first_card(self)
         self.kagan_app.ticket_changed_signal.subscribe(self, self._on_ticket_changed)
+        self.kagan_app.iteration_changed_signal.subscribe(self, self._on_iteration_changed)
+        self._sync_iterations()
         from kagan.ui.widgets.header import _get_git_branch
 
         config_path = self.kagan_app.config_path
@@ -190,6 +187,36 @@ class KanbanScreen(KaganScreen):
     async def _on_ticket_changed(self, _ticket_id: str) -> None:
         await self._refresh_board()
 
+    def _on_iteration_changed(self, data: tuple[str, int]) -> None:
+        """Handle iteration count updates from scheduler."""
+        ticket_id, iteration = data
+        try:
+            column = self.query_one("#column-in_progress", KanbanColumn)
+        except NoMatches:
+            return
+        max_iter = self.kagan_app.config.general.max_iterations
+        if iteration > 0:
+            column.update_iterations({ticket_id: f"Iter {iteration}/{max_iter}"})
+        else:
+            column.update_iterations({ticket_id: ""})
+
+    def _sync_iterations(self) -> None:
+        """Sync iteration display for any already-running tickets."""
+        scheduler = self.kagan_app.scheduler
+        try:
+            column = self.query_one("#column-in_progress", KanbanColumn)
+        except NoMatches:
+            return
+        max_iter = self.kagan_app.config.general.max_iterations
+        iterations = {}
+        for card in column.get_cards():
+            if card.ticket:
+                count = scheduler.get_iteration_count(card.ticket.id)
+                if count > 0:
+                    iterations[card.ticket.id] = f"Iter {count}/{max_iter}"
+        if iterations:
+            column.update_iterations(iterations)
+
     def on_descendant_focus(self, event: events.DescendantFocus) -> None:
         self.refresh_bindings()
 
@@ -198,6 +225,7 @@ class KanbanScreen(KaganScreen):
 
     async def on_screen_resume(self) -> None:
         await self._refresh_board()
+        self._sync_iterations()
 
     def _check_screen_size(self) -> None:
         size = self.app.size
@@ -310,10 +338,10 @@ class KanbanScreen(KaganScreen):
 
         # Map leader key sequences
         leader_actions = {
-            "[": "move_backward",
-            "]": "move_forward",
             "c": "open_chat",
             "d": "view_diff",
+            "h": "move_backward",
+            "l": "move_forward",
             "r": "open_review",
             "w": "watch_agent",
         }
@@ -594,7 +622,19 @@ class KanbanScreen(KaganScreen):
                 await self.kagan_app.state_manager.move_ticket(ticket.id, TicketStatus.IN_PROGRESS)
 
             with self.app.suspend():
-                session_manager.attach_session(ticket.id)
+                attach_success = session_manager.attach_session(ticket.id)
+
+            if not attach_success:
+                # Session died unexpectedly (e.g., agent exited, tmux killed)
+                # Clean up stale state and try to recreate
+                await session_manager.kill_session(ticket.id)
+                await session_manager.create_session(ticket, wt_path)
+
+                with self.app.suspend():
+                    retry_success = session_manager.attach_session(ticket.id)
+
+                if not retry_success:
+                    self.notify("Session failed to start. Try again.", severity="error")
 
             await self._refresh_board()
         except (TmuxError, WorktreeError) as exc:
@@ -614,24 +654,6 @@ class KanbanScreen(KaganScreen):
             # Reload config after save
             self.kagan_app.config = self.kagan_app.config.load(config_path)
             self.notify("Settings saved")
-
-    async def action_toggle_type(self) -> None:
-        card = focus.get_focused_card(self)
-        if not card or not card.ticket:
-            return
-
-        ticket = card.ticket
-        current_type = ticket.ticket_type
-        if isinstance(current_type, str):
-            current_type = TicketType(current_type)
-
-        new_type = TicketType.PAIR if current_type == TicketType.AUTO else TicketType.AUTO
-
-        update = TicketUpdate(ticket_type=new_type)
-        await self.kagan_app.state_manager.update_ticket(ticket.id, update)
-        await self._refresh_board()
-        type_label = "AUTO" if new_type == TicketType.AUTO else "PAIR"
-        self.notify(f"Changed {ticket.short_id} to {type_label}")
 
     async def action_watch_agent(self) -> None:
         card = focus.get_focused_card(self)
@@ -751,27 +773,6 @@ class KanbanScreen(KaganScreen):
         await self._refresh_board()
         self.notify(f"Rejected: {ticket.title}")
 
-    async def action_rerun_checks(self) -> None:
-        ticket = actions.get_review_ticket(self, focus.get_focused_card(self))
-        if not ticket:
-            return
-
-        worktree = self.kagan_app.worktree_manager
-        wt_path = await worktree.get_path(ticket.id)
-        if wt_path is None:
-            self.notify("Worktree not found for ticket", severity="error")
-            return
-
-        command = ticket.check_command or "pytest && ruff check ."
-        process = await asyncio.create_subprocess_shell(command, cwd=wt_path)
-        return_code = await process.wait()
-        checks_passed = return_code == 0
-        update = TicketUpdate(checks_passed=checks_passed)
-        await self.kagan_app.state_manager.update_ticket(ticket.id, update)
-        await self._refresh_board()
-        status = "passed" if checks_passed else "failed"
-        self.notify(f"Checks {status} for {ticket.short_id}")
-
     # Message handlers
     def on_ticket_card_selected(self, message: TicketCard.Selected) -> None:
         self.action_view_details()
@@ -787,37 +788,6 @@ class KanbanScreen(KaganScreen):
 
     def on_ticket_card_delete_requested(self, message: TicketCard.DeleteRequested) -> None:
         self.action_delete_ticket()
-
-    async def on_ticket_card_drag_move(self, message: TicketCard.DragMove) -> None:
-        if not message.target_status or message.target_status == message.ticket.status:
-            return
-
-        ticket = message.ticket
-        current_status = TicketStatus(ticket.status)
-        target_status = message.target_status
-        ticket_type = ticket.ticket_type
-        if isinstance(ticket_type, str):
-            ticket_type = TicketType(ticket_type)
-
-        if current_status == TicketStatus.IN_PROGRESS and ticket_type == TicketType.AUTO:
-            self.notify("Agent controls this ticket's movement", severity="warning")
-            return
-
-        if current_status == TicketStatus.DONE and target_status != TicketStatus.BACKLOG:
-            self.notify("DONE tickets can only be moved to BACKLOG", severity="warning")
-            return
-
-        if current_status == TicketStatus.DONE and target_status == TicketStatus.BACKLOG:
-            await actions.reopen_ticket(self.kagan_app, ticket)
-            await self._refresh_board()
-            self.notify(f"Reopened #{ticket.id} to BACKLOG")
-            focus.focus_column(self, target_status)
-            return
-
-        await self.kagan_app.state_manager.move_ticket(ticket.id, target_status)
-        await self._refresh_board()
-        self.notify(f"Moved #{ticket.id} to {target_status.value}")
-        focus.focus_column(self, target_status)
 
     async def on_ticket_changed(self, message: TicketChanged) -> None:
         await self._refresh_board()

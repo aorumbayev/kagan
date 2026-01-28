@@ -189,7 +189,7 @@ class TestFreshProjectWorktree:
             await pilot.pause()
 
             # Move to IN_PROGRESS (this triggers worktree creation for PAIR)
-            await pilot.press("right_square_bracket")
+            await pilot.press("g", "l")
             await pilot.pause()
 
             # Verify ticket moved (no error means worktree was created)

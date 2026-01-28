@@ -31,7 +31,6 @@ def row_to_ticket(row: aiosqlite.Row) -> Ticket:
         agent_backend=row["agent_backend"],
         parent_id=row["parent_id"],
         acceptance_criteria=deserialize_acceptance_criteria(row["acceptance_criteria"]),
-        check_command=row["check_command"],
         review_summary=row["review_summary"],
         checks_passed=None if row["checks_passed"] is None else bool(row["checks_passed"]),
         session_active=bool(row["session_active"]),
@@ -89,7 +88,6 @@ def build_update_params(update, serialize_fn) -> tuple[list[str], list]:
         "agent_backend": update.agent_backend,
         "parent_id": update.parent_id,
         "acceptance_criteria": criteria_val,
-        "check_command": update.check_command,
         "review_summary": update.review_summary,
         "checks_passed": checks_val,
         "session_active": session_val,
@@ -121,7 +119,6 @@ def build_insert_params(ticket, serialize_fn) -> tuple:
         ticket.agent_backend,
         ticket.parent_id,
         serialize_fn(ticket.acceptance_criteria),
-        ticket.check_command,
         ticket.review_summary,
         None if ticket.checks_passed is None else (1 if ticket.checks_passed else 0),
         1 if ticket.session_active else 0,
@@ -135,10 +132,10 @@ INSERT_TICKET_SQL = """
 INSERT INTO tickets
     (id, title, description, status, priority, ticket_type,
      assigned_hat, agent_backend, parent_id,
-     acceptance_criteria, check_command, review_summary,
+     acceptance_criteria, review_summary,
      checks_passed, session_active,
      created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 SELECT_ALL_TICKETS_SQL = """

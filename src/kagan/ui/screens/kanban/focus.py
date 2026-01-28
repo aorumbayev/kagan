@@ -35,23 +35,34 @@ def focus_column(screen: KanbanScreen, status: TicketStatus) -> None:
 
 def focus_horizontal(screen: KanbanScreen, direction: int) -> None:
     card = get_focused_card(screen)
-    if not card or not card.ticket:
-        return
     columns = get_columns(screen)
-    col_idx = next((i for i, s in enumerate(COLUMN_ORDER) if s == card.ticket.status), -1)
-    target_idx = col_idx + direction
-    if target_idx < 0 or target_idx >= len(COLUMN_ORDER):
+
+    # If no card focused, focus first available card
+    if not card or not card.ticket:
+        focus_first_card(screen)
         return
+
+    col_idx = next((i for i, s in enumerate(COLUMN_ORDER) if s == card.ticket.status), -1)
     card_idx = columns[col_idx].get_focused_card_index() or 0
-    cards = columns[target_idx].get_cards()
-    if cards:
-        columns[target_idx].focus_card(min(card_idx, len(cards) - 1))
+
+    # Search in direction until we find a column with cards
+    target_idx = col_idx + direction
+    while 0 <= target_idx < len(COLUMN_ORDER):
+        cards = columns[target_idx].get_cards()
+        if cards:
+            columns[target_idx].focus_card(min(card_idx, len(cards) - 1))
+            return
+        target_idx += direction
 
 
 def focus_vertical(screen: KanbanScreen, direction: int) -> None:
     card = get_focused_card(screen)
+
+    # If no card focused, focus first available card
     if not card or not card.ticket:
+        focus_first_card(screen)
         return
+
     status = card.ticket.status
     status_str = status.value if isinstance(status, TicketStatus) else status
     col = screen.query_one(f"#column-{status_str.lower()}", KanbanColumn)

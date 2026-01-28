@@ -171,7 +171,6 @@ class TestParsePlan:
             <criterion>Users can log in</criterion>
             <criterion>Users can log out</criterion>
           </acceptance_criteria>
-          <check_command>pytest tests/test_auth.py</check_command>
           <priority>high</priority>
         </ticket>
         </plan>

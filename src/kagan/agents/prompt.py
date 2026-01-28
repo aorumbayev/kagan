@@ -63,17 +63,9 @@ def build_prompt(
         criteria_list = "\n".join(f"- {c}" for c in ticket.acceptance_criteria)
         criteria_section = f"\n## Acceptance Criteria\n{criteria_list}\n"
 
-    # Build check command section if present
-    check_section = ""
-    if ticket.check_command:
-        check_section = (
-            f"\n## Verification Command\nRun this to verify your work:\n"
-            f"```\n{ticket.check_command}\n```\n"
-        )
-
-    # Combine description with criteria and check sections
+    # Combine description with criteria section
     full_description = ticket.description or "No description provided."
-    full_description = full_description + criteria_section + check_section
+    full_description = full_description + criteria_section
 
     return template.format(
         iteration=iteration,

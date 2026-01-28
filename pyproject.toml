@@ -34,6 +34,7 @@ dev = [
     "textual-dev>=1.8.0",
     "mkdocs>=1.6.0",
     "pytest-cov>=7.0.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.ruff]
@@ -60,7 +61,7 @@ search_path = ["src", "."]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
-addopts = "--cov=src/kagan --cov-report=term-missing"
+addopts = "--cov=src/kagan --cov-report=term-missing -n auto"
 
 [tool.coverage.run]
 source = ["src/kagan"]

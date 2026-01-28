@@ -90,14 +90,14 @@ async def focus_first_ticket(pilot: Pilot) -> bool:
 
 
 async def move_ticket_forward(pilot: Pilot) -> None:
-    """Move the focused ticket to the next status column."""
-    await pilot.press("right_square_bracket")
+    """Move the focused ticket to the next status column using g+l leader key."""
+    await pilot.press("g", "l")
     await pilot.pause()
 
 
 async def move_ticket_backward(pilot: Pilot) -> None:
-    """Move the focused ticket to the previous status column."""
-    await pilot.press("left_square_bracket")
+    """Move the focused ticket to the previous status column using g+h leader key."""
+    await pilot.press("g", "h")
     await pilot.pause()
 
 

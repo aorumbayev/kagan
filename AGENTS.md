@@ -208,7 +208,6 @@ When implementing the session-first rewrite (see `kagan_session-first_rewrite_*.
 ```python
 # Ticket model additions
 acceptance_criteria: list[str] = Field(default_factory=list)
-check_command: str | None = None
 review_summary: str | None = None
 checks_passed: bool | None = None
 session_active: bool = False

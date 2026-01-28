@@ -20,7 +20,6 @@ class TestMCPTools:
                 title="Feature",
                 description="Details",
                 acceptance_criteria=["Tests pass"],
-                check_command="true",
             )
         )
         await state_manager.update_scratchpad(ticket.id, "Notes")
@@ -32,7 +31,6 @@ class TestMCPTools:
         assert context["title"] == "Feature"
         assert context["description"] == "Details"
         assert context["acceptance_criteria"] == ["Tests pass"]
-        assert context["check_command"] == "true"
         assert context["scratchpad"] == "Notes"
 
     async def test_update_scratchpad_appends(self, state_manager):
@@ -52,13 +50,9 @@ class TestMCPTools:
         ticket = await state_manager.create_ticket(TicketCreate(title="Feature"))
         server = KaganMCPServer(state_manager)
 
-        async def _checks(*_args) -> bool:
-            return True
-
         async def _no_uncommitted(*_args) -> bool:
             return False  # No uncommitted changes
 
-        monkeypatch.setattr(server, "_run_checks", _checks)
         monkeypatch.setattr(server, "_check_uncommitted_changes", _no_uncommitted)
 
         result = await server.request_review(ticket.id, "Looks good")
@@ -68,32 +62,7 @@ class TestMCPTools:
         assert updated is not None
         assert updated.status == TicketStatus.REVIEW
         assert updated.review_summary == "Looks good"
-        assert updated.checks_passed is True
-
-    async def test_request_review_fails(self, state_manager, monkeypatch):
-        """request_review leaves status unchanged on failure."""
-        ticket = await state_manager.create_ticket(
-            TicketCreate(title="Feature", check_command="pytest tests/")
-        )
-        server = KaganMCPServer(state_manager)
-
-        async def _checks(*_args) -> bool:
-            return False
-
-        async def _no_uncommitted(*_args) -> bool:
-            return False  # No uncommitted changes
-
-        monkeypatch.setattr(server, "_run_checks", _checks)
-        monkeypatch.setattr(server, "_check_uncommitted_changes", _no_uncommitted)
-
-        result = await server.request_review(ticket.id, "Needs work")
-
-        assert result["status"] == "failed"
-        updated = await state_manager.get_ticket(ticket.id)
-        assert updated is not None
-        assert updated.status == TicketStatus.BACKLOG
-        assert updated.review_summary == "Needs work"
-        assert updated.checks_passed is False
+        assert updated.checks_passed is None
 
     async def test_request_review_blocks_uncommitted(self, state_manager, monkeypatch):
         """request_review returns error when uncommitted changes exist."""

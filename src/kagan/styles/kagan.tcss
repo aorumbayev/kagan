@@ -202,11 +202,6 @@ TicketCard:hover {
     background: $panel;
 }
 
-TicketCard.dragging {
-    border: dashed $warning;
-    opacity: 0.7;
-}
-
 /* ============================================
    SESSION & AGENT STATE INDICATORS
    ============================================ */
@@ -330,8 +325,7 @@ TicketDetailsModal {
 TicketDetailsModal > Vertical,
 TicketDetailsModal #ticket-details-container {
     width: 80;
-    height: auto;
-    max-height: 90%;
+    max-height: 80%;
     border: thick $primary;
     background: $surface;
     padding: 1 2;
@@ -421,8 +415,8 @@ TicketDetailsModal .expand-hint {
 TicketDetailsModal .ticket-description {
     padding: 1;
     background: $background;
-    min-height: 8;
-    max-height: 15;
+    min-height: 3;
+    max-height: 10;
     height: auto;
     color: $text;
     overflow-y: auto;
@@ -480,6 +474,8 @@ TicketDetailsModal .meta-separator {
 }
 
 TicketDetailsModal .button-row {
+    width: 100%;
+    height: auto;
     padding-top: 1;
     align: center middle;
 }
@@ -872,7 +868,9 @@ PlannerScreen {
 .empty-state {
     width: 100%;
     height: auto;
+    max-height: 1fr;
     align: center middle;
+    content-align: center middle;
     padding: 2;
     margin-top: 2;
 }
@@ -886,10 +884,11 @@ PlannerScreen {
 }
 
 .empty-state-cards {
-    width: auto;
+    width: 100%;
     height: auto;
     layout: horizontal;
     align: center middle;
+    content-align: center middle;
 }
 
 .empty-state-card {
