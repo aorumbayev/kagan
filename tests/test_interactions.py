@@ -6,7 +6,8 @@ These tests are fast and help quickly identify which keybinding broke.
 
 from __future__ import annotations
 
-from kagan.app import KaganApp
+from typing import TYPE_CHECKING, cast
+
 from kagan.database.models import TicketStatus, TicketType
 from kagan.ui.widgets.card import TicketCard
 from tests.helpers.pages import (
@@ -15,6 +16,9 @@ from tests.helpers.pages import (
     get_tickets_by_status,
     is_on_screen,
 )
+
+if TYPE_CHECKING:
+    from kagan.app import KaganApp
 
 
 class TestVimNavigation:
@@ -108,14 +112,20 @@ class TestTicketOperations:
             await pilot.pause()
             assert is_on_screen(pilot, "TicketDetailsModal")
 
-    async def test_x_shows_delete_confirmation(self, e2e_app_with_tickets: KaganApp):
-        """Pressing 'x' shows delete confirmation modal."""
+    async def test_ctrl_d_deletes_ticket_directly(self, e2e_app_with_tickets: KaganApp):
+        """Pressing 'ctrl+d' deletes ticket directly without confirmation."""
         async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             await focus_first_ticket(pilot)
-            await pilot.press("x")
+            ticket_before = await get_focused_ticket(pilot)
+            assert ticket_before is not None
+
+            await pilot.press("ctrl+d")
             await pilot.pause()
-            assert is_on_screen(pilot, "ConfirmModal")
+
+            # Ticket should be deleted (no confirmation modal)
+            tickets = await e2e_app_with_tickets.state_manager.get_all_tickets()
+            assert ticket_before.id not in [t.id for t in tickets]
 
 
 class TestTicketMovement:
@@ -152,6 +162,143 @@ class TestTicketMovement:
             assert any(t.id == ticket_before.id for t in backlog)
 
 
+class TestTicketMovementRules:
+    """Test ticket movement rules for PAIR/AUTO types."""
+
+    async def test_auto_ticket_in_progress_blocks_forward(self, e2e_app_with_auto_ticket: KaganApp):
+        """AUTO ticket in IN_PROGRESS should block forward movement via ]."""
+        async with e2e_app_with_auto_ticket.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            # Find the AUTO ticket in IN_PROGRESS and focus it
+            cards = list(pilot.app.screen.query(TicketCard))
+            auto_ticket = None
+            for card in cards:
+                if (
+                    card.ticket
+                    and card.ticket.status == TicketStatus.IN_PROGRESS
+                    and card.ticket.ticket_type == TicketType.AUTO
+                ):
+                    card.focus()
+                    auto_ticket = card.ticket
+                    break
+            await pilot.pause()
+            assert auto_ticket is not None, "Should have AUTO ticket in IN_PROGRESS"
+
+            # Try to move forward - should be blocked
+            await pilot.press("right_square_bracket")
+            await pilot.pause()
+
+            # Ticket should still be in IN_PROGRESS (not moved to REVIEW)
+            in_progress = await get_tickets_by_status(pilot, TicketStatus.IN_PROGRESS)
+            assert any(t.id == auto_ticket.id for t in in_progress)
+
+    async def test_auto_ticket_in_progress_blocks_backward(
+        self, e2e_app_with_auto_ticket: KaganApp
+    ):
+        """AUTO ticket in IN_PROGRESS should block backward movement via [."""
+        async with e2e_app_with_auto_ticket.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            # Find the AUTO ticket in IN_PROGRESS and focus it
+            cards = list(pilot.app.screen.query(TicketCard))
+            auto_ticket = None
+            for card in cards:
+                if (
+                    card.ticket
+                    and card.ticket.status == TicketStatus.IN_PROGRESS
+                    and card.ticket.ticket_type == TicketType.AUTO
+                ):
+                    card.focus()
+                    auto_ticket = card.ticket
+                    break
+            await pilot.pause()
+            assert auto_ticket is not None, "Should have AUTO ticket in IN_PROGRESS"
+
+            # Try to move backward - should be blocked
+            await pilot.press("left_square_bracket")
+            await pilot.pause()
+
+            # Ticket should still be in IN_PROGRESS (not moved to BACKLOG)
+            in_progress = await get_tickets_by_status(pilot, TicketStatus.IN_PROGRESS)
+            assert any(t.id == auto_ticket.id for t in in_progress)
+
+    async def test_done_ticket_backward_shows_confirm(self, e2e_app_with_done_ticket: KaganApp):
+        """DONE ticket backward movement should show confirmation dialog."""
+        async with e2e_app_with_done_ticket.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            # Find the DONE ticket and focus it
+            cards = list(pilot.app.screen.query(TicketCard))
+            done_ticket = None
+            for card in cards:
+                if card.ticket and card.ticket.status == TicketStatus.DONE:
+                    card.focus()
+                    done_ticket = card.ticket
+                    break
+            await pilot.pause()
+            assert done_ticket is not None, "Should have DONE ticket"
+
+            # Press [ to move backward - should show confirmation
+            await pilot.press("left_square_bracket")
+            await pilot.pause()
+
+            # Should show confirmation modal
+            assert is_on_screen(pilot, "ConfirmModal")
+
+    async def test_done_ticket_backward_jumps_to_backlog(self, e2e_app_with_done_ticket: KaganApp):
+        """DONE ticket backward movement should jump directly to BACKLOG."""
+        async with e2e_app_with_done_ticket.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            # Find the DONE ticket and focus it
+            cards = list(pilot.app.screen.query(TicketCard))
+            done_ticket = None
+            for card in cards:
+                if card.ticket and card.ticket.status == TicketStatus.DONE:
+                    card.focus()
+                    done_ticket = card.ticket
+                    break
+            await pilot.pause()
+            assert done_ticket is not None, "Should have DONE ticket"
+
+            # Press [ to move backward
+            await pilot.press("left_square_bracket")
+            await pilot.pause()
+
+            # Confirm the action
+            await pilot.press("y")
+            await pilot.pause()
+
+            # Ticket should now be in BACKLOG (not REVIEW, which is the previous status)
+            backlog = await get_tickets_by_status(pilot, TicketStatus.BACKLOG)
+            assert any(t.id == done_ticket.id for t in backlog)
+
+    async def test_pair_ticket_in_progress_forward_shows_confirm(
+        self, e2e_app_with_tickets: KaganApp
+    ):
+        """PAIR ticket in IN_PROGRESS forward movement should show warning."""
+        async with e2e_app_with_tickets.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            # Find a PAIR ticket in IN_PROGRESS and focus it
+            cards = list(pilot.app.screen.query(TicketCard))
+            pair_ticket = None
+            for card in cards:
+                if (
+                    card.ticket
+                    and card.ticket.status == TicketStatus.IN_PROGRESS
+                    and card.ticket.ticket_type == TicketType.PAIR
+                ):
+                    card.focus()
+                    pair_ticket = card.ticket
+                    break
+            await pilot.pause()
+            assert pair_ticket is not None, "Should have PAIR ticket in IN_PROGRESS"
+
+            # Press ] to move forward - should show warning confirmation
+            await pilot.press("right_square_bracket")
+            await pilot.pause()
+
+            # Should show confirmation modal
+            assert is_on_screen(pilot, "ConfirmModal")
+
+
 class TestTicketTypeToggle:
     """Test ticket type toggle."""
 
@@ -165,7 +312,8 @@ class TestTicketTypeToggle:
             original_type = ticket_before.ticket_type
             await pilot.press("t")
             await pilot.pause()
-            updated = await pilot.app.state_manager.get_ticket(ticket_before.id)
+            app = cast("KaganApp", pilot.app)
+            updated = await app.state_manager.get_ticket(ticket_before.id)
             assert updated is not None
             if original_type == TicketType.AUTO:
                 assert updated.ticket_type == TicketType.PAIR

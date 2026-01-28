@@ -1,7 +1,7 @@
 # Configuration
 
-Kagan reads optional configuration from `.kagan/config.toml`. If the file is missing,
-defaults are used.
+Kagan reads configuration from `.kagan/config.toml`. On first run, Kagan creates this file
+with sensible defaults via the welcome screen.
 
 ## Default paths
 
@@ -10,50 +10,86 @@ defaults are used.
 - Lock file: `.kagan/kagan.lock`
 - Worktrees: `.kagan/worktrees/`
 - Custom prompts: `.kagan/prompts/`
-- Hat role prompts: `.kagan/prompts/roles/`
 
 ## General settings
 
 ```toml
 [general]
-max_concurrent_agents = 3
+# Enable AUTO mode scheduler (runs agents automatically)
+auto_start = false
+
 # Branch to use for worktrees and merges
 default_base_branch = "main"
-# Auto-run the scheduler loop
-auto_start = false
-# Max iterations per ticket in auto mode
-max_iterations = 10
-# Delay between iterations (seconds)
-iteration_delay_seconds = 2.0
+
+# Default agent for new tickets
+default_worker_agent = "claude"
 ```
+
+### Settings explained
+
+| Setting | Default | Description |
+| ------- | ------- | ----------- |
+| `auto_start` | `false` | When `true`, the scheduler runs agents on AUTO tickets automatically |
+| `default_base_branch` | `"main"` | Git branch for creating worktrees and merging completed work |
+| `default_worker_agent` | `"claude"` | Which configured agent to use by default |
 
 ## Agents
 
-Agents are ACP-compatible processes that Kagan can start. The first `active = true`
-agent is used as the default.
+Agents are ACP-compatible processes that Kagan can start. Configure at least one agent
+with `active = true`.
 
 ```toml
 [agents.claude]
 identity = "anthropic.claude"
 name = "Claude Code"
 short_name = "claude"
-protocol = "acp"
 active = true
 
 [agents.claude.run_command]
 "*" = "claude"
-# You can also provide OS-specific values:
+# OS-specific commands:
 # linux = "claude"
 # macos = "claude"
 # windows = "claude.exe"
 ```
 
+### Agent configuration options
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `identity` | Yes | Unique identifier for the agent |
+| `name` | Yes | Display name shown in UI |
+| `short_name` | Yes | Short name for compact display |
+| `active` | No | Whether this agent is available (default: `true`) |
+| `run_command` | Yes | Command to start the agent (supports OS-specific values) |
+
+### Multiple agents
+
+You can configure multiple agents and select them per-ticket:
+
+```toml
+[agents.claude]
+identity = "anthropic.claude"
+name = "Claude Code"
+short_name = "claude"
+active = true
+
+[agents.claude.run_command]
+"*" = "claude"
+
+[agents.codex]
+identity = "openai.codex"
+name = "OpenAI Codex"
+short_name = "codex"
+active = true
+
+[agents.codex.run_command]
+"*" = "codex"
+```
+
 ## Prompts
 
 Kagan's AI agent prompts can be customized through TOML config or markdown files.
-
-On first setup (via the welcome screen), Kagan automatically creates `.kagan/prompts/`
-with the default templates so you can customize them immediately.
 
 **Priority order:** User files > TOML inline > Built-in defaults
 
@@ -82,64 +118,111 @@ File overrides take priority over TOML inline prompts.
 ### Template variables
 
 **Worker template** (`worker.md`):
-- `{iteration}` - Current iteration number
-- `{max_iterations}` - Maximum allowed iterations
-- `{title}` - Ticket title
-- `{description}` - Ticket description
-- `{scratchpad}` - Previous progress notes
-- `{hat_instructions}` - Role-specific instructions (from hat config)
+
+| Variable | Description |
+| -------- | ----------- |
+| `{iteration}` | Current iteration number |
+| `{max_iterations}` | Maximum allowed iterations |
+| `{title}` | Ticket title |
+| `{description}` | Ticket description |
+| `{scratchpad}` | Previous progress notes |
 
 **Reviewer template** (`reviewer.md`):
-- `{title}` - Ticket title
-- `{ticket_id}` - Ticket ID
-- `{description}` - Ticket description
-- `{commits}` - List of commits
-- `{diff_summary}` - Summary of changes
+
+| Variable | Description |
+| -------- | ----------- |
+| `{title}` | Ticket title |
+| `{ticket_id}` | Ticket ID |
+| `{description}` | Ticket description |
+| `{commits}` | List of commits |
+| `{diff_summary}` | Summary of changes |
 
 **Planner** (`planner.md`):
 - No variables - customize the planner's personality and guidelines
-- **Note:** The XML output format (`<ticket>`, `<title>`, etc.) is automatically appended
-  and cannot be changed - Kagan needs this format to parse tickets correctly
+- The XML output format is automatically appended and cannot be changed
 
-## Hats (optional role prompts)
+## Session configuration
 
-Hats let you add role-specific instructions that are injected into worker prompts.
-You can define instructions inline or reference a file.
-
-### Inline system prompt
+For PAIR mode tmux sessions:
 
 ```toml
-[hats.backend]
-agent_command = "claude"
-args = ["--model", "sonnet"]
-system_prompt = "You are a backend engineer. Focus on API design and database optimization."
+[session]
+# Startup prompt sent to the agent when session opens
+startup_prompt = "You are working on ticket: {title}\n\nDescription:\n{description}"
 ```
 
-### File reference
+### Session template variables
 
-```toml
-[hats.frontend]
-agent_command = "claude"
-prompt_file = "frontend.md"  # Loads .kagan/prompts/roles/frontend.md
-```
+| Variable | Description |
+| -------- | ----------- |
+| `{title}` | Ticket title |
+| `{description}` | Ticket description |
+| `{ticket_id}` | Ticket ID |
 
-Place hat prompt files in `.kagan/prompts/roles/`:
-
-```
-.kagan/prompts/roles/
-├── frontend.md
-├── backend.md
-└── devops.md
-```
-
-The `.md` extension is optional in the config - both `prompt_file = "frontend"` and
-`prompt_file = "frontend.md"` work.
-
-**Priority:** `prompt_file` takes precedence over `system_prompt` if both are set.
-
-## Minimal config
+## Example: Full configuration
 
 ```toml
 [general]
-max_concurrent_agents = 3
+auto_start = false
+default_base_branch = "main"
+default_worker_agent = "claude"
+
+[agents.claude]
+identity = "anthropic.claude"
+name = "Claude Code"
+short_name = "claude"
+active = true
+
+[agents.claude.run_command]
+"*" = "claude"
+macos = "claude"
+linux = "claude"
+
+[prompts]
+planner_system_prompt = """
+You are a senior software architect. When creating tickets:
+- Break large features into small, focused tasks
+- Include acceptance criteria
+- Consider edge cases and error handling
+"""
+
+[session]
+startup_prompt = """
+You are working on: {title}
+
+{description}
+
+Use the Kagan MCP tools to:
+- get_context: See ticket details and project info
+- update_scratchpad: Save progress notes
+- request_review: Signal completion
+"""
 ```
+
+## Minimal config
+
+For manual-only workflows (no AUTO mode):
+
+```toml
+[general]
+default_base_branch = "main"
+default_worker_agent = "claude"
+
+[agents.claude]
+identity = "anthropic.claude"
+name = "Claude Code"
+short_name = "claude"
+active = true
+
+[agents.claude.run_command]
+"*" = "claude"
+```
+
+## Environment variables
+
+Kagan respects these environment variables (set in tmux sessions):
+
+| Variable | Description |
+| -------- | ----------- |
+| `KAGAN_TICKET_ID` | Current ticket ID |
+| `KAGAN_WORKTREE_PATH` | Path to ticket worktree |

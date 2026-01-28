@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from textual.containers import Container, ScrollableContainer, Vertical
+from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label
@@ -87,9 +88,9 @@ class KanbanColumn(Widget):
     def update_tickets(self, tickets: list[Ticket]) -> None:
         """Update tickets with minimal DOM changes - no full recompose.
 
-        Only adds new cards and removes cards for tickets that moved out.
-        Existing cards are kept as-is since ticket metadata rarely changes
-        (status changes cause tickets to move between columns).
+        - Updates existing cards when ticket metadata changes
+        - Adds new cards for tickets that weren't here before
+        - Removes cards for tickets that moved out
         """
         new_tickets = [t for t in tickets if t.status == self.status]
         self._tickets = new_tickets
@@ -98,23 +99,31 @@ class KanbanColumn(Widget):
         try:
             header = self.query_one(f"#header-{self.status.value.lower()}", _NSLabel)
             header.update(f"{STATUS_LABELS[self.status]} ({len(new_tickets)})")
-        except Exception:
+        except NoMatches:
             pass
 
         # Get current cards and build lookup
         current_cards = {card.ticket.id: card for card in self.get_cards() if card.ticket}
-        new_ticket_ids = {t.id for t in new_tickets}
+        new_tickets_by_id = {t.id: t for t in new_tickets}
+        new_ticket_ids = set(new_tickets_by_id.keys())
         current_ids = set(current_cards.keys())
 
         try:
             content = self.query_one(f"#content-{self.status.value.lower()}", _NSScrollable)
-        except Exception:
+        except NoMatches:
             return
 
         # Remove cards for tickets no longer in this column
         for ticket_id in current_ids - new_ticket_ids:
             card = current_cards[ticket_id]
             card.remove()
+
+        # Update existing cards with new ticket data (handles metadata changes like type)
+        for ticket_id in current_ids & new_ticket_ids:
+            card = current_cards[ticket_id]
+            new_ticket = new_tickets_by_id[ticket_id]
+            # Update the ticket reactive - this triggers recompose if needed
+            card.ticket = new_ticket
 
         # Add new cards only (tickets that weren't here before)
         for ticket in new_tickets:
@@ -130,7 +139,7 @@ class KanbanColumn(Widget):
             if new_tickets:
                 # Have tickets now, remove empty state
                 empty_container.remove()
-        except Exception:
+        except NoMatches:
             pass
 
         # If no tickets and no empty container, add empty state

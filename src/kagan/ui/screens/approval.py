@@ -10,6 +10,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Static
 
+from kagan.constants import APPROVAL_TITLE_MAX_LENGTH
 from kagan.database.models import TicketCreate, TicketType
 
 if TYPE_CHECKING:
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 
 class ApprovalScreen(ModalScreen[list[TicketCreate] | str | None]):
     """Review and approve proposed tickets.
-    
+
     Returns:
         list[TicketCreate]: Approved tickets (possibly with modified types)
         "refine": User wants to continue refining with agent
@@ -63,9 +64,13 @@ class ApprovalScreen(ModalScreen[list[TicketCreate] | str | None]):
         for i, ticket in enumerate(self._tickets, 1):
             type_label = "AUTO" if ticket.ticket_type == TicketType.AUTO else "PAIR"
             priority_label = ticket.priority.label
+            max_len = APPROVAL_TITLE_MAX_LENGTH
+            title_display = (
+                ticket.title[:max_len] + "..." if len(ticket.title) > max_len else ticket.title
+            )
             table.add_row(
                 str(i),
-                ticket.title[:45] + "..." if len(ticket.title) > 45 else ticket.title,
+                title_display,
                 type_label,
                 priority_label,
             )

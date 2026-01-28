@@ -57,52 +57,49 @@ When creating tickets, you MUST output them in this EXACT XML format:
 
 ## Priority: low | medium | high
 
-IMPORTANT: Always output the actual <plan> XML block with tickets. Never just describe what tickets you would create.
+IMPORTANT: Always output the actual <plan> XML block with tickets.
+Never just describe what tickets you would create.
 """
-
-# Alias for backward compatibility with prompt loader
-PLANNER_PREAMBLE = PLANNER_DIALOG_PROMPT
-PLANNER_SYSTEM_PROMPT = PLANNER_DIALOG_PROMPT
 
 
 def parse_plan(response: str) -> list[TicketCreate]:
     """Parse multiple tickets from agent response using stdlib XML parser.
-    
+
     Returns empty list if no <plan> block found or parsing fails.
     """
-    
+
     match = re.search(r"<plan>(.*?)</plan>", response, re.DOTALL | re.IGNORECASE)
     if not match:
         return []
-    
+
     try:
         root = ET.fromstring(f"<root>{match.group(1)}</root>")
     except ET.ParseError:
         return []
-    
+
     return [_element_to_ticket(el) for el in root.findall("ticket")]
 
 
 def _element_to_ticket(el: ET.Element) -> TicketCreate:
     """Convert XML element to TicketCreate. Pure function."""
     from kagan.database.models import TicketType
-    
+
     def text(tag: str, default: str = "") -> str:
         child = el.find(tag)
         return (child.text or "").strip() if child is not None else default
-    
+
     def criteria() -> list[str]:
         ac = el.find("acceptance_criteria")
         if ac is None:
             return []
         return [c.text.strip() for c in ac.findall("criterion") if c.text]
-    
+
     type_str = text("type", "PAIR").upper()
     ticket_type = TicketType.AUTO if type_str == "AUTO" else TicketType.PAIR
-    
+
     priority_map = {"low": TicketPriority.LOW, "high": TicketPriority.HIGH}
     priority = priority_map.get(text("priority", "medium").lower(), TicketPriority.MEDIUM)
-    
+
     return TicketCreate(
         title=text("title", "Untitled")[:200],
         description=text("description"),

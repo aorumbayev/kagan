@@ -104,20 +104,6 @@ class InstanceLock:
         self.release()
 
 
-def check_single_instance(lock_path: str | Path = DEFAULT_LOCK_PATH) -> InstanceLock:
-    """
-    Convenience function to check and acquire instance lock.
-
-    Returns the lock object (caller should release on exit).
-
-    Raises:
-        InstanceLockError: If another instance is already running.
-    """
-    lock = InstanceLock(lock_path)
-    lock.acquire()
-    return lock
-
-
 def exit_if_already_running(lock_path: str | Path = DEFAULT_LOCK_PATH) -> InstanceLock:
     """
     Check for another instance and exit with error message if found.

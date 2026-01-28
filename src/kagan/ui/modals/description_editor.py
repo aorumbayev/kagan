@@ -4,7 +4,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Label, Static, TextArea
+from textual.widgets import Footer, Label, Static, TextArea
 
 
 class DescriptionEditorModal(ModalScreen[str | None]):
@@ -46,6 +46,8 @@ class DescriptionEditorModal(ModalScreen[str | None]):
                 yield Static("", id="cursor-position")
                 yield Static("", id="status-spacer")
                 yield Static("", id="line-count")
+
+        yield Footer()
 
     def on_mount(self) -> None:
         """Focus the textarea on mount and update status."""

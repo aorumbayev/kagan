@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Label, RichLog
+from textual.widgets import Footer, Label, RichLog
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -29,6 +29,7 @@ class DiffModal(ModalScreen[None]):
         with Vertical(id="diff-container"):
             yield Label(self._title, classes="modal-title")
             yield RichLog(id="diff-log", wrap=True, highlight=True)
+        yield Footer()
 
     def on_mount(self) -> None:
         log = self.query_one("#diff-log", RichLog)

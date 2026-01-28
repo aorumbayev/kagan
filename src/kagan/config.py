@@ -37,6 +37,7 @@ class GeneralConfig(BaseModel):
     max_concurrent_agents: int = Field(default=3)
     default_base_branch: str = Field(default="main")
     auto_start: bool = Field(default=False)
+    auto_approve: bool = Field(default=False)
     auto_merge: bool = Field(default=False)
     max_iterations: int = Field(default=10)
     iteration_delay_seconds: float = Field(default=2.0)
@@ -58,7 +59,7 @@ class AgentConfig(BaseModel):
     protocol: Literal["acp"] = Field(default="acp", description="Protocol type")
     run_command: dict[str, str] = Field(
         default_factory=dict,
-        description="OS-specific ACP commands for AUTO mode (e.g., 'claude-code-acp')",
+        description="OS-specific ACP commands for AUTO mode (e.g., 'npx claude-code-acp')",
     )
     interactive_command: dict[str, str] = Field(
         default_factory=dict,
@@ -114,6 +115,6 @@ def get_fallback_agent_config() -> AgentConfig:
         identity="claude.com",
         name="Claude Code",
         short_name="claude",
-        run_command={"*": "claude-code-acp"},
+        run_command={"*": "npx claude-code-acp"},
         interactive_command={"*": "claude"},
     )

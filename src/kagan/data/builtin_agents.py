@@ -15,25 +15,33 @@ class BuiltinAgent:
     author: str
     description: str
     install_command: str
+    mcp_config_file: str = ".mcp.json"  # Filename for MCP config
+    mcp_config_format: str = "claude"  # Format: "claude" | "opencode"
 
 
 # Built-in agents that ship with Kagan
 # run_command: ACP protocol command for AUTO mode (programmatic)
 # interactive_command: CLI command for PAIR mode (interactive tmux session)
 # NOTE: Only OpenCode and Claude Code are supported. Other CLI tools removed.
+#
+# MCP config formats:
+# - claude: Uses .mcp.json with {"mcpServers": {"name": {"command": ..., "args": [...]}}}
+# - opencode: Uses opencode.json with {"mcp": {"name": {"type": "local", "command": [...]}}}
 BUILTIN_AGENTS: dict[str, BuiltinAgent] = {
     "claude": BuiltinAgent(
         config=AgentConfig(
             identity="claude.com",
             name="Claude Code",
             short_name="claude",
-            run_command={"*": "claude-code-acp"},
+            run_command={"*": "npx claude-code-acp"},
             interactive_command={"*": "claude"},
             active=True,
         ),
         author="Anthropic",
         description="Agentic AI for coding tasks",
         install_command="curl -fsSL https://claude.ai/install.sh | bash",
+        mcp_config_file=".mcp.json",
+        mcp_config_format="claude",
     ),
     "opencode": BuiltinAgent(
         config=AgentConfig(
@@ -47,6 +55,8 @@ BUILTIN_AGENTS: dict[str, BuiltinAgent] = {
         author="SST",
         description="Multi-model CLI with TUI",
         install_command="npm i -g opencode-ai",
+        mcp_config_file="opencode.json",
+        mcp_config_format="opencode",
     ),
 }
 

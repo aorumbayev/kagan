@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import shlex
 from pathlib import Path
-from shutil import which
 
 from textual.app import App
 from textual.binding import Binding
@@ -12,15 +10,18 @@ from textual.signal import Signal
 
 from kagan.agents.scheduler import Scheduler
 from kagan.agents.worktree import WorktreeManager
-from kagan.config import KaganConfig, get_os_value
-from kagan.constants import DEFAULT_CONFIG_PATH, DEFAULT_DB_PATH, DEFAULT_LOCK_PATH
-from kagan.data.builtin_agents import get_builtin_agent
-from kagan.database import KnowledgeBase, StateManager
+from kagan.config import KaganConfig
+from kagan.constants import (
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_DB_PATH,
+    DEFAULT_LOCK_PATH,
+    TICK_INTERVAL,
+)
+from kagan.database import StateManager
 from kagan.git_utils import has_git_repo, init_git_repo
 from kagan.lock import InstanceLock, exit_if_already_running
 from kagan.sessions import SessionManager
 from kagan.theme import KAGAN_THEME
-from kagan.ui.screens.agent_missing import AgentMissingScreen, MissingAgentInfo
 from kagan.ui.screens.kanban import KanbanScreen
 
 
@@ -54,7 +55,6 @@ class KaganApp(App):
         self.config_path = Path(config_path)
         self.lock_path = Path(lock_path) if lock_path else None
         self._state_manager: StateManager | None = None
-        self._knowledge_base: KnowledgeBase | None = None
         self._worktree_manager: WorktreeManager | None = None
         self._session_manager: SessionManager | None = None
         self._scheduler: Scheduler | None = None
@@ -65,11 +65,6 @@ class KaganApp(App):
     def state_manager(self) -> StateManager:
         assert self._state_manager is not None
         return self._state_manager
-
-    @property
-    def knowledge_base(self) -> KnowledgeBase:
-        assert self._knowledge_base is not None
-        return self._knowledge_base
 
     @property
     def worktree_manager(self) -> WorktreeManager:
@@ -103,12 +98,6 @@ class KaganApp(App):
         """Initialize all app components."""
         self.config = KaganConfig.load(self.config_path)
         self.log("Config loaded", path=str(self.config_path))
-
-        missing_agents = self._get_missing_agents()
-        if missing_agents:
-            await self.push_screen(AgentMissingScreen(missing_agents))
-            return
-
         self.log.debug("Config settings", auto_start=self.config.general.auto_start)
 
         project_root = self.config_path.parent.parent
@@ -128,9 +117,6 @@ class KaganApp(App):
             await self._state_manager.initialize()
             self.log("Database initialized", path=str(self.db_path))
 
-        if self._knowledge_base is None:
-            self._knowledge_base = KnowledgeBase(self._state_manager.connection)
-
         # Project root is the parent of .kagan directory (where config lives)
         if self._worktree_manager is None:
             self._worktree_manager = WorktreeManager(repo_root=project_root)
@@ -146,10 +132,11 @@ class KaganApp(App):
                 state_manager=self._state_manager,
                 worktree_manager=self._worktree_manager,
                 config=self.config,
+                session_manager=self._session_manager,
                 on_ticket_changed=lambda: self.ticket_changed_signal.publish(""),
             )
-            # Start scheduler tick loop (every 5 seconds)
-            self.set_interval(5.0, self._scheduler_tick)
+            # Start scheduler tick loop
+            self.set_interval(TICK_INTERVAL, self._scheduler_tick)
             self.log("Scheduler initialized", auto_start=self.config.general.auto_start)
 
         # Chat-first boot: show PlannerScreen if board is empty, else KanbanScreen
@@ -212,47 +199,6 @@ class KaganApp(App):
             await self._state_manager.close()
         if self._instance_lock:
             self._instance_lock.release()
-
-    def _get_missing_agents(self) -> list[MissingAgentInfo]:
-        selected = [self.config.general.default_worker_agent]
-
-        missing: list[MissingAgentInfo] = []
-        seen: set[str] = set()
-
-        for agent_name in selected:
-            if agent_name in seen:
-                continue
-            seen.add(agent_name)
-
-            agent_config = self.config.get_agent(agent_name)
-            if agent_config is None:
-                continue
-
-            run_command = get_os_value(agent_config.run_command)
-            if not run_command:
-                missing.append(
-                    MissingAgentInfo(
-                        name=agent_config.name,
-                        short_name=agent_config.short_name,
-                        run_command="",
-                        install_command=None,
-                    )
-                )
-                continue
-
-            command_parts = shlex.split(run_command)
-            if not command_parts or which(command_parts[0]) is None:
-                builtin = get_builtin_agent(agent_name)
-                missing.append(
-                    MissingAgentInfo(
-                        name=agent_config.name,
-                        short_name=agent_config.short_name,
-                        run_command=run_command,
-                        install_command=builtin.install_command if builtin else None,
-                    )
-                )
-
-        return missing
 
 
 def run() -> None:

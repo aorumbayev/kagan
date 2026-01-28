@@ -11,7 +11,15 @@ from textual.reactive import reactive, var
 from textual.widget import Widget
 from textual.widgets import Label
 
-from kagan.constants import COLUMN_ORDER
+from kagan.constants import (
+    CARD_BACKEND_MAX_LENGTH,
+    CARD_DESC_MAX_LENGTH,
+    CARD_HAT_MAX_LENGTH,
+    CARD_ID_MAX_LENGTH,
+    CARD_REVIEW_MAX_LENGTH,
+    CARD_TITLE_MAX_LENGTH,
+    COLUMN_ORDER,
+)
 from kagan.database.models import Ticket, TicketPriority, TicketStatus, TicketType
 
 if TYPE_CHECKING:
@@ -25,7 +33,7 @@ class TicketCard(Widget):
 
     can_focus = True
 
-    ticket: reactive[Ticket | None] = reactive(None)
+    ticket: reactive[Ticket | None] = reactive(None, recompose=True)
     is_agent_active: var[bool] = var(False, toggle_class="agent-active")
     iteration_info: reactive[str] = reactive("")
     _dragging: bool = False
@@ -65,26 +73,28 @@ class TicketCard(Widget):
 
         # Line 1: Type badge + Title (truncated to fit)
         type_badge = self._get_type_badge()
-        title_text = f"{type_badge} {self._truncate_title(self.ticket.title, 16)}"
+        title_text = (
+            f"{type_badge} {self._truncate_title(self.ticket.title, CARD_TITLE_MAX_LENGTH)}"
+        )
         yield Label(title_text, classes="card-title")
 
         # Line 2: Priority icon + description
         priority_class = self._get_priority_class()
         priority_icon = {"LOW": "▽", "MED": "◇", "HIGH": "△"}[self.ticket.priority_label]
         desc = self.ticket.description or "No description"
-        desc_text = f"{priority_icon} {self._truncate_title(desc, 15)}"
+        desc_text = f"{priority_icon} {self._truncate_title(desc, CARD_DESC_MAX_LENGTH)}"
         yield Label(desc_text, classes=f"card-desc {priority_class}")
 
         # Line 3: backend/hat + ID + date
         hat = getattr(self.ticket, "assigned_hat", None) or ""
-        hat_display = hat[:8] if hat else ""  # Truncate hat to 8 chars
-        ticket_id = f"#{self.ticket.short_id[:4]}"  # Short 4-char ID
+        hat_display = hat[:CARD_HAT_MAX_LENGTH] if hat else ""
+        ticket_id = f"#{self.ticket.short_id[:CARD_ID_MAX_LENGTH]}"
         date_str = self.ticket.created_at.strftime("%m/%d")
         backend = getattr(self.ticket, "agent_backend", None) or ""
 
         # Build meta line with spacing
         if backend:
-            meta_text = f"{backend[:6]} {ticket_id} {date_str}"
+            meta_text = f"{backend[:CARD_BACKEND_MAX_LENGTH]} {ticket_id} {date_str}"
         elif hat_display:
             meta_text = f"{hat_display}  {ticket_id} {date_str}"
         else:
@@ -96,7 +106,7 @@ class TicketCard(Widget):
         if self.ticket.status == TicketStatus.REVIEW:
             summary = self.ticket.review_summary or "No summary"
             yield Label(
-                self._truncate_title(f"Summary: {summary}", 18),
+                self._truncate_title(f"Summary: {summary}", CARD_REVIEW_MAX_LENGTH),
                 classes="card-review",
             )
             yield Label(self._format_checks_status(), classes="card-checks")
@@ -175,8 +185,9 @@ class TicketCard(Widget):
         """Determine target column based on screen X position."""
         try:
             screen_width = self.app.size.width
-            column_width = screen_width // 4
-            column_index = min(3, max(0, screen_x // column_width))
+            num_columns = len(COLUMN_ORDER)
+            column_width = screen_width // num_columns
+            column_index = min(num_columns - 1, max(0, screen_x // column_width))
             return COLUMN_ORDER[column_index]
         except (NoMatches, IndexError, ZeroDivisionError):
             return None

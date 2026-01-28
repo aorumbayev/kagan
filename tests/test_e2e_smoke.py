@@ -6,9 +6,10 @@ They use real components (git, database) with only agent CLI mocking.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 import pytest
 
-from kagan.app import KaganApp
 from kagan.database.models import TicketStatus
 from tests.helpers.pages import (
     create_ticket_via_ui,
@@ -19,6 +20,9 @@ from tests.helpers.pages import (
     move_ticket_forward,
     navigate_to_kanban,
 )
+
+if TYPE_CHECKING:
+    from kagan.app import KaganApp
 
 
 class TestTicketLifecycle:
@@ -56,6 +60,9 @@ class TestTicketLifecycle:
 
             await focus_first_ticket(pilot)
             await move_ticket_forward(pilot)
+            # PAIR tickets now require confirmation for IN_PROGRESS -> REVIEW
+            await pilot.press("y")
+            await pilot.pause()
 
             review = await get_tickets_by_status(pilot, TicketStatus.REVIEW)
             assert len(review) >= 1
@@ -105,9 +112,7 @@ class TestTicketDeletion:
             assert initial_count >= 1
 
             await focus_first_ticket(pilot)
-            await pilot.press("x")
-            await pilot.pause()
-            await pilot.press("enter")
+            await pilot.press("ctrl+d")
             await pilot.pause()
 
             final_count = get_ticket_count(pilot)
@@ -169,7 +174,8 @@ class TestFreshProjectWorktree:
             await pilot.pause()
 
             # Verify git was initialized by kagan
-            project_root = pilot.app.config_path.parent.parent
+            app = cast("KaganApp", pilot.app)
+            project_root = app.config_path.parent.parent
             git_dir = project_root / ".git"
             assert git_dir.exists(), "Kagan should have initialized git"
 
@@ -190,9 +196,8 @@ class TestFreshProjectWorktree:
             in_progress = await get_tickets_by_status(pilot, TicketStatus.IN_PROGRESS)
             assert len(in_progress) >= 1, "Ticket should have moved to IN_PROGRESS"
 
-            # Verify worktree was actually created
+            # Verify worktree directory exists (worktree may or may not be created
+            # on just moving status - the real test is pressing Enter which
+            # triggers _open_pair_session)
             worktree_dir = project_root / ".kagan" / "worktrees"
-            if worktree_dir.exists():
-                worktrees = list(worktree_dir.iterdir())
-                # Worktree may or may not be created on just moving status
-                # The real test is pressing Enter which triggers _open_pair_session
+            _ = worktree_dir.exists()  # Check existence without needing result

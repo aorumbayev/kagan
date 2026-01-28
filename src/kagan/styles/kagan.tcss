@@ -13,6 +13,11 @@ $priority-medium-text: $background;
 $priority-low: $border;
 $priority-low-text: $text-muted;
 
+/* Status badge text colors - use dark text for visibility on colored backgrounds */
+$success-text: $background;
+$error-text: $text;
+$warning-text: $background;
+
 /* Common spacing */
 $modal-padding: 1 2;
 $card-margin: 0 0 1 0;
@@ -102,6 +107,11 @@ FooterKey > .footer-key--key {
 
 FooterKey > .footer-key--description {
     color: $text-disabled;
+}
+
+/* Modal Footer - dock to bottom of screen */
+ModalScreen Footer {
+    dock: bottom;
 }
 
 /* =============================================================================
@@ -357,6 +367,42 @@ TicketDetailsModal .ticket-description {
     overflow-y: auto;
 }
 
+/* Review results section */
+TicketDetailsModal .review-results-section {
+    width: 100%;
+    height: auto;
+    padding: 0 1;
+}
+
+TicketDetailsModal .review-status-row {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+
+TicketDetailsModal .review-summary-text {
+    padding: 1;
+    background: $surface;
+    color: $text;
+    width: 100%;
+    height: auto;
+}
+
+TicketDetailsModal .badge-checks-passed {
+    background: $success;
+    color: $success-text;
+}
+
+TicketDetailsModal .badge-checks-failed {
+    background: $error;
+    color: $error-text;
+}
+
+TicketDetailsModal .badge-checks-pending {
+    background: $warning;
+    color: $warning-text;
+}
+
 TicketDetailsModal .meta-row {
     width: 100%;
     height: auto;
@@ -568,6 +614,7 @@ DescriptionEditorModal #line-count {
 KanbanScreen {
     layout: vertical;
     background: $background;
+    layers: base overlay;
 }
 
 KanbanScreen .size-warning {
@@ -757,74 +804,91 @@ WelcomeScreen {
     background: $background;
 }
 
-/* Instance Locked Screen */
-#lock-container {
+/* Troubleshooting Screen */
+#troubleshoot-container {
     width: 100%;
     height: 1fr;
     align: center middle;
 }
 
-#lock-card {
-    width: 60;
+#troubleshoot-card {
+    width: 80;
     height: auto;
     border: thick $error;
     background: $surface;
     padding: 2 4;
 }
 
-#lock-title {
+#troubleshoot-logo {
     text-align: center;
-    text-style: bold;
+    color: $error;
     width: 100%;
     padding-bottom: 1;
 }
 
-#lock-message {
-    text-align: center;
-    width: 100%;
-    color: $text-muted;
-}
-
-#lock-hint {
-    text-align: center;
-    width: 100%;
-    padding-top: 1;
-    color: $text-muted;
-}
-
-/* Missing Agent Screen */
-#agent-missing-container {
-    width: 100%;
-    height: 1fr;
-    align: center middle;
-}
-
-#agent-missing-card {
-    width: 70;
-    height: auto;
-    border: thick $error;
-    background: $surface;
-    padding: 2 4;
-}
-
-#agent-missing-title {
+#troubleshoot-title {
     text-align: center;
     text-style: bold;
+    color: $error;
     width: 100%;
     padding-bottom: 1;
 }
 
-#agent-missing-message {
+#troubleshoot-count {
     text-align: center;
-    width: 100%;
     color: $text-muted;
+    width: 100%;
+    padding-bottom: 1;
 }
 
-#agent-missing-hint {
-    text-align: center;
+#troubleshoot-issues {
+    max-height: 50%;
+    width: 100%;
+}
+
+.issue-card {
+    border: solid $border;
+    background: $background;
+    margin-bottom: 1;
+    padding: 1;
+}
+
+.issue-card-title {
+    text-style: bold;
+    color: $warning;
+    width: 100%;
+}
+
+.issue-card-message {
+    color: $text;
     width: 100%;
     padding-top: 1;
+}
+
+.issue-card-hint {
     color: $text-muted;
+    text-style: italic;
+    width: 100%;
+    padding-top: 1;
+}
+
+.issue-card-url {
+    color: $primary;
+    width: 100%;
+}
+
+#troubleshoot-resolve-hint {
+    text-align: center;
+    color: $text;
+    width: 100%;
+    padding-top: 1;
+}
+
+#troubleshoot-exit-hint {
+    text-align: center;
+    color: $text-muted;
+    width: 100%;
+    padding-top: 1;
 }
 
 #welcome-container {
@@ -863,6 +927,22 @@ WelcomeScreen {
 }
 
 .info-label {
+    color: $text-muted;
+}
+
+.settings-header {
+    margin-top: 1;
+}
+
+.toggle-row {
+    width: 100%;
+    height: auto;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+.toggle-text {
+    padding-left: 1;
     color: $text-muted;
 }
 
@@ -1090,4 +1170,79 @@ RejectionInputModal .button-row {
 
 RejectionInputModal .button-row Button {
     margin: 0 1;
+}
+
+/* =============================================================================
+   STREAMING OUTPUT WIDGET
+   ============================================================================= */
+
+/* StreamingOutput widget */
+StreamingOutput {
+    height: 1fr;
+    width: 1fr;
+}
+
+StreamingOutput > ScrollableContainer {
+    height: 1fr;
+    padding: 0 1;
+    scrollbar-gutter: stable;
+}
+
+StreamingOutput > ScrollableContainer > Markdown {
+    padding: 0;
+}
+
+StreamingOutput > RichLog {
+    height: auto;
+    max-height: 8;
+    border-top: solid $surface-lighten-2;
+}
+
+/* =============================================================================
+   SEARCH BAR
+   ============================================================================= */
+
+/* SearchBar widget - hidden by default */
+SearchBar {
+    dock: top;
+    width: 100%;
+    height: 3;
+    display: none;
+    padding: 0 1;
+    background: $panel;
+}
+
+SearchBar.visible {
+    display: block;
+}
+
+SearchBar Input {
+    width: 100%;
+    border: round $primary;
+    background: $background;
+}
+
+SearchBar Input:focus {
+    border: round $secondary;
+}
+
+/* =============================================================================
+   LEADER KEY HINT
+   ============================================================================= */
+
+/* Leader mode hint overlay - layer ensures it appears above footer */
+.leader-hint {
+    dock: bottom;
+    width: 100%;
+    height: 1;
+    background: $warning;
+    color: $background;
+    text-align: center;
+    text-style: bold;
+    display: none;
+    layer: overlay;
+}
+
+.leader-hint.visible {
+    display: block;
 }

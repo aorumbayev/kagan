@@ -8,7 +8,9 @@ from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, Rule, TextArea
+from textual.widgets import Button, Footer, Label, Rule, TextArea
+
+from kagan.constants import MODAL_TITLE_MAX_LENGTH
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -29,15 +31,18 @@ class RejectionInputModal(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="rejection-input-container"):
             yield Label("Rejection Feedback", classes="modal-title")
-            yield Label(f"Ticket: {self._ticket_title[:50]}", classes="ticket-label")
+            yield Label(
+                f"Ticket: {self._ticket_title[:MODAL_TITLE_MAX_LENGTH]}", classes="ticket-label"
+            )
             yield Rule()
             yield Label("What needs to be fixed?", classes="prompt-label")
             yield TextArea(id="feedback-input")
             yield Rule()
-            yield Label("[Ctrl+S] Submit  [Esc] Cancel", classes="hint-label")
             with Horizontal(classes="button-row"):
                 yield Button("Submit", variant="primary", id="submit-btn")
                 yield Button("Cancel", id="cancel-btn")
+
+        yield Footer()
 
     def on_mount(self) -> None:
         """Focus the text area on mount."""

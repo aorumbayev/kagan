@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Label, Rule
 
 from kagan.acp import messages
+from kagan.constants import MODAL_TITLE_MAX_LENGTH
 from kagan.ui.widgets import StreamingOutput
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ class AgentOutputModal(ModalScreen[None]):
         """Compose the modal layout."""
         with Vertical(id="agent-output-container"):
             yield Label(
-                f"AUTO: {self.ticket.title[:50]}",
+                f"AUTO: {self.ticket.title[:MODAL_TITLE_MAX_LENGTH]}",
                 classes="modal-title",
             )
             yield Label(
@@ -110,7 +111,7 @@ class AgentOutputModal(ModalScreen[None]):
         """Handle tool call start."""
         title = message.tool_call.get("title", "Tool call")
         kind = message.tool_call.get("kind", "")
-        tool_text = f"\n**> {title}**"
+        tool_text = f"\n\n**> {title}**"
         if kind:
             tool_text += f" *({kind})*"
         await self._write_to_output(tool_text)
@@ -121,7 +122,7 @@ class AgentOutputModal(ModalScreen[None]):
         status = message.update.get("status")
         if status:
             symbol = " ✓" if status == "completed" else " ⋯"
-            await self._write_to_output(f"{symbol} {status}")
+            await self._write_to_output(f"{symbol} {status}\n")
 
     @on(messages.AgentReady)
     async def on_agent_ready(self, message: messages.AgentReady) -> None:
@@ -131,7 +132,7 @@ class AgentOutputModal(ModalScreen[None]):
     @on(messages.AgentFail)
     async def on_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""
-        await self._write_to_output(f"\n**Error:** {message.message}\n")
+        await self._write_to_output(f"\n\n**Error:** {message.message}\n")
         if message.details:
             await self._write_to_output(f"\n{message.details}\n")
 
@@ -153,7 +154,7 @@ class AgentOutputModal(ModalScreen[None]):
         """Send cancel signal to agent."""
         if self._agent:
             await self._agent.cancel()
-            await self._write_to_output("\n*Cancel signal sent*\n")
+            await self._write_to_output("\n\n*Cancel signal sent*\n")
             self.notify("Sent cancel request to agent")
         else:
             self.notify("No agent to cancel", severity="warning")

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from kagan.database.models import Ticket, TicketStatus
-
 if TYPE_CHECKING:
     from textual.pilot import Pilot
+
+    from kagan.database.models import Ticket, TicketStatus
 
 
 async def skip_welcome_if_shown(pilot: Pilot) -> None:
@@ -102,14 +102,9 @@ async def move_ticket_backward(pilot: Pilot) -> None:
 
 
 async def delete_focused_ticket(pilot: Pilot, confirm: bool = True) -> None:
-    """Delete the focused ticket. Set confirm=True to confirm the dialog."""
-    await pilot.press("x")
+    """Delete the focused ticket using Ctrl+D (direct delete, no confirm modal)."""
+    await pilot.press("ctrl+d")
     await pilot.pause()
-
-    if confirm:
-        # Confirm modal should be showing, press enter to confirm
-        await pilot.press("enter")
-        await pilot.pause()
 
 
 async def toggle_ticket_type(pilot: Pilot) -> None:

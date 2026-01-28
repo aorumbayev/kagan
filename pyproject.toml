@@ -60,6 +60,19 @@ search_path = ["src", "."]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+addopts = "--cov=src/kagan --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/kagan"]
+branch = true
+omit = ["*/tests/*", "*/__main__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.poe.tasks]
 dev = "textual run --dev src/kagan/app.py"

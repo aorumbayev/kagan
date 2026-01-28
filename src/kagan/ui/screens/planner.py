@@ -15,6 +15,8 @@ from kagan.acp.agent import Agent
 from kagan.agents.planner import build_planner_prompt, parse_plan
 from kagan.agents.prompt_loader import PromptLoader
 from kagan.config import get_fallback_agent_config
+from kagan.constants import PLANNER_TITLE_MAX_LENGTH
+from kagan.limits import AGENT_TIMEOUT
 from kagan.ui.screens.approval import ApprovalScreen
 from kagan.ui.screens.base import KaganScreen
 from kagan.ui.widgets import StreamingOutput
@@ -135,7 +137,7 @@ class PlannerScreen(KaganScreen):
             return
 
         full_response = "".join(self._accumulated_response)
-        
+
         # Parse as multi-ticket plan (only format supported)
         tickets = parse_plan(full_response)
         if tickets:
@@ -163,12 +165,18 @@ class PlannerScreen(KaganScreen):
             await self._send_prompt(refine_prompt)
             return
 
+        # At this point, result must be list[TicketCreate] (not None or str)
+        if isinstance(result, str):
+            return
+
         # Approved - create all tickets
         created_count = 0
         for ticket_data in result:
             try:
                 ticket = await self.kagan_app.state_manager.create_ticket(ticket_data)
-                self.notify(f"Created: {ticket.title[:30]}", severity="information")
+                self.notify(
+                    f"Created: {ticket.title[:PLANNER_TITLE_MAX_LENGTH]}", severity="information"
+                )
                 created_count += 1
             except Exception as e:
                 self.notify(f"Failed to create ticket: {e}", severity="error")
@@ -205,7 +213,7 @@ class PlannerScreen(KaganScreen):
             prompt = build_planner_prompt(text, prompt_loader)
 
             try:
-                await self._agent.wait_ready(timeout=30.0)
+                await self._agent.wait_ready(timeout=AGENT_TIMEOUT)
                 await self._agent.send_prompt(prompt)
                 # After prompt completes, try to create ticket from response
                 await self._try_create_ticket_from_response()

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from textual.containers import Center, Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Label, Select
+from textual.widgets import Button, Footer, Label, Select, Switch
 
 from kagan.agents.prompt_loader import dump_default_prompts
 from kagan.data.builtin_agents import BUILTIN_AGENTS, list_builtin_agents
@@ -26,7 +26,6 @@ KAGAN_LOGO = """\
 ᘚᘛ  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝  ᘚᘛ"""
 
 DEFAULT_BASE_BRANCHES = ("main", "master", "develop", "trunk")
-MCP_SETUP_COMMAND = "claude mcp add kagan -- kagan-mcp"
 
 
 class WelcomeScreen(Screen):
@@ -106,16 +105,17 @@ class WelcomeScreen(Screen):
                     classes="info-label",
                 )
 
-            # MCP setup section
-            yield Label("─" * 50, classes="separator")
-            yield Label(
-                "i For full integration, run once in your terminal:",
-                classes="info-label",
-            )
-            with Horizontal(id="mcp-command-row"):
-                yield Label(MCP_SETUP_COMMAND, id="mcp-command", classes="command-text")
-                yield Button("Copy Command", id="copy-command-btn", variant="default")
-            yield Button("I'll do it later", id="skip-mcp-btn", variant="default")
+            # AUTO Mode Settings section
+            yield Label("AUTO Mode Settings:", classes="section-label settings-header")
+            with Horizontal(classes="toggle-row"):
+                yield Switch(value=False, id="auto-run-switch")
+                yield Label("Auto-run tickets in IN_PROGRESS", classes="toggle-text")
+            with Horizontal(classes="toggle-row"):
+                yield Switch(value=False, id="auto-approve-switch")
+                yield Label("Auto-approve agent permissions", classes="toggle-text")
+            with Horizontal(classes="toggle-row"):
+                yield Switch(value=False, id="auto-merge-switch")
+                yield Label("Auto-merge completed tickets", classes="toggle-text")
 
             # Continue button
             with Center(id="buttons"):
@@ -128,63 +128,10 @@ class WelcomeScreen(Screen):
         """Handle button presses."""
         if event.button.id == "continue-btn":
             self._save_and_continue()
-        elif event.button.id == "copy-command-btn":
-            self._copy_mcp_command()
-        elif event.button.id == "skip-mcp-btn":
-            # Just dismiss the info, continue with setup
-            pass
 
     def action_skip(self) -> None:
         """Skip setup, use defaults (escape key)."""
         self._save_and_continue()
-
-    def _copy_mcp_command(self) -> None:
-        """Copy MCP setup command to clipboard."""
-        # Try to copy using system clipboard commands
-        import shutil
-        import subprocess
-
-        # Try xclip (Linux), pbcopy (macOS), or clip (Windows)
-        if shutil.which("xclip"):
-            try:
-                subprocess.run(
-                    ["xclip", "-selection", "clipboard"],
-                    input=MCP_SETUP_COMMAND.encode(),
-                    check=True,
-                )
-                self.notify("Command copied to clipboard!", severity="information")
-                return
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                pass
-        elif shutil.which("pbcopy"):
-            try:
-                subprocess.run(
-                    ["pbcopy"],
-                    input=MCP_SETUP_COMMAND.encode(),
-                    check=True,
-                )
-                self.notify("Command copied to clipboard!", severity="information")
-                return
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                pass
-        elif shutil.which("clip"):
-            try:
-                subprocess.run(
-                    ["clip"],
-                    input=MCP_SETUP_COMMAND.encode(),
-                    check=True,
-                )
-                self.notify("Command copied to clipboard!", severity="information")
-                return
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                pass
-
-        # Fallback: show notification with command
-        self.notify(
-            f"Run this command: {MCP_SETUP_COMMAND}",
-            severity="information",
-            timeout=5.0,
-        )
 
     def _save_and_continue(self) -> None:
         """Save configuration and continue."""
@@ -195,11 +142,15 @@ class WelcomeScreen(Screen):
         agent = str(select.value) if select.value else "claude"
         worker = agent
 
-        # No auto-start for session-first model
-        auto_start = False
-        auto_merge = False
+        # Read toggle values
+        auto_run_switch = self.query_one("#auto-run-switch", Switch)
+        auto_approve_switch = self.query_one("#auto-approve-switch", Switch)
+        auto_merge_switch = self.query_one("#auto-merge-switch", Switch)
+        auto_start = auto_run_switch.value
+        auto_approve = auto_approve_switch.value
+        auto_merge = auto_merge_switch.value
 
-        self._write_config(worker, auto_start, auto_merge, base_branch)
+        self._write_config(worker, auto_start, auto_approve, auto_merge, base_branch)
         self.app.pop_screen()
         self.app.call_later(self._notify_setup_complete)
 
@@ -212,12 +163,19 @@ class WelcomeScreen(Screen):
         self,
         worker: str,
         auto_start: bool,
+        auto_approve: bool,
         auto_merge: bool,
         base_branch: str,
     ) -> None:
         """Write config.toml file with correct ACP run commands."""
         kagan_dir = Path(".kagan")
         kagan_dir.mkdir(exist_ok=True)
+
+        # Ensure .kagan is gitignored in git repos
+        if self._has_git_repo:
+            added = self._ensure_gitignored()
+            if added:
+                self.app.call_later(lambda: self.app.notify("Added .kagan/ to .gitignore"))
 
         # Build agent sections from BUILTIN_AGENTS with correct ACP commands
         agent_sections = []
@@ -236,6 +194,7 @@ active = true''')
 
 [general]
 auto_start = {str(auto_start).lower()}
+auto_approve = {str(auto_approve).lower()}
 auto_merge = {str(auto_merge).lower()}
 default_base_branch = "{base_branch}"
 default_worker_agent = "{worker}"
@@ -247,3 +206,27 @@ default_worker_agent = "{worker}"
 
         # Dump default prompt templates for user customization
         dump_default_prompts(kagan_dir / "prompts")
+
+    def _ensure_gitignored(self) -> bool:
+        """Add .kagan/ to .gitignore if not already present.
+
+        Returns True if .gitignore was modified, False otherwise.
+        """
+        gitignore = Path(".gitignore")
+
+        if gitignore.exists():
+            content = gitignore.read_text()
+            lines = content.split("\n")
+            # Check if already ignored (with or without trailing slash)
+            if ".kagan" in lines or ".kagan/" in lines:
+                return False
+            # Append to existing file
+            if not content.endswith("\n"):
+                content += "\n"
+            content += "\n# Kagan local state\n.kagan/\n"
+            gitignore.write_text(content)
+        else:
+            # Create new .gitignore
+            gitignore.write_text("# Kagan local state\n.kagan/\n")
+
+        return True

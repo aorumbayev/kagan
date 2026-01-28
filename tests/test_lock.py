@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from kagan.lock import InstanceLock, InstanceLockError, check_single_instance
+from kagan.lock import InstanceLock, InstanceLockError
 
 
 class TestInstanceLock:
@@ -204,19 +204,3 @@ except InstanceLockError:
             )
 
             assert "ACQUIRED" in result.stdout
-
-
-class TestCheckSingleInstance:
-    """Tests for the check_single_instance helper function."""
-
-    def test_check_single_instance_returns_lock(self):
-        """Test that check_single_instance returns an acquired lock."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            lock_path = Path(tmpdir) / "test.lock"
-
-            lock = check_single_instance(lock_path)
-
-            assert lock._acquired
-            assert lock_path.exists()
-
-            lock.release()

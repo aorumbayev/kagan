@@ -261,6 +261,307 @@ class TestSchedulerWithMockAgent:
         assert config.short_name == "test"
 
 
+class TestAutoMerge:
+    """Tests for auto-merge functionality with agent-based review."""
+
+    @pytest.fixture
+    def auto_merge_config(self):
+        """Create a test config with auto_merge enabled."""
+        return KaganConfig(
+            general=GeneralConfig(
+                auto_start=True,
+                auto_merge=True,
+                max_concurrent_agents=2,
+                max_iterations=3,
+                iteration_delay_seconds=0.01,
+                default_worker_agent="test",
+                default_base_branch="main",
+            ),
+            agents={
+                "test": AgentConfig(
+                    identity="test.agent",
+                    name="Test Agent",
+                    short_name="test",
+                    run_command={"*": "echo test"},
+                )
+            },
+        )
+
+    @pytest.fixture
+    def mock_session_manager(self):
+        """Create a mock session manager."""
+        manager = MagicMock()
+        manager.kill_session = AsyncMock()
+        return manager
+
+    @pytest.fixture
+    def mock_review_agent(self):
+        """Create a mock agent for review that returns approve signal."""
+        agent = MagicMock()
+        agent.set_auto_approve = MagicMock()
+        agent.start = MagicMock()
+        agent.wait_ready = AsyncMock()
+        agent.send_prompt = AsyncMock()
+        agent.get_response_text = MagicMock(
+            return_value='Looks good! <approve summary="Implementation complete"/>'
+        )
+        agent.stop = AsyncMock()
+        return agent
+
+    @pytest.fixture
+    def auto_merge_scheduler(
+        self, state_manager, mock_worktree_manager, auto_merge_config, mock_session_manager
+    ):
+        """Create a scheduler with auto_merge enabled."""
+        # Add mock methods for review prompt building
+        mock_worktree_manager.get_commit_log = AsyncMock(return_value=["feat: add feature"])
+        mock_worktree_manager.get_diff_stats = AsyncMock(return_value="1 file changed")
+        changed_callback = MagicMock()
+        return Scheduler(
+            state_manager=state_manager,
+            worktree_manager=mock_worktree_manager,
+            config=auto_merge_config,
+            session_manager=mock_session_manager,
+            on_ticket_changed=changed_callback,
+        )
+
+    async def test_auto_merge_when_review_approved(
+        self,
+        auto_merge_scheduler: Scheduler,
+        state_manager: StateManager,
+        mock_worktree_manager,
+        mock_session_manager,
+        mock_review_agent,
+    ):
+        """Test auto-merge happens when auto_merge=true and review is approved."""
+        ticket = await state_manager.create_ticket(
+            TicketCreate(
+                title="Auto ticket",
+                ticket_type=TicketType.AUTO,
+                status=TicketStatus.IN_PROGRESS,
+            )
+        )
+
+        # Mock merge success
+        mock_worktree_manager.merge_to_main = AsyncMock(return_value=(True, "Merged"))
+        mock_worktree_manager.delete = AsyncMock()
+
+        # Mock review agent returning approve signal
+        with patch("kagan.agents.scheduler.Agent", return_value=mock_review_agent):
+            full_ticket = await state_manager.get_ticket(ticket.id)
+            assert full_ticket is not None
+            await auto_merge_scheduler._handle_complete(full_ticket)
+
+        # Ticket should be in DONE
+        updated = await state_manager.get_ticket(ticket.id)
+        assert updated is not None
+        assert updated.status == TicketStatus.DONE
+        assert updated.checks_passed is True
+        assert updated.review_summary == "Implementation complete"
+
+        # Merge and cleanup should have been called
+        mock_worktree_manager.merge_to_main.assert_called_once()
+        mock_worktree_manager.delete.assert_called_once()
+        mock_session_manager.kill_session.assert_called_once_with(ticket.id)
+
+    async def test_no_auto_merge_when_disabled(
+        self,
+        scheduler: Scheduler,  # Uses default config (auto_merge=false)
+        state_manager: StateManager,
+        mock_worktree_manager,
+    ):
+        """Test no auto-merge when auto_merge=false."""
+        ticket = await state_manager.create_ticket(
+            TicketCreate(
+                title="Auto ticket",
+                ticket_type=TicketType.AUTO,
+                status=TicketStatus.IN_PROGRESS,
+            )
+        )
+
+        # Add mock methods for review
+        mock_worktree_manager.get_commit_log = AsyncMock(return_value=["feat: add feature"])
+        mock_worktree_manager.get_diff_stats = AsyncMock(return_value="1 file changed")
+
+        # Mock review agent returning approve signal
+        mock_agent = MagicMock()
+        mock_agent.set_auto_approve = MagicMock()
+        mock_agent.start = MagicMock()
+        mock_agent.wait_ready = AsyncMock()
+        mock_agent.send_prompt = AsyncMock()
+        mock_agent.get_response_text = MagicMock(return_value='<approve summary="Done"/>')
+        mock_agent.stop = AsyncMock()
+
+        with patch("kagan.agents.scheduler.Agent", return_value=mock_agent):
+            full_ticket = await state_manager.get_ticket(ticket.id)
+            assert full_ticket is not None
+            await scheduler._handle_complete(full_ticket)
+
+        # Ticket should be in REVIEW (not DONE)
+        updated = await state_manager.get_ticket(ticket.id)
+        assert updated is not None
+        assert updated.status == TicketStatus.REVIEW
+        assert updated.checks_passed is True
+
+        # Merge should NOT have been called
+        mock_worktree_manager.merge_to_main.assert_not_called()
+
+    async def test_no_auto_merge_when_review_rejected(
+        self,
+        auto_merge_scheduler: Scheduler,
+        state_manager: StateManager,
+        mock_worktree_manager,
+    ):
+        """Test no auto-merge when review is rejected."""
+        ticket = await state_manager.create_ticket(
+            TicketCreate(
+                title="Auto ticket",
+                ticket_type=TicketType.AUTO,
+                status=TicketStatus.IN_PROGRESS,
+            )
+        )
+
+        # Mock review agent returning reject signal
+        mock_agent = MagicMock()
+        mock_agent.set_auto_approve = MagicMock()
+        mock_agent.start = MagicMock()
+        mock_agent.wait_ready = AsyncMock()
+        mock_agent.send_prompt = AsyncMock()
+        mock_agent.get_response_text = MagicMock(
+            return_value='Missing tests. <reject reason="No unit tests added"/>'
+        )
+        mock_agent.stop = AsyncMock()
+
+        with patch("kagan.agents.scheduler.Agent", return_value=mock_agent):
+            full_ticket = await state_manager.get_ticket(ticket.id)
+            assert full_ticket is not None
+            await auto_merge_scheduler._handle_complete(full_ticket)
+
+        # Ticket should stay in REVIEW
+        updated = await state_manager.get_ticket(ticket.id)
+        assert updated is not None
+        assert updated.status == TicketStatus.REVIEW
+        assert updated.checks_passed is False
+        assert updated.review_summary == "No unit tests added"
+
+        # Merge should NOT have been called
+        mock_worktree_manager.merge_to_main.assert_not_called()
+
+    async def test_no_auto_merge_when_no_signal(
+        self,
+        auto_merge_scheduler: Scheduler,
+        state_manager: StateManager,
+        mock_worktree_manager,
+    ):
+        """Test no auto-merge when review agent returns no signal."""
+        ticket = await state_manager.create_ticket(
+            TicketCreate(
+                title="Auto ticket",
+                ticket_type=TicketType.AUTO,
+                status=TicketStatus.IN_PROGRESS,
+            )
+        )
+
+        # Mock review agent returning no signal
+        mock_agent = MagicMock()
+        mock_agent.set_auto_approve = MagicMock()
+        mock_agent.start = MagicMock()
+        mock_agent.wait_ready = AsyncMock()
+        mock_agent.send_prompt = AsyncMock()
+        mock_agent.get_response_text = MagicMock(
+            return_value="The code looks fine but I need more context."
+        )
+        mock_agent.stop = AsyncMock()
+
+        with patch("kagan.agents.scheduler.Agent", return_value=mock_agent):
+            full_ticket = await state_manager.get_ticket(ticket.id)
+            assert full_ticket is not None
+            await auto_merge_scheduler._handle_complete(full_ticket)
+
+        # Ticket should stay in REVIEW with checks_passed=False
+        updated = await state_manager.get_ticket(ticket.id)
+        assert updated is not None
+        assert updated.status == TicketStatus.REVIEW
+        assert updated.checks_passed is False
+        assert "No review signal found" in (updated.review_summary or "")
+
+        # Merge should NOT have been called
+        mock_worktree_manager.merge_to_main.assert_not_called()
+
+    async def test_stays_in_review_when_merge_fails(
+        self,
+        auto_merge_scheduler: Scheduler,
+        state_manager: StateManager,
+        mock_worktree_manager,
+        mock_review_agent,
+    ):
+        """Test ticket stays in REVIEW if merge fails."""
+        ticket = await state_manager.create_ticket(
+            TicketCreate(
+                title="Auto ticket",
+                ticket_type=TicketType.AUTO,
+                status=TicketStatus.IN_PROGRESS,
+            )
+        )
+
+        # Mock merge failure
+        mock_worktree_manager.merge_to_main = AsyncMock(return_value=(False, "Merge conflict"))
+
+        # Mock review agent returning approve signal
+        with patch("kagan.agents.scheduler.Agent", return_value=mock_review_agent):
+            full_ticket = await state_manager.get_ticket(ticket.id)
+            assert full_ticket is not None
+            await auto_merge_scheduler._handle_complete(full_ticket)
+
+        # Ticket should stay in REVIEW (not moved to DONE)
+        updated = await state_manager.get_ticket(ticket.id)
+        assert updated is not None
+        assert updated.status == TicketStatus.REVIEW  # Stays in REVIEW after failed merge
+
+        # Cleanup should NOT have been called since merge failed
+        mock_worktree_manager.delete.assert_not_called()
+
+    async def test_run_review_helper(
+        self,
+        auto_merge_scheduler: Scheduler,
+        state_manager: StateManager,
+        mock_worktree_manager,
+    ):
+        """Test _run_review helper method."""
+        ticket = await state_manager.create_ticket(
+            TicketCreate(
+                title="Test ticket",
+                ticket_type=TicketType.AUTO,
+                description="Test description",
+            )
+        )
+        full_ticket = await state_manager.get_ticket(ticket.id)
+        assert full_ticket is not None
+        wt_path = Path("/tmp/test-worktree")
+
+        # Test approve signal
+        mock_agent = MagicMock()
+        mock_agent.set_auto_approve = MagicMock()
+        mock_agent.start = MagicMock()
+        mock_agent.wait_ready = AsyncMock()
+        mock_agent.send_prompt = AsyncMock()
+        mock_agent.get_response_text = MagicMock(return_value='<approve summary="All good"/>')
+        mock_agent.stop = AsyncMock()
+
+        with patch("kagan.agents.scheduler.Agent", return_value=mock_agent):
+            passed, summary = await auto_merge_scheduler._run_review(full_ticket, wt_path)
+            assert passed is True
+            assert summary == "All good"
+
+        # Test reject signal
+        mock_agent.get_response_text.return_value = '<reject reason="Needs work"/>'
+
+        with patch("kagan.agents.scheduler.Agent", return_value=mock_agent):
+            passed, summary = await auto_merge_scheduler._run_review(full_ticket, wt_path)
+            assert passed is False
+            assert summary == "Needs work"
+
+
 class TestSchedulerHelpers:
     """Tests for scheduler helper methods."""
 

@@ -6,6 +6,8 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from kagan.agents.prompt_loader import _get_default_iteration_prompt
+
 if TYPE_CHECKING:
     from typing import Any
 
@@ -20,27 +22,7 @@ def _load_template() -> str:
     """Load iteration prompt template from file or use fallback."""
     if TEMPLATE_PATH.exists():
         return TEMPLATE_PATH.read_text()
-    # Fallback inline template
-    return """# Iteration {iteration} of {max_iterations}
-
-## Task: {title}
-
-{description}
-
-{hat_instructions}
-
-## Your Progress So Far
-{scratchpad}
-
-## CRITICAL: Response Signal Required
-
-You MUST end your response with exactly ONE of these XML signals:
-- `<complete/>` - Task is FULLY DONE and verified working
-- `<continue/>` - Made progress, need another iteration
-- `<blocked reason="why"/>` - Cannot proceed without human help
-
-**If you completed the task, output `<complete/>` as the last thing in your response.**
-"""
+    return _get_default_iteration_prompt()
 
 
 def build_prompt(

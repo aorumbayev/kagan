@@ -279,3 +279,66 @@ async def e2e_app_with_tickets(e2e_project):
         lock_path=None,
     )
     return app
+
+
+@pytest.fixture
+async def e2e_app_with_auto_ticket(e2e_project):
+    """Create a KaganApp with an AUTO ticket in IN_PROGRESS for testing.
+
+    This is used to test AUTO ticket movement restrictions.
+    """
+    from kagan.database.models import TicketCreate, TicketPriority, TicketStatus, TicketType
+
+    manager = StateManager(e2e_project.db)
+    await manager.initialize()
+
+    # Create an AUTO ticket in IN_PROGRESS
+    await manager.create_ticket(
+        TicketCreate(
+            title="Auto task in progress",
+            description="An AUTO task currently being worked on by agent",
+            priority=TicketPriority.HIGH,
+            status=TicketStatus.IN_PROGRESS,
+            ticket_type=TicketType.AUTO,
+        )
+    )
+
+    await manager.close()
+
+    app = KaganApp(
+        db_path=e2e_project.db,
+        config_path=e2e_project.config,
+        lock_path=None,
+    )
+    return app
+
+
+@pytest.fixture
+async def e2e_app_with_done_ticket(e2e_project):
+    """Create a KaganApp with a ticket in DONE status for testing.
+
+    This is used to test DONE -> BACKLOG jump behavior.
+    """
+    from kagan.database.models import TicketCreate, TicketPriority, TicketStatus
+
+    manager = StateManager(e2e_project.db)
+    await manager.initialize()
+
+    # Create a DONE ticket
+    await manager.create_ticket(
+        TicketCreate(
+            title="Completed task",
+            description="A task that has been completed",
+            priority=TicketPriority.MEDIUM,
+            status=TicketStatus.DONE,
+        )
+    )
+
+    await manager.close()
+
+    app = KaganApp(
+        db_path=e2e_project.db,
+        config_path=e2e_project.config,
+        lock_path=None,
+    )
+    return app

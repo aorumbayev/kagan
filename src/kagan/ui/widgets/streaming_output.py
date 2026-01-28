@@ -21,34 +21,10 @@ class StreamingOutput(Widget):
     Optionally includes a RichLog for status messages (tool calls, thinking, etc.).
     """
 
-    DEFAULT_CSS = """
-    StreamingOutput {
-        height: 1fr;
-        width: 1fr;
-    }
-
-    StreamingOutput > ScrollableContainer {
-        height: 1fr;
-        padding: 0 1;
-        scrollbar-gutter: stable;
-    }
-
-    StreamingOutput > ScrollableContainer > Markdown {
-        padding: 0;
-    }
-
-    StreamingOutput > RichLog {
-        height: auto;
-        max-height: 8;
-        border-top: solid $surface-lighten-2;
-    }
-    """
-
     def __init__(
         self,
         *,
         show_status_log: bool = False,
-        status_log_max_height: int = 8,
         id: str | None = None,
         classes: str | None = None,
     ) -> None:
@@ -56,13 +32,11 @@ class StreamingOutput(Widget):
 
         Args:
             show_status_log: Whether to show a separate RichLog for status messages.
-            status_log_max_height: Maximum height of the status log.
             id: Widget ID.
             classes: CSS classes.
         """
         super().__init__(id=id, classes=classes)
         self._show_status_log = show_status_log
-        self._status_log_max_height = status_log_max_height
         self._markdown_stream: MarkdownStream | None = None
 
     def compose(self) -> ComposeResult:

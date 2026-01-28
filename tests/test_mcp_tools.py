@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path  # noqa: TC003
+
+import pytest
+
 from kagan.database.models import TicketCreate, TicketStatus
 from kagan.mcp.tools import KaganMCPServer
 
@@ -68,7 +72,9 @@ class TestMCPTools:
 
     async def test_request_review_fails(self, state_manager, monkeypatch):
         """request_review leaves status unchanged on failure."""
-        ticket = await state_manager.create_ticket(TicketCreate(title="Feature"))
+        ticket = await state_manager.create_ticket(
+            TicketCreate(title="Feature", check_command="pytest tests/")
+        )
         server = KaganMCPServer(state_manager)
 
         async def _checks(*_args) -> bool:
@@ -107,3 +113,138 @@ class TestMCPTools:
         updated = await state_manager.get_ticket(ticket.id)
         assert updated is not None
         assert updated.status == TicketStatus.BACKLOG
+
+
+@pytest.fixture
+def git_repo(tmp_path: Path):
+    """Create a git repository for testing uncommitted changes."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    # Create initial commit
+    (repo / "README.md").write_text("# Test")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    return repo
+
+
+class TestCheckUncommittedChanges:
+    """Tests for _check_uncommitted_changes filtering logic."""
+
+    async def test_clean_repo_returns_false(self, state_manager, git_repo: Path, monkeypatch):
+        """Clean repo should return False (no uncommitted changes)."""
+        monkeypatch.chdir(git_repo)
+        server = KaganMCPServer(state_manager)
+
+        result = await server._check_uncommitted_changes()
+
+        assert result is False
+
+    async def test_real_changes_returns_true(self, state_manager, git_repo: Path, monkeypatch):
+        """Real uncommitted changes should return True."""
+        monkeypatch.chdir(git_repo)
+        (git_repo / "new_file.py").write_text("# new file")
+        server = KaganMCPServer(state_manager)
+
+        result = await server._check_uncommitted_changes()
+
+        assert result is True
+
+    async def test_kagan_dir_ignored(self, state_manager, git_repo: Path, monkeypatch):
+        """Untracked .kagan/ directory should be ignored."""
+        monkeypatch.chdir(git_repo)
+        (git_repo / ".kagan").mkdir()
+        (git_repo / ".kagan" / "state.db").write_text("")
+        server = KaganMCPServer(state_manager)
+
+        result = await server._check_uncommitted_changes()
+
+        assert result is False
+
+    async def test_opencode_json_ignored(self, state_manager, git_repo: Path, monkeypatch):
+        """Untracked opencode.json should be ignored (OpenCode MCP config)."""
+        monkeypatch.chdir(git_repo)
+        (git_repo / "opencode.json").write_text('{"mcp": {}}')
+        server = KaganMCPServer(state_manager)
+
+        result = await server._check_uncommitted_changes()
+
+        assert result is False
+
+    async def test_mcp_json_ignored(self, state_manager, git_repo: Path, monkeypatch):
+        """Untracked .mcp.json should be ignored."""
+        monkeypatch.chdir(git_repo)
+        (git_repo / ".mcp.json").write_text("{}")
+        server = KaganMCPServer(state_manager)
+
+        result = await server._check_uncommitted_changes()
+
+        assert result is False
+
+    async def test_claude_md_not_ignored(self, state_manager, git_repo: Path, monkeypatch):
+        """Untracked CLAUDE.md should NOT be ignored (we don't generate it anymore)."""
+        monkeypatch.chdir(git_repo)
+        (git_repo / "CLAUDE.md").write_text("# Claude")
+        server = KaganMCPServer(state_manager)
+
+        result = await server._check_uncommitted_changes()
+
+        # CLAUDE.md is no longer a Kagan-generated file, so it should be detected
+        assert result is True
+
+    async def test_mixed_kagan_and_real_changes(self, state_manager, git_repo: Path, monkeypatch):
+        """Should return True when both Kagan and real changes exist."""
+        monkeypatch.chdir(git_repo)
+        # Kagan files (should be ignored)
+        (git_repo / ".kagan").mkdir()
+        (git_repo / ".kagan" / "state.db").write_text("")
+        (git_repo / ".mcp.json").write_text("{}")
+        # Real file (should not be ignored)
+        (git_repo / "feature.py").write_text("# feature")
+        server = KaganMCPServer(state_manager)
+
+        result = await server._check_uncommitted_changes()
+
+        assert result is True
+
+    async def test_only_kagan_files_returns_false(self, state_manager, git_repo: Path, monkeypatch):
+        """Should return False when only Kagan files are uncommitted."""
+        monkeypatch.chdir(git_repo)
+        # Create Kagan-generated files (only .kagan/ and MCP configs are generated now)
+        (git_repo / ".kagan").mkdir()
+        (git_repo / ".kagan" / "config.toml").write_text("")
+        (git_repo / ".mcp.json").write_text("{}")
+        (git_repo / "opencode.json").write_text("{}")
+        server = KaganMCPServer(state_manager)
+
+        result = await server._check_uncommitted_changes()
+
+        assert result is False

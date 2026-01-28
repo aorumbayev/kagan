@@ -148,6 +148,13 @@ class Ticket(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 ```
 
+## Testing Strategy
+
+- **pytest-cov enabled by default** - Coverage reports on every test run
+- **E2E smoke tests** (`test_e2e_smoke.py`) - Primary UI regression coverage for critical user journeys
+- **Unit tests** - Business logic validation (database, models, planner, scheduler)
+- **Interaction tests** (`test_interactions.py`) - Keyboard shortcut coverage
+
 ## Testing Patterns
 
 ```python

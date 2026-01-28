@@ -128,9 +128,7 @@ class TestPlannerScreen:
             # Should show ApprovalScreen
             assert isinstance(app_with_mock_planner.screen, ApprovalScreen)
 
-    async def test_no_plan_block_continues_conversation(
-        self, app_with_mock_planner: KaganApp
-    ):
+    async def test_no_plan_block_continues_conversation(self, app_with_mock_planner: KaganApp):
         """Test that response without <plan> continues conversation."""
         async with app_with_mock_planner.run_test(size=(120, 40)) as pilot:
             await app_with_mock_planner.push_screen(PlannerScreen())
@@ -156,7 +154,7 @@ class TestParsePlan:
 
     def test_parse_single_ticket_in_plan(self) -> None:
         """Parse a plan with a single ticket."""
-        response = '''
+        response = """
         Here's my plan:
         <plan>
         <ticket>
@@ -171,7 +169,7 @@ class TestParsePlan:
           <priority>high</priority>
         </ticket>
         </plan>
-        '''
+        """
         tickets = parse_plan(response)
         assert len(tickets) == 1
         assert tickets[0].title == "Add user authentication"
@@ -181,7 +179,7 @@ class TestParsePlan:
 
     def test_parse_multiple_tickets(self) -> None:
         """Parse a plan with multiple tickets."""
-        response = '''
+        response = """
         <plan>
         <ticket>
           <title>Create database schema</title>
@@ -202,7 +200,7 @@ class TestParsePlan:
           <priority>low</priority>
         </ticket>
         </plan>
-        '''
+        """
         tickets = parse_plan(response)
         assert len(tickets) == 3
         assert tickets[0].title == "Create database schema"
@@ -214,14 +212,14 @@ class TestParsePlan:
 
     def test_parse_plan_default_type_is_pair(self) -> None:
         """Default ticket type should be PAIR when not specified."""
-        response = '''
+        response = """
         <plan>
         <ticket>
           <title>Design new feature</title>
           <description>Feature without type specified</description>
         </ticket>
         </plan>
-        '''
+        """
         tickets = parse_plan(response)
         assert len(tickets) == 1
         assert tickets[0].ticket_type == TicketType.PAIR
@@ -234,14 +232,14 @@ class TestParsePlan:
 
     def test_parse_plan_malformed_xml(self) -> None:
         """Handle malformed XML gracefully."""
-        response = '''
+        response = """
         <plan>
         <ticket>
           <title>Broken ticket
           <description>Missing closing tags
         </ticket>
         </plan>
-        '''
+        """
         tickets = parse_plan(response)
         assert tickets == []
 
@@ -253,7 +251,7 @@ class TestParsePlan:
 
     def test_parse_plan_case_insensitive(self) -> None:
         """Plan wrapper tags should be case insensitive (inner tags are case-sensitive)."""
-        response = '''
+        response = """
         <PLAN>
         <ticket>
           <title>Test ticket</title>
@@ -261,7 +259,7 @@ class TestParsePlan:
           <description>Testing case insensitivity</description>
         </ticket>
         </PLAN>
-        '''
+        """
         tickets = parse_plan(response)
         assert len(tickets) == 1
         assert tickets[0].title == "Test ticket"
@@ -269,7 +267,7 @@ class TestParsePlan:
 
     def test_parse_plan_with_surrounding_text(self) -> None:
         """Parse plan when surrounded by other text."""
-        response = '''
+        response = """
         Based on your requirements, I've created a plan:
 
         <plan>
@@ -281,7 +279,7 @@ class TestParsePlan:
         </plan>
 
         Let me know if you'd like any changes!
-        '''
+        """
         tickets = parse_plan(response)
         assert len(tickets) == 1
         assert tickets[0].title == "Implement feature X"

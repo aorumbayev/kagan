@@ -96,6 +96,42 @@ class PromptLoader:
             return hat.system_prompt
         return ""
 
+    def load_review_prompt(
+        self,
+        title: str,
+        ticket_id: str,
+        description: str,
+        commits: str,
+        diff_summary: str,
+    ) -> str:
+        """Load and format the review prompt template.
+
+        Args:
+            title: Ticket title.
+            ticket_id: Ticket ID.
+            description: Ticket description.
+            commits: Formatted commit messages.
+            diff_summary: Diff statistics summary.
+
+        Returns:
+            Formatted review prompt.
+        """
+        # Priority 1: User file override
+        user_file = self._prompts_dir / "review.md"
+        if user_file.exists():
+            template = user_file.read_text()
+        else:
+            # Priority 2: Built-in template
+            template = _load_builtin_template("review.md") or _get_default_review_prompt()
+
+        return template.format(
+            title=title,
+            ticket_id=ticket_id,
+            description=description,
+            commits=commits,
+            diff_summary=diff_summary,
+        )
+
 
 @cache
 def _load_builtin_template(filename: str) -> str:
@@ -159,4 +195,46 @@ analyze their request and create ONE detailed ticket.
 4. If the request is vague, make reasonable assumptions and note them
 
 After outputting the ticket, briefly explain what you created and any assumptions you made.
+"""
+
+
+def _get_default_review_prompt() -> str:
+    """Get the default review prompt template."""
+    return """\
+# Code Review Request
+
+## Ticket: {title}
+
+**ID:** {ticket_id}
+**Description:** {description}
+
+## Changes Made
+
+### Commits
+{commits}
+
+### Diff Summary
+{diff_summary}
+
+## Review Criteria
+
+Please review the changes against:
+1. Does the implementation match the ticket description?
+2. Are there any obvious bugs or issues?
+3. Is the code reasonably clean and maintainable?
+
+## Your Task
+
+1. Review the changes
+2. Provide a brief summary of what was implemented
+3. End with exactly ONE signal:
+
+- `<approve summary="Brief 1-2 sentence summary of work done"/>` - Changes are good
+- `<reject reason="What needs to be fixed"/>` - Changes need work
+
+Example:
+```
+The implementation looks good. Added the new feature with proper error handling.
+<approve summary="Implemented user authentication with JWT tokens and proper validation"/>
+```
 """

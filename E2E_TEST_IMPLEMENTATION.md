@@ -62,7 +62,6 @@ Implementing a lightweight, user-focused E2E test suite using the hybrid approac
 - test_database.py - StateManager CRUD
 - test_models.py - Pydantic validation
 - test_lock.py - Instance lock
-- test_knowledge.py - Knowledge base
 - test_prompt_loader.py - Prompt loading
 - test_mcp_tools.py - MCP tools
 - test_signals.py - Signal mechanism

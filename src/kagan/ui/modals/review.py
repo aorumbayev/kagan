@@ -8,10 +8,12 @@ from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, RichLog, Rule, Static
+from textual.widgets import Button, Footer, Label, RichLog, Rule, Static
 
 from kagan.acp import messages
 from kagan.acp.agent import Agent
+from kagan.constants import DIFF_MAX_LENGTH, MODAL_TITLE_MAX_LENGTH
+from kagan.limits import AGENT_TIMEOUT
 from kagan.ui.widgets import StreamingOutput
 
 if TYPE_CHECKING:
@@ -50,7 +52,9 @@ class ReviewModal(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="review-modal-container"):
-            yield Label(f"Review: {self.ticket.title[:50]}", classes="modal-title")
+            yield Label(
+                f"Review: {self.ticket.title[:MODAL_TITLE_MAX_LENGTH]}", classes="modal-title"
+            )
             yield Rule()
 
             # Commits section
@@ -68,38 +72,28 @@ class ReviewModal(ModalScreen[str | None]):
             # AI Review section (opt-in, expandable)
             with Vertical(id="ai-review-section"):
                 yield Label("AI Review", classes="section-title")
-                yield Button(
-                    "Generate AI Review", id="generate-btn", variant="default"
-                )
+                yield Button("Generate AI Review", id="generate-btn", variant="default")
                 yield StreamingOutput(id="ai-review-output", classes="hidden")
 
             yield Rule()
 
             # Action bar
-            yield Label(
-                "[a] Approve  [r] Reject  [g] Generate Review  [Esc] Close",
-                classes="hint-label",
-            )
             with Horizontal(classes="button-row"):
                 yield Button("Approve", variant="success", id="approve-btn")
                 yield Button("Reject", variant="error", id="reject-btn")
 
+        yield Footer()
+
     async def on_mount(self) -> None:
         """Load commits and diff immediately (fast operations)."""
-        commits = await self._worktree.get_commit_log(
-            self.ticket.id, self._base_branch
-        )
-        diff_stats = await self._worktree.get_diff_stats(
-            self.ticket.id, self._base_branch
-        )
+        commits = await self._worktree.get_commit_log(self.ticket.id, self._base_branch)
+        diff_stats = await self._worktree.get_diff_stats(self.ticket.id, self._base_branch)
 
         log = self.query_one("#commits-log", RichLog)
         for commit in commits or ["[dim]No commits found[/dim]"]:
             log.write(f"  {commit}")
 
-        self.query_one("#diff-stats", Static).update(
-            diff_stats or "[dim](No changes)[/dim]"
-        )
+        self.query_one("#diff-stats", Static).update(diff_stats or "[dim](No changes)[/dim]")
 
     @on(Button.Pressed, "#generate-btn")
     async def on_generate_btn(self) -> None:
@@ -149,7 +143,7 @@ class ReviewModal(ModalScreen[str | None]):
         await output.write("*Starting AI review...*\n\n")
 
         try:
-            await self._agent.wait_ready(timeout=30.0)
+            await self._agent.wait_ready(timeout=AGENT_TIMEOUT)
 
             review_prompt = f"""Review the following code changes for ticket: {self.ticket.title}
 
@@ -163,7 +157,7 @@ Be concise - keep your review brief and actionable.
 
 Diff:
 ```diff
-{diff[:10000]}
+{diff[:DIFF_MAX_LENGTH]}
 ```"""
 
             await self._agent.send_prompt(review_prompt)

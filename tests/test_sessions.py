@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path  # noqa: TC003
+from typing import Any
 
 import pytest
 
@@ -14,7 +15,7 @@ from kagan.sessions.manager import SessionManager
 @pytest.fixture
 def mock_tmux(monkeypatch):
     """Intercept tmux subprocess calls."""
-    sessions: dict[str, dict[str, object]] = {}
+    sessions: dict[str, dict[str, Any]] = {}
 
     async def fake_run_tmux(*args: str) -> str:
         command = args[0]
@@ -50,12 +51,12 @@ def mock_tmux(monkeypatch):
 class TestSessionManager:
     """Session manager behavior tests."""
 
-    async def test_create_session_writes_context(self, state_manager, mock_tmux, tmp_path: Path):
+    async def test_create_session_writes_mcp_config(self, state_manager, mock_tmux, tmp_path: Path):
+        """Test that session creation writes MCP config and sets up environment."""
         project_root = tmp_path / "project"
         worktree_path = tmp_path / "worktree"
         project_root.mkdir()
         worktree_path.mkdir()
-        (project_root / "AGENTS.md").write_text("Agents")
 
         ticket = await state_manager.create_ticket(
             TicketCreate(
@@ -77,13 +78,7 @@ class TestSessionManager:
         assert env["KAGAN_WORKTREE_PATH"] == str(worktree_path)
         assert env["KAGAN_PROJECT_ROOT"] == str(project_root)
 
-        context_path = worktree_path / ".kagan-context" / "CONTEXT.md"
-        assert context_path.exists()
-        context = context_path.read_text()
-        assert ticket.id in context
-        assert "Tests pass" in context
-
-        # Check .mcp.json is created (works for both Claude Code and OpenCode)
+        # Check .mcp.json is created for default (Claude) agent
         mcp_config_path = worktree_path / ".mcp.json"
         assert mcp_config_path.exists()
         import json
@@ -94,12 +89,77 @@ class TestSessionManager:
         assert mcp_config["mcpServers"]["kagan"]["command"] == "kagan"
         assert mcp_config["mcpServers"]["kagan"]["args"] == ["mcp"]
 
-        agents_link = worktree_path / "AGENTS.md"
-        assert agents_link.exists()
+        # No CONTEXT.md, CLAUDE.md, or AGENTS.md symlink created anymore
+        # (worktree already has user's files from git clone, context via MCP tool)
+        assert not (worktree_path / ".kagan-context").exists()
 
         updated = await state_manager.get_ticket(ticket.id)
         assert updated is not None
         assert updated.session_active is True
+
+    async def test_create_session_opencode_mcp_config(
+        self, state_manager, mock_tmux, tmp_path: Path
+    ):
+        """Test that OpenCode agent gets opencode.json MCP config format."""
+        project_root = tmp_path / "project"
+        worktree_path = tmp_path / "worktree"
+        project_root.mkdir()
+        worktree_path.mkdir()
+
+        ticket = await state_manager.create_ticket(
+            TicketCreate(title="OpenCode task", agent_backend="opencode")
+        )
+        config = KaganConfig()
+        manager = SessionManager(project_root, state_manager, config)
+
+        await manager.create_session(ticket, worktree_path)
+
+        # Check opencode.json is created instead of .mcp.json
+        assert not (worktree_path / ".mcp.json").exists()
+        opencode_config_path = worktree_path / "opencode.json"
+        assert opencode_config_path.exists()
+
+        import json
+
+        opencode_config = json.loads(opencode_config_path.read_text())
+        assert "$schema" in opencode_config
+        assert opencode_config["$schema"] == "https://opencode.ai/config.json"
+        assert "mcp" in opencode_config
+        assert "kagan" in opencode_config["mcp"]
+        assert opencode_config["mcp"]["kagan"]["type"] == "local"
+        assert opencode_config["mcp"]["kagan"]["command"] == ["kagan", "mcp"]
+        assert opencode_config["mcp"]["kagan"]["enabled"] is True
+
+    async def test_create_session_merges_existing_mcp_config(
+        self, state_manager, mock_tmux, tmp_path: Path
+    ):
+        """Test that existing MCP config is merged, not overwritten."""
+        project_root = tmp_path / "project"
+        worktree_path = tmp_path / "worktree"
+        project_root.mkdir()
+        worktree_path.mkdir()
+
+        import json
+
+        # Create existing .mcp.json with user's servers
+        existing_config = {
+            "mcpServers": {"my-server": {"command": "my-mcp", "args": ["--port", "8080"]}}
+        }
+        (worktree_path / ".mcp.json").write_text(json.dumps(existing_config))
+
+        ticket = await state_manager.create_ticket(TicketCreate(title="Task"))
+        config = KaganConfig()
+        manager = SessionManager(project_root, state_manager, config)
+
+        await manager.create_session(ticket, worktree_path)
+
+        merged_config = json.loads((worktree_path / ".mcp.json").read_text())
+        # Original server preserved
+        assert "my-server" in merged_config["mcpServers"]
+        assert merged_config["mcpServers"]["my-server"]["command"] == "my-mcp"
+        # Kagan server added
+        assert "kagan" in merged_config["mcpServers"]
+        assert merged_config["mcpServers"]["kagan"]["command"] == "kagan"
 
     async def test_create_session_sends_startup_prompt(
         self, state_manager, mock_tmux, tmp_path: Path
@@ -150,3 +210,74 @@ class TestSessionManager:
         updated = await state_manager.get_ticket(ticket.id)
         assert updated is not None
         assert updated.session_active is False
+
+    async def test_create_session_writes_gitignore(self, state_manager, mock_tmux, tmp_path: Path):
+        """Test that worktree .gitignore is created with MCP config entry."""
+        project_root = tmp_path / "project"
+        worktree_path = tmp_path / "worktree"
+        project_root.mkdir()
+        worktree_path.mkdir()
+
+        ticket = await state_manager.create_ticket(TicketCreate(title="Task"))
+        config = KaganConfig()
+        manager = SessionManager(project_root, state_manager, config)
+
+        await manager.create_session(ticket, worktree_path)
+
+        gitignore = worktree_path / ".gitignore"
+        assert gitignore.exists()
+        content = gitignore.read_text()
+        # Only the MCP config file is gitignored now
+        assert ".mcp.json" in content
+        # These are no longer generated, so not gitignored
+        assert ".kagan-context/" not in content
+        assert "CLAUDE.md" not in content
+
+    async def test_create_session_appends_to_existing_gitignore(
+        self, state_manager, mock_tmux, tmp_path: Path
+    ):
+        """Test that existing .gitignore is preserved and appended to."""
+        project_root = tmp_path / "project"
+        worktree_path = tmp_path / "worktree"
+        project_root.mkdir()
+        worktree_path.mkdir()
+
+        # Create existing .gitignore
+        existing_content = "node_modules/\n*.pyc\n"
+        (worktree_path / ".gitignore").write_text(existing_content)
+
+        ticket = await state_manager.create_ticket(TicketCreate(title="Task"))
+        config = KaganConfig()
+        manager = SessionManager(project_root, state_manager, config)
+
+        await manager.create_session(ticket, worktree_path)
+
+        content = (worktree_path / ".gitignore").read_text()
+        # Original content preserved
+        assert "node_modules/" in content
+        assert "*.pyc" in content
+        # MCP config entry added
+        assert ".mcp.json" in content
+
+    async def test_create_session_skips_duplicate_gitignore_entries(
+        self, state_manager, mock_tmux, tmp_path: Path
+    ):
+        """Test that MCP config entry is not duplicated in .gitignore."""
+        project_root = tmp_path / "project"
+        worktree_path = tmp_path / "worktree"
+        project_root.mkdir()
+        worktree_path.mkdir()
+
+        # Create .gitignore with MCP config already present
+        existing_content = ".mcp.json\n"
+        (worktree_path / ".gitignore").write_text(existing_content)
+
+        ticket = await state_manager.create_ticket(TicketCreate(title="Task"))
+        config = KaganConfig()
+        manager = SessionManager(project_root, state_manager, config)
+
+        await manager.create_session(ticket, worktree_path)
+
+        content = (worktree_path / ".gitignore").read_text()
+        # Should not have duplicates - content should be unchanged
+        assert content == existing_content
