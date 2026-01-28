@@ -136,8 +136,11 @@ class KaganApp(App):
             self._worktree_manager = WorktreeManager(repo_root=project_root)
         if self._session_manager is None:
             self._session_manager = SessionManager(
-                project_root=project_root, state=self._state_manager
+                project_root=project_root, state=self._state_manager, config=self.config
             )
+            # Reconcile orphaned sessions from previous runs
+            await self._reconcile_sessions()
+
         if self._scheduler is None:
             self._scheduler = Scheduler(
                 state_manager=self._state_manager,
@@ -176,6 +179,30 @@ class KaganApp(App):
         """Run one scheduler tick."""
         if self._scheduler:
             await self._scheduler.tick()
+
+    async def _reconcile_sessions(self) -> None:
+        """Kill orphaned tmux sessions from previous runs."""
+        from kagan.sessions.tmux import TmuxError, run_tmux
+
+        state = self.state_manager  # Uses property, ensures not None
+        try:
+            output = await run_tmux("list-sessions", "-F", "#{session_name}")
+            kagan_sessions = [s for s in output.split("\n") if s.startswith("kagan-")]
+
+            tickets = await state.get_all_tickets()
+            valid_ticket_ids = {t.id for t in tickets}
+
+            for session_name in kagan_sessions:
+                ticket_id = session_name.replace("kagan-", "")
+                if ticket_id not in valid_ticket_ids:
+                    # Orphaned session - ticket no longer exists
+                    await run_tmux("kill-session", "-t", session_name)
+                    self.log(f"Killed orphaned session: {session_name}")
+                else:
+                    # Session exists, ensure session_active flag is correct
+                    await state.mark_session_active(ticket_id, True)
+        except TmuxError:
+            pass  # No tmux server running
 
     async def cleanup(self) -> None:
         """Terminate all agents and close resources."""

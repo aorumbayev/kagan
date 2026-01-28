@@ -75,6 +75,7 @@ class KanbanScreen(KaganScreen):
         super().__init__(**kwargs)
         self._tickets: list[Ticket] = []
         self._pending_delete_ticket: Ticket | None = None
+        self._pending_merge_ticket: Ticket | None = None
         self._editing_ticket_id: str | None = None
 
     def compose(self) -> ComposeResult:
@@ -248,6 +249,23 @@ class KanbanScreen(KaganScreen):
     async def _on_delete_confirmed(self, confirmed: bool | None) -> None:
         if confirmed and self._pending_delete_ticket:
             ticket = self._pending_delete_ticket
+
+            # Stop agent if running (AUTO tickets)
+            scheduler = self.kagan_app.scheduler
+            if scheduler.is_running(ticket.id):
+                agent = scheduler.get_running_agent(ticket.id)
+                if agent:
+                    await agent.stop()
+
+            # Kill tmux session if exists
+            await self.kagan_app.session_manager.kill_session(ticket.id)
+
+            # Delete worktree if exists
+            worktree = self.kagan_app.worktree_manager
+            if await worktree.get_path(ticket.id):
+                await worktree.delete(ticket.id, delete_branch=True)
+
+            # Delete ticket from database
             await self.kagan_app.state_manager.delete_ticket(ticket.id)
             await self._refresh_board()
             self.notify(f"Deleted ticket: {ticket.title}")
@@ -263,12 +281,42 @@ class KanbanScreen(KaganScreen):
             TicketStatus.next_status(status) if forward else TicketStatus.prev_status(status)
         )
         if new_status:
+            # REVIEW -> DONE requires merge confirmation
+            if status == TicketStatus.REVIEW and new_status == TicketStatus.DONE:
+                self._pending_merge_ticket = card.ticket
+                title = card.ticket.title[:40]
+                msg = f"Merge '{title}' and move to DONE?\n\nCleanup worktree and session."
+                self.app.push_screen(
+                    ConfirmModal(title="Complete Ticket?", message=msg),
+                    callback=self._on_merge_confirmed,
+                )
+                return
+
             await self.kagan_app.state_manager.move_ticket(card.ticket.id, new_status)
             await self._refresh_board()
             self.notify(f"Moved #{card.ticket.id} to {new_status.value}")
             self._focus_column(new_status)
         else:
             self.notify(f"Already in {'final' if forward else 'first'} status", severity="warning")
+
+    async def _on_merge_confirmed(self, confirmed: bool | None) -> None:
+        """Handle merge confirmation from ] key on REVIEW ticket."""
+        if confirmed and self._pending_merge_ticket:
+            ticket = self._pending_merge_ticket
+            worktree = self.kagan_app.worktree_manager
+            base = self.kagan_app.config.general.default_base_branch
+
+            success, message = await worktree.merge_to_main(ticket.id, base_branch=base)
+            if success:
+                # Cleanup resources but KEEP the ticket (move to DONE)
+                await worktree.delete(ticket.id, delete_branch=True)
+                await self.kagan_app.session_manager.kill_session(ticket.id)
+                await self.kagan_app.state_manager.move_ticket(ticket.id, TicketStatus.DONE)
+                await self._refresh_board()
+                self.notify(f"Merged and completed: {ticket.title}")
+            else:
+                self.notify(message, severity="error")
+        self._pending_merge_ticket = None
 
     async def action_move_forward(self) -> None:
         await self._move_ticket(forward=True)
@@ -287,12 +335,45 @@ class KanbanScreen(KaganScreen):
             )
 
     async def action_open_session(self) -> None:
-        """Open tmux session for selected ticket."""
+        """Open session for selected ticket (tmux for PAIR, modal for AUTO)."""
         card = self._get_focused_card()
         if not card or not card.ticket:
             return
 
         ticket = card.ticket
+        raw_type = ticket.ticket_type
+        ticket_type = TicketType(raw_type) if isinstance(raw_type, str) else raw_type
+
+        if ticket_type == TicketType.AUTO:
+            await self._open_auto_session(ticket)
+        else:
+            await self._open_pair_session(ticket)
+
+    async def _open_auto_session(self, ticket: Ticket) -> None:
+        """Handle Enter key for AUTO tickets - show agent output modal."""
+        scheduler = self.kagan_app.scheduler
+
+        # If in BACKLOG, move to IN_PROGRESS (scheduler will pick it up)
+        if ticket.status == TicketStatus.BACKLOG:
+            await self.kagan_app.state_manager.move_ticket(ticket.id, TicketStatus.IN_PROGRESS)
+            await self._refresh_board()
+            self.notify(f"Started AUTO ticket: {ticket.short_id}")
+            return
+
+        # If agent is running, open the watch modal
+        if scheduler.is_running(ticket.id):
+            from kagan.ui.modals.agent_output import AgentOutputModal
+
+            agent = scheduler.get_running_agent(ticket.id)
+            iteration = scheduler.get_iteration_count(ticket.id)
+            await self.app.push_screen(
+                AgentOutputModal(ticket=ticket, agent=agent, iteration=iteration)
+            )
+        else:
+            self.notify("Agent not running yet. Will start on next tick.", severity="warning")
+
+    async def _open_pair_session(self, ticket: Ticket) -> None:
+        """Handle Enter key for PAIR tickets - open tmux session."""
         worktree = self.kagan_app.worktree_manager
 
         try:

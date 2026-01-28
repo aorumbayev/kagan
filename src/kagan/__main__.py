@@ -2,82 +2,78 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
+from pathlib import Path
 
+import click
+
+from kagan import __version__
 from kagan.constants import DEFAULT_CONFIG_PATH, DEFAULT_DB_PATH, DEFAULT_LOCK_PATH
 
 
-def main() -> int:
-    """Main entry point for Kagan CLI."""
-    parser = argparse.ArgumentParser(
-        prog="kagan",
-        description="AI-powered Kanban TUI for autonomous development workflows",
-    )
-    parser.add_argument(
-        "--version",
-        action="store_true",
-        help="Show version and exit",
-    )
-    parser.add_argument(
-        "--db",
-        type=str,
-        default=DEFAULT_DB_PATH,
-        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default=DEFAULT_CONFIG_PATH,
-        help=f"Path to config file (default: {DEFAULT_CONFIG_PATH})",
-    )
+@click.group(invoke_without_command=True)
+@click.option("--version", is_flag=True, help="Show version and exit")
+@click.pass_context
+def cli(ctx: click.Context, version: bool) -> None:
+    """AI-powered Kanban TUI for autonomous development workflows."""
+    if version:
+        click.echo(f"kagan {__version__}")
+        ctx.exit(0)
 
-    args = parser.parse_args()
+    # Run TUI by default if no subcommand
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(tui)
 
-    if args.version:
-        from kagan import __version__
 
-        print(f"kagan {__version__}")
-        return 0
+@cli.command()
+@click.option("--db", default=DEFAULT_DB_PATH, help="Path to SQLite database")
+@click.option("--config", default=DEFAULT_CONFIG_PATH, help="Path to config file")
+def tui(db: str, config: str) -> None:
+    """Run the Kanban TUI (default command)."""
+    config_path = Path(config)
+    db_path = db
 
-    # If config is specified but db is not, derive db path from config path
-    # (db should be in the same directory as config)
-    from pathlib import Path
-
-    config_path = Path(args.config)
-    if args.db == DEFAULT_DB_PATH and args.config != DEFAULT_CONFIG_PATH:
-        # User specified a custom config but not a custom db
-        # Derive db path from config's parent directory
+    # Derive db path from config path if only config is specified
+    if db == DEFAULT_DB_PATH and config != DEFAULT_CONFIG_PATH:
         db_path = str(config_path.parent / "state.db")
-    else:
-        db_path = args.db
 
     # Import here to avoid slow startup for --help/--version
     from kagan.lock import InstanceLock, InstanceLockError
 
-    # Try to acquire the instance lock
     lock = InstanceLock(DEFAULT_LOCK_PATH)
     try:
         lock.acquire()
     except InstanceLockError:
-        # Another instance is running - show the locked screen
         from kagan.ui.screens.locked import InstanceLockedApp
 
         app = InstanceLockedApp()
         app.run()
-        return 1
+        sys.exit(1)
 
-    # Lock acquired - run the main app
     try:
         from kagan.app import KaganApp
 
-        app = KaganApp(db_path=db_path, config_path=args.config)
+        app = KaganApp(db_path=db_path, config_path=config)
         app._instance_lock = lock
         app.run()
-        return 0
     finally:
         lock.release()
 
 
+@cli.command()
+def mcp() -> None:
+    """Run the MCP server (STDIO transport).
+
+    This command is typically invoked by AI agents (Claude Code, OpenCode, etc.)
+    to communicate with Kagan via the Model Context Protocol.
+
+    The MCP server finds the nearest .kagan/ directory by traversing up
+    from the current working directory.
+    """
+    from kagan.mcp.server import main as mcp_main
+
+    mcp_main()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    cli()

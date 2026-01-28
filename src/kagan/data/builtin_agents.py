@@ -18,57 +18,76 @@ class BuiltinAgent:
 
 
 # Built-in agents that ship with Kagan
-# Run commands use ACP (Agent Communication Protocol) for standardized communication
+# run_command: ACP protocol command for AUTO mode (programmatic)
+# interactive_command: CLI command for PAIR mode (interactive tmux session)
 BUILTIN_AGENTS: dict[str, BuiltinAgent] = {
     "claude": BuiltinAgent(
         config=AgentConfig(
-            identity="anthropic.claude",
+            identity="claude.com",
             name="Claude Code",
             short_name="claude",
             run_command={"*": "claude-code-acp"},
+            interactive_command={"*": "claude"},
             active=True,
         ),
         author="Anthropic",
         description="Agentic AI for coding tasks",
-        install_command=(
-            "npm install -g @anthropic/claude-code && npm install -g @anthropic/claude-code-acp"
-        ),
+        install_command="curl -fsSL https://claude.ai/install.sh | bash",
     ),
     "opencode": BuiltinAgent(
         config=AgentConfig(
-            identity="opencode.dev",
+            identity="opencode.ai",
             name="OpenCode",
             short_name="opencode",
             run_command={"*": "opencode acp"},
+            interactive_command={"*": "opencode"},
             active=True,
         ),
-        author="Open Source",
+        author="SST",
         description="Multi-model CLI with TUI",
         install_command="npm i -g opencode-ai",
     ),
     "codex": BuiltinAgent(
         config=AgentConfig(
-            identity="openai.codex",
+            identity="openai.com",
             name="Codex CLI",
             short_name="codex",
             run_command={"*": "npx @zed-industries/codex-acp"},
+            interactive_command={"*": "codex"},
             active=True,
         ),
         author="OpenAI",
-        description="AI coding assistant",
+        description="Lightweight coding agent",
         install_command="npm install -g @openai/codex",
     ),
     "gemini": BuiltinAgent(
         config=AgentConfig(
-            identity="google.gemini",
+            identity="geminicli.com",
             name="Gemini CLI",
             short_name="gemini",
             run_command={"*": "gemini --experimental-acp"},
+            interactive_command={"*": "gemini"},
             active=True,
         ),
         author="Google",
-        description="Multimodal AI agent",
+        description="Query and edit large codebases",
         install_command="npm install -g @google/gemini-cli",
+    ),
+    "goose": BuiltinAgent(
+        config=AgentConfig(
+            identity="goose.ai",
+            name="Goose",
+            short_name="goose",
+            run_command={"*": "goose acp"},
+            interactive_command={"*": "goose"},
+            active=True,
+        ),
+        author="Block",
+        description="Extensible AI agent framework",
+        install_command=(
+            "curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh "
+            "| bash"
+        ),
     ),
 }
 

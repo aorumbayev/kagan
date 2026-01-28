@@ -4,20 +4,27 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING
 
-from kagan.database.manager import StateManager  # noqa: TC001
-from kagan.database.models import Ticket  # noqa: TC001
+from kagan.config import AgentConfig, get_os_value
 from kagan.sessions.context import build_context
 from kagan.sessions.tmux import TmuxError, run_tmux
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from kagan.config import KaganConfig
+    from kagan.database.manager import StateManager
+    from kagan.database.models import Ticket
 
 
 class SessionManager:
     """Manages tmux sessions for tickets."""
 
-    def __init__(self, project_root: Path, state: StateManager) -> None:
+    def __init__(self, project_root: Path, state: StateManager, config: KaganConfig) -> None:
         self._root = project_root
         self._state = state
+        self._config = config
 
     async def create_session(self, ticket: Ticket, worktree_path: Path) -> str:
         """Create tmux session with full context injection."""
@@ -43,10 +50,31 @@ class SessionManager:
         await self._write_context_files(ticket, worktree_path)
         await self._state.mark_session_active(ticket.id, True)
 
-        # Auto-launch Claude Code in the session
-        await run_tmux("send-keys", "-t", session_name, "claude", "Enter")
+        # Auto-launch the agent's interactive CLI in the session
+        agent_config = self._get_agent_config(ticket)
+        interactive_cmd = get_os_value(agent_config.interactive_command)
+        if interactive_cmd:
+            await run_tmux("send-keys", "-t", session_name, interactive_cmd, "Enter")
 
         return session_name
+
+    def _get_agent_config(self, ticket: Ticket) -> AgentConfig:
+        """Get agent config for ticket, with fallback to default."""
+        from kagan.config import get_fallback_agent_config
+        from kagan.data.builtin_agents import get_builtin_agent
+
+        # Priority 1: ticket's agent_backend
+        if ticket.agent_backend:
+            if builtin := get_builtin_agent(ticket.agent_backend):
+                return builtin.config
+
+        # Priority 2: config's default_worker_agent
+        default_agent = self._config.general.default_worker_agent
+        if builtin := get_builtin_agent(default_agent):
+            return builtin.config
+
+        # Priority 3: fallback
+        return get_fallback_agent_config()
 
     def attach_session(self, ticket_id: str) -> None:
         """Attach to session (blocks until detach, then returns to TUI)."""
@@ -76,7 +104,7 @@ class SessionManager:
         claude_dir = worktree_path / ".claude"
         claude_dir.mkdir(exist_ok=True)
         (claude_dir / "settings.local.json").write_text(
-            '{"mcpServers": {"kagan": {"command": "kagan-mcp"}}}'
+            '{"mcpServers": {"kagan": {"command": "kagan", "args": ["mcp"]}}}'
         )
 
         agents_md = self._root / "AGENTS.md"

@@ -6,6 +6,7 @@ from pathlib import Path  # noqa: TC003
 
 import pytest
 
+from kagan.config import KaganConfig
 from kagan.database.models import TicketCreate
 from kagan.sessions.manager import SessionManager
 
@@ -57,7 +58,8 @@ class TestSessionManager:
                 check_command="pytest tests/",
             )
         )
-        manager = SessionManager(project_root, state_manager)
+        config = KaganConfig()
+        manager = SessionManager(project_root, state_manager, config)
 
         session_name = await manager.create_session(ticket, worktree_path)
 
@@ -91,7 +93,8 @@ class TestSessionManager:
         worktree_path.mkdir()
 
         ticket = await state_manager.create_ticket(TicketCreate(title="Work"))
-        manager = SessionManager(project_root, state_manager)
+        config = KaganConfig()
+        manager = SessionManager(project_root, state_manager, config)
 
         await manager.create_session(ticket, worktree_path)
         assert await manager.session_exists(ticket.id) is True

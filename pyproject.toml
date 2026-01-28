@@ -11,11 +11,11 @@ dependencies = [
     "psutil>=6.0.0",
     "typeguard>=4.0.0",
     "mcp",
+    "click>=8.0.0",
 ]
 
 [project.scripts]
-kagan = "kagan.__main__:main"
-kagan-mcp = "kagan.mcp:main"
+kagan = "kagan.__main__:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -44,9 +44,9 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "TCH", "RUF"]
 ignore = [
-    "RUF012",  # Textual class attributes (BINDINGS, etc.) don't need ClassVar
-    "SIM102",  # Allow nested if statements for readability
-    "SIM117",  # Allow nested with statements for Textual compose patterns
+    "RUF012", # Textual class attributes (BINDINGS, etc.) don't need ClassVar
+    "SIM102", # Allow nested if statements for readability
+    "SIM117", # Allow nested with statements for Textual compose patterns
 ]
 
 [tool.ruff.format]
@@ -59,6 +59,7 @@ search_path = ["src", "."]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
 
 [tool.poe.tasks]
 dev = "textual run --dev src/kagan/app.py"

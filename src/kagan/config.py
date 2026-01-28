@@ -58,7 +58,11 @@ class AgentConfig(BaseModel):
     protocol: Literal["acp"] = Field(default="acp", description="Protocol type")
     run_command: dict[str, str] = Field(
         default_factory=dict,
-        description="OS-specific run commands (keys: 'linux', 'macos', 'windows', '*')",
+        description="OS-specific ACP commands for AUTO mode (e.g., 'claude-code-acp')",
+    )
+    interactive_command: dict[str, str] = Field(
+        default_factory=dict,
+        description="OS-specific CLI commands for PAIR mode (e.g., 'claude')",
     )
     active: bool = Field(default=True, description="Whether this agent is active")
 
@@ -107,8 +111,9 @@ def load_config() -> KaganConfig:
 def get_fallback_agent_config() -> AgentConfig:
     """Get fallback agent config when none configured."""
     return AgentConfig(
-        identity="anthropic.claude",
-        name="Claude",
+        identity="claude.com",
+        name="Claude Code",
         short_name="claude",
-        run_command={"*": "claude"},
+        run_command={"*": "claude-code-acp"},
+        interactive_command={"*": "claude"},
     )
