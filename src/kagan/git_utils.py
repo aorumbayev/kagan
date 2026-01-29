@@ -100,13 +100,15 @@ def init_git_repo(repo_root: Path, base_branch: str) -> bool:
         if result.returncode != 0:
             return False
 
-        subprocess.run(
+        branch_result = subprocess.run(
             ["git", "branch", "-M", base_branch],
             cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,
         )
+        if branch_result.returncode != 0:
+            return False
 
     # Create initial commit so worktrees can be created
     # Without a commit, the base branch doesn't exist as a valid reference
@@ -114,20 +116,21 @@ def init_git_repo(repo_root: Path, base_branch: str) -> bool:
     if not gitkeep.exists():
         gitkeep.write_text("")
 
-    subprocess.run(
+    add_result = subprocess.run(
         ["git", "add", ".gitkeep"],
         cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
     )
+    if add_result.returncode != 0:
+        return False
 
-    subprocess.run(
+    commit_result = subprocess.run(
         ["git", "commit", "-m", "Initial commit (kagan)"],
         cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
     )
-
-    return True
+    return commit_result.returncode == 0
