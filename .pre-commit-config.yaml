@@ -4,19 +4,22 @@ repos:
     rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
+        exclude: ^tests/__snapshots__/
       - id: trailing-whitespace
+        exclude: ^tests/__snapshots__/
       - id: check-yaml
       - id: check-added-large-files
       - id: check-merge-conflict
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: ^tests/__snapshots__/
 
   # Markdown formatter
   - repo: https://github.com/hukkin/mdformat
     rev: 1.0.0
     hooks:
       - id: mdformat
-        exclude: ^\.github/
+        exclude: ^(\.github/|README\.md$)
         additional_dependencies:
           - mdformat-gfm
           - mdformat-ruff

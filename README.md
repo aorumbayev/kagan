@@ -67,7 +67,7 @@ See the [docs/](docs/) folder for detailed documentation:
 
 [MIT](LICENSE)
 
-## Star History
+---
 
 <a href="https://www.star-history.com/#aorumbayev/kagan&type=date&legend=top-left">
  <picture>
