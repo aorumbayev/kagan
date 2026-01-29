@@ -98,7 +98,8 @@ jobs:
     # Run docs publishing in two scenarios:
     # 1. After a successful production release on main branch
     # 2. When docs_only flag is set (on main branch only)
-    if: always() && !cancelled() && github.ref == 'refs/heads/main' && (needs.release.result == 'success' || needs.release.result == 'skipped') && ((inputs.production_release && !inputs.docs_only) || inputs.docs_only)
+    # Note: docs_only takes precedence if both flags are set
+    if: always() && !cancelled() && github.ref == 'refs/heads/main' && (needs.release.result == 'success' || needs.release.result == 'skipped') && (inputs.production_release || inputs.docs_only)
     runs-on: ubuntu-latest
     permissions:
       contents: read
