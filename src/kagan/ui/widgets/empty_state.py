@@ -60,6 +60,6 @@ class EmptyState(Widget):
                     classes="card-item-compact",
                 )
                 yield Static(
-                    f"  {BOX_DRAWING['BULLET']} Use CTRL+e to AI enhance you input prompt",
+                    f"  {BOX_DRAWING['BULLET']} Use CTRL+e to AI enhance your input prompt",
                     classes="card-item-compact",
                 )
