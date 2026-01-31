@@ -11,26 +11,51 @@ on:
       - ".github/workflows/ci.yml"
 
 jobs:
-  check:
+  # Fast lint and typecheck - runs first, fails fast
+  lint-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - run: uv sync --dev
+
+      - name: Lint
+        run: uv run poe lint
+
+      - name: Typecheck
+        run: uv run poe typecheck
+
+  # Tests - runs after lint passes
+  test:
+    name: Test (${{ matrix.name }})
+    needs: lint-typecheck
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu x86_64 (Intel/AMD)
+          # Always run on Ubuntu x86_64 (fastest, most common)
           - os: ubuntu-latest
             name: Ubuntu x86_64
-          # Ubuntu ARM64
+            run-always: true
+          # Additional platforms only on main branch pushes
           - os: ubuntu-24.04-arm
             name: Ubuntu ARM64
-          # macOS ARM64 (Apple Silicon)
+            run-always: false
           - os: macos-15
             name: macOS ARM64
-          # macOS x86_64 (Intel) - macos-13 retired, use macos-15-intel
+            run-always: false
           - os: macos-15-intel
             name: macOS x86_64
+            run-always: false
 
-    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # Run if: always-run platform OR pushing to main branch
+    if: ${{ matrix.run-always || github.ref == 'refs/heads/main' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -46,4 +71,11 @@ jobs:
 
       - run: uv sync --dev
 
-      - run: uv run poe check
+      # Run tests - add coverage only on main branch
+      - name: Run tests
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            uv run pytest tests/ -n auto --cov=src/kagan --cov-report=term-missing
+          else
+            uv run pytest tests/ -n auto
+          fi
