@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.2.1-beta.1 (2026-01-31)
+
+### Documentation
+
+- Update readme
+  ([`821f59b`](https://github.com/aorumbayev/kagan/commit/821f59b9282b77201a27649ceb4a4a44dec5d63d))
+
+### Refactoring
+
+- **tests**: Mock fetch_latest_version instead of httpx transport
+  ([`db9053a`](https://github.com/aorumbayev/kagan/commit/db9053a0ed4d8a9b503ca03bcf850e0f06112506))
+
+- **tests**: Reduce httpx_mock usage to minimize event loop warnings
+  ([`37332db`](https://github.com/aorumbayev/kagan/commit/37332db58650b42f481039e8a5874d05bb24044e))
+
+
 ## v0.2.0 (2026-01-31)
 
 
