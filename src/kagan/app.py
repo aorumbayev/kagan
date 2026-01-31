@@ -98,9 +98,9 @@ class KaganApp(App):
         self.log.debug("Config settings", auto_start=self.config.general.auto_start)
 
         project_root = self.config_path.parent.parent
-        if not has_git_repo(project_root):
+        if not await has_git_repo(project_root):
             base_branch = self.config.general.default_base_branch
-            if init_git_repo(project_root, base_branch):
+            if await init_git_repo(project_root, base_branch):
                 self.log("Initialized git repository", base_branch=base_branch)
             else:
                 self.log.warning("Failed to initialize git repository", path=str(project_root))

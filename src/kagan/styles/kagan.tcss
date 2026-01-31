@@ -1492,6 +1492,7 @@ SearchBar Input:focus {
    ============================================================================= */
 
 /* Leader mode hint overlay - layer ensures it appears above footer */
+/* Uses offset-y instead of display toggle to avoid layout recalculation */
 .leader-hint {
     dock: bottom;
     width: 100%;
@@ -1500,13 +1501,13 @@ SearchBar Input:focus {
     color: $background;
     text-align: center;
     text-style: bold;
-    display: none;
     layer: overlay;
     padding: 0 1;
+    offset-y: 100%;
 }
 
 .leader-hint.visible {
-    display: block;
+    offset-y: 0;
 }
 
 /* =============================================================================

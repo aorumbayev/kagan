@@ -57,33 +57,42 @@ class TestBuildBranchOptions:
 class TestGetDefaultBaseBranch:
     """Tests for _get_default_base_branch method."""
 
-    def test_no_git_repo_returns_main(self):
+    async def test_no_git_repo_returns_main(self):
         screen = _create_welcome_screen(has_git_repo=False)
-        result = screen._get_default_base_branch([])
+        result = await screen._get_default_base_branch([])
         assert result == "main"
 
-    def test_no_git_repo_ignores_branches(self):
+    async def test_no_git_repo_ignores_branches(self):
         screen = _create_welcome_screen(has_git_repo=False)
-        result = screen._get_default_base_branch(["develop", "feature"])
+        result = await screen._get_default_base_branch(["develop", "feature"])
         assert result == "main"
 
-    def test_with_git_repo_prefers_default_candidates(self, tmp_path: Path, monkeypatch):
-        # Mock get_current_branch to return None
-        monkeypatch.setattr("kagan.ui.screens.welcome.get_current_branch", lambda _: None)
+    async def test_with_git_repo_prefers_default_candidates(self, tmp_path: Path, monkeypatch):
+        # Mock get_current_branch to return None (async)
+        async def mock_get_current_branch(_):
+            return None
+
+        monkeypatch.setattr("kagan.ui.screens.welcome.get_current_branch", mock_get_current_branch)
         screen = _create_welcome_screen(has_git_repo=True, repo_root=tmp_path)
-        result = screen._get_default_base_branch(["develop", "feature"])
+        result = await screen._get_default_base_branch(["develop", "feature"])
         assert result == "develop"
 
-    def test_with_git_repo_falls_back_to_first_branch(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr("kagan.ui.screens.welcome.get_current_branch", lambda _: None)
+    async def test_with_git_repo_falls_back_to_first_branch(self, tmp_path: Path, monkeypatch):
+        async def mock_get_current_branch(_):
+            return None
+
+        monkeypatch.setattr("kagan.ui.screens.welcome.get_current_branch", mock_get_current_branch)
         screen = _create_welcome_screen(has_git_repo=True, repo_root=tmp_path)
-        result = screen._get_default_base_branch(["custom-branch", "another"])
+        result = await screen._get_default_base_branch(["custom-branch", "another"])
         assert result == "custom-branch"
 
-    def test_with_git_repo_uses_current_branch(self, tmp_path: Path, monkeypatch):
-        monkeypatch.setattr("kagan.ui.screens.welcome.get_current_branch", lambda _: "feature-x")
+    async def test_with_git_repo_uses_current_branch(self, tmp_path: Path, monkeypatch):
+        async def mock_get_current_branch(_):
+            return "feature-x"
+
+        monkeypatch.setattr("kagan.ui.screens.welcome.get_current_branch", mock_get_current_branch)
         screen = _create_welcome_screen(has_git_repo=True, repo_root=tmp_path)
-        result = screen._get_default_base_branch(["main", "develop"])
+        result = await screen._get_default_base_branch(["main", "develop"])
         assert result == "feature-x"
 
 

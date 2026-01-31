@@ -1,113 +1,112 @@
-"""Utility helpers for git repository setup and queries."""
+"""Utility helpers for git repository setup and queries.
+
+All functions are async to avoid blocking the event loop during subprocess calls.
+"""
 
 from __future__ import annotations
 
-import subprocess
+import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def has_git_repo(repo_root: Path) -> bool:
+async def has_git_repo(repo_root: Path) -> bool:
     """Return True if the path is inside a git work tree."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "rev-parse",
+            "--is-inside-work-tree",
             cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stdout, _ = await proc.communicate()
+        return proc.returncode == 0 and stdout.decode().strip() == "true"
     except FileNotFoundError:
         return False
 
-    return result.returncode == 0 and result.stdout.strip() == "true"
 
-
-def list_local_branches(repo_root: Path) -> list[str]:
+async def list_local_branches(repo_root: Path) -> list[str]:
     """Return local branch names for a repository, if any."""
-    if not has_git_repo(repo_root):
+    if not await has_git_repo(repo_root):
         return []
-
     try:
-        result = subprocess.run(
-            ["git", "branch", "--list", "--format", "%(refname:short)"],
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "branch",
+            "--list",
+            "--format",
+            "%(refname:short)",
             cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return []
+        return [line.strip() for line in stdout.decode().splitlines() if line.strip()]
     except FileNotFoundError:
         return []
 
-    if result.returncode != 0:
-        return []
 
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
-
-
-def get_current_branch(repo_root: Path) -> str:
+async def get_current_branch(repo_root: Path) -> str:
     """Return the current git branch name, or empty string if unavailable."""
-    if not has_git_repo(repo_root):
+    if not await has_git_repo(repo_root):
         return ""
-
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
             cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return ""
+        branch = stdout.decode().strip()
+        return "" if branch == "HEAD" else branch
     except FileNotFoundError:
         return ""
 
-    if result.returncode != 0:
-        return ""
 
-    branch = result.stdout.strip()
-    return "" if branch == "HEAD" else branch
-
-
-def init_git_repo(repo_root: Path, base_branch: str) -> bool:
+async def init_git_repo(repo_root: Path, base_branch: str) -> bool:
     """Initialize a git repo with the requested base branch and initial commit.
 
     Creates an initial commit so that worktrees can be created from the base branch.
     Without a commit, `git worktree add -b <branch> <path> <base>` fails with
     'fatal: invalid reference: <base>'.
     """
-    try:
-        result = subprocess.run(
-            ["git", "init", "-b", base_branch],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError:
-        return False
 
-    if result.returncode != 0:
+    async def run_git(*args: str) -> tuple[int, str]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                *args,
+                cwd=repo_root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            returncode = proc.returncode if proc.returncode is not None else 1
+            return returncode, stdout.decode()
+        except FileNotFoundError:
+            return 1, ""
+
+    # Try init with -b flag first
+    code, _ = await run_git("init", "-b", base_branch)
+    if code != 0:
         # Fallback for older git versions without -b support
-        result = subprocess.run(
-            ["git", "init"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
+        code, _ = await run_git("init")
+        if code != 0:
             return False
-
-        branch_result = subprocess.run(
-            ["git", "branch", "-M", base_branch],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if branch_result.returncode != 0:
+        code, _ = await run_git("branch", "-M", base_branch)
+        if code != 0:
             return False
 
     # Create initial commit so worktrees can be created
@@ -116,21 +115,9 @@ def init_git_repo(repo_root: Path, base_branch: str) -> bool:
     if not gitkeep.exists():
         gitkeep.write_text("")
 
-    add_result = subprocess.run(
-        ["git", "add", ".gitkeep"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if add_result.returncode != 0:
+    code, _ = await run_git("add", ".gitkeep")
+    if code != 0:
         return False
 
-    commit_result = subprocess.run(
-        ["git", "commit", "-m", "Initial commit (kagan)"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return commit_result.returncode == 0
+    code, _ = await run_git("commit", "-m", "Initial commit (kagan)")
+    return code == 0

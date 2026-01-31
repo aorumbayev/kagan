@@ -1,9 +1,10 @@
-"""Tests for git_utils module - all functions."""
+"""Tests for git_utils module - all async functions."""
 
 from __future__ import annotations
 
-import subprocess
+import asyncio
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,252 +12,154 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from kagan.git_utils import get_current_branch, has_git_repo, init_git_repo, list_local_branches
+from tests.helpers.git import configure_git_user
 
 pytestmark = pytest.mark.integration
+
+
+async def _run_git(repo_path: Path, *args: str) -> None:
+    """Run git command silently."""
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        *args,
+        cwd=repo_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await proc.communicate()
 
 
 class TestHasGitRepo:
     """Tests for has_git_repo function."""
 
-    def test_returns_true_for_valid_repo(self, tmp_path: Path) -> None:
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-        assert has_git_repo(tmp_path) is True
+    async def test_returns_true_for_valid_repo(self, tmp_path: Path) -> None:
+        await _run_git(tmp_path, "init")
+        assert await has_git_repo(tmp_path) is True
 
-    def test_returns_false_for_non_repo(self, tmp_path: Path) -> None:
-        assert has_git_repo(tmp_path) is False
+    async def test_returns_false_for_non_repo(self, tmp_path: Path) -> None:
+        assert await has_git_repo(tmp_path) is False
 
-    def test_returns_false_when_git_not_found(self, tmp_path: Path, mocker) -> None:
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=FileNotFoundError)
-        assert has_git_repo(tmp_path) is False
-
-    def test_returns_false_on_nonzero_returncode(self, tmp_path: Path, mocker) -> None:
-        mock_result = mocker.MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        mocker.patch("kagan.git_utils.subprocess.run", return_value=mock_result)
-        assert has_git_repo(tmp_path) is False
-
-    def test_returns_false_when_stdout_not_true(self, tmp_path: Path, mocker) -> None:
-        mock_result = mocker.MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "false\n"
-        mocker.patch("kagan.git_utils.subprocess.run", return_value=mock_result)
-        assert has_git_repo(tmp_path) is False
+    async def test_returns_false_when_git_not_found(self, tmp_path: Path) -> None:
+        with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError):
+            assert await has_git_repo(tmp_path) is False
 
 
 class TestListLocalBranches:
     """Tests for list_local_branches function."""
 
-    def test_returns_empty_for_non_repo(self, tmp_path: Path) -> None:
-        assert list_local_branches(tmp_path) == []
+    async def test_returns_empty_for_non_repo(self, tmp_path: Path) -> None:
+        assert await list_local_branches(tmp_path) == []
 
-    def test_returns_branches_for_valid_repo(self, tmp_path: Path) -> None:
-        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True
-        )
-        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, capture_output=True)
-        subprocess.run(
-            ["git", "config", "commit.gpgsign", "false"], cwd=tmp_path, capture_output=True
-        )
+    async def test_returns_branches_for_valid_repo(self, tmp_path: Path) -> None:
+        await _run_git(tmp_path, "init", "-b", "main")
+        await configure_git_user(tmp_path)
         (tmp_path / "file.txt").write_text("content")
-        subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True)
-        branches = list_local_branches(tmp_path)
+        await _run_git(tmp_path, "add", ".")
+        await _run_git(tmp_path, "commit", "-m", "init")
+        branches = await list_local_branches(tmp_path)
         assert "main" in branches
 
-    def test_returns_empty_when_git_not_found(self, tmp_path: Path, mocker) -> None:
+    async def test_returns_empty_when_git_not_found_on_branch_list(self, tmp_path: Path) -> None:
+        """When has_git_repo succeeds but branch listing fails with FileNotFoundError."""
+        await _run_git(tmp_path, "init")
         call_count = [0]
-        original_run = subprocess.run
 
-        def mock_run(*args, **kwargs):
+        async def mock_subprocess(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
-                return original_run(*args, **kwargs)
+                # First call (has_git_repo) - succeed
+                mock_proc = MagicMock()
+                mock_proc.communicate = AsyncMock(return_value=(b"true\n", b""))
+                mock_proc.returncode = 0
+                return mock_proc
+            # Second call (branch list) - fail
             raise FileNotFoundError
 
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert list_local_branches(tmp_path) == []
-
-    def test_returns_empty_on_nonzero_returncode(self, tmp_path: Path, mocker) -> None:
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
-
-        call_count = [0]
-
-        def mock_run(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                result = mocker.MagicMock()
-                result.returncode = 0
-                result.stdout = "true\n"
-                return result
-            result = mocker.MagicMock()
-            result.returncode = 1
-            result.stdout = ""
-            return result
-
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert list_local_branches(tmp_path) == []
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess):
+            assert await list_local_branches(tmp_path) == []
 
 
 class TestGetCurrentBranch:
     """Tests for get_current_branch function."""
 
-    def test_returns_empty_for_non_repo(self, tmp_path: Path) -> None:
-        assert get_current_branch(tmp_path) == ""
+    async def test_returns_empty_for_non_repo(self, tmp_path: Path) -> None:
+        assert await get_current_branch(tmp_path) == ""
 
-    def test_returns_branch_name(self, tmp_path: Path) -> None:
-        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True
-        )
-        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, capture_output=True)
-        subprocess.run(
-            ["git", "config", "commit.gpgsign", "false"], cwd=tmp_path, capture_output=True
-        )
+    async def test_returns_branch_name(self, tmp_path: Path) -> None:
+        await _run_git(tmp_path, "init", "-b", "main")
+        await configure_git_user(tmp_path)
         (tmp_path / "file.txt").write_text("content")
-        subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True)
-        assert get_current_branch(tmp_path) == "main"
+        await _run_git(tmp_path, "add", ".")
+        await _run_git(tmp_path, "commit", "-m", "init")
+        assert await get_current_branch(tmp_path) == "main"
 
-    def test_returns_empty_when_git_not_found(self, tmp_path: Path, mocker) -> None:
+    async def test_returns_empty_for_detached_head(self, tmp_path: Path) -> None:
+        """When HEAD is detached, returns empty string."""
         call_count = [0]
 
-        def mock_run(*args, **kwargs):
+        async def mock_subprocess(*args, **kwargs):
             call_count[0] += 1
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock()
             if call_count[0] == 1:
-                result = mocker.MagicMock()
-                result.returncode = 0
-                result.stdout = "true\n"
-                return result
-            raise FileNotFoundError
+                # has_git_repo check
+                mock_proc.communicate.return_value = (b"true\n", b"")
+                mock_proc.returncode = 0
+            else:
+                # get current branch - detached HEAD
+                mock_proc.communicate.return_value = (b"HEAD\n", b"")
+                mock_proc.returncode = 0
+            return mock_proc
 
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert get_current_branch(tmp_path) == ""
-
-    def test_returns_empty_on_nonzero_returncode(self, tmp_path: Path, mocker) -> None:
-        call_count = [0]
-
-        def mock_run(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                result = mocker.MagicMock()
-                result.returncode = 0
-                result.stdout = "true\n"
-                return result
-            result = mocker.MagicMock()
-            result.returncode = 1
-            result.stdout = ""
-            return result
-
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert get_current_branch(tmp_path) == ""
-
-    def test_returns_empty_for_detached_head(self, tmp_path: Path, mocker) -> None:
-        call_count = [0]
-
-        def mock_run(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                result = mocker.MagicMock()
-                result.returncode = 0
-                result.stdout = "true\n"
-                return result
-            result = mocker.MagicMock()
-            result.returncode = 0
-            result.stdout = "HEAD\n"
-            return result
-
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert get_current_branch(tmp_path) == ""
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess):
+            assert await get_current_branch(tmp_path) == ""
 
 
 class TestInitGitRepo:
     """Tests for init_git_repo function."""
 
-    def test_init_creates_repo_with_branch(self, tmp_path: Path) -> None:
-        subprocess.run(
-            ["git", "config", "--global", "user.email", "test@test.com"], capture_output=True
-        )
-        subprocess.run(["git", "config", "--global", "user.name", "Test"], capture_output=True)
-        result = init_git_repo(tmp_path, "develop")
+    async def test_init_creates_repo_with_branch(self, tmp_path: Path) -> None:
+        # Configure git globally for the test
+        await _run_git(tmp_path, "config", "--global", "user.email", "test@test.com")
+        await _run_git(tmp_path, "config", "--global", "user.name", "Test")
+        result = await init_git_repo(tmp_path, "develop")
         assert result is True
-        assert has_git_repo(tmp_path)
+        assert await has_git_repo(tmp_path)
         assert (tmp_path / ".gitkeep").exists()
 
-    def test_returns_false_when_git_not_found(self, tmp_path: Path, mocker) -> None:
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=FileNotFoundError)
-        assert init_git_repo(tmp_path, "main") is False
+    async def test_returns_false_when_git_not_found(self, tmp_path: Path) -> None:
+        with patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError):
+            assert await init_git_repo(tmp_path, "main") is False
 
-    def test_fallback_for_old_git_versions(self, tmp_path: Path, mocker) -> None:
+    async def test_fallback_for_old_git_versions(self, tmp_path: Path) -> None:
+        """When git init -b fails, falls back to git init + git branch -M."""
         call_count = [0]
-        original_run = subprocess.run
+        original_exec = asyncio.create_subprocess_exec
 
-        def mock_run(cmd, **kwargs):
+        async def mock_subprocess(*args, **kwargs):
+            nonlocal call_count
             call_count[0] += 1
             if call_count[0] == 1:
-                result = mocker.MagicMock()
-                result.returncode = 1
-                return result
-            return original_run(cmd, **kwargs)
+                # First call (init -b) fails
+                mock_proc = MagicMock()
+                mock_proc.communicate = AsyncMock(return_value=(b"", b"error"))
+                mock_proc.returncode = 1
+                return mock_proc
+            # Subsequent calls use real implementation
+            return await original_exec(*args, **kwargs)
 
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        result = init_git_repo(tmp_path, "main")
-        assert result is True
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess):
+            result = await init_git_repo(tmp_path, "main")
+            assert result is True
 
-    def test_returns_false_if_fallback_init_fails(self, tmp_path: Path, mocker) -> None:
-        def mock_run(cmd, **kwargs):
-            result = mocker.MagicMock()
-            result.returncode = 1
-            return result
+    async def test_returns_false_if_all_init_attempts_fail(self, tmp_path: Path) -> None:
+        """When all init attempts fail, returns False."""
 
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert init_git_repo(tmp_path, "main") is False
+        async def mock_subprocess(*args, **kwargs):
+            mock_proc = MagicMock()
+            mock_proc.communicate = AsyncMock(return_value=(b"", b"error"))
+            mock_proc.returncode = 1
+            return mock_proc
 
-    def test_returns_false_if_branch_rename_fails(self, tmp_path: Path, mocker) -> None:
-        call_count = [0]
-        original_run = subprocess.run
-
-        def mock_run(cmd, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                result = mocker.MagicMock()
-                result.returncode = 1
-                return result
-            if call_count[0] == 2:
-                return original_run(cmd, **kwargs)
-            if call_count[0] == 3:
-                result = mocker.MagicMock()
-                result.returncode = 1
-                return result
-            return original_run(cmd, **kwargs)
-
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert init_git_repo(tmp_path, "main") is False
-
-    def test_returns_false_if_git_add_fails(self, tmp_path: Path, mocker) -> None:
-        original_run = subprocess.run
-
-        def mock_run(cmd, **kwargs):
-            if "add" in cmd:
-                result = mocker.MagicMock()
-                result.returncode = 1
-                return result
-            return original_run(cmd, **kwargs)
-
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert init_git_repo(tmp_path, "main") is False
-
-    def test_returns_false_if_commit_fails(self, tmp_path: Path, mocker) -> None:
-        original_run = subprocess.run
-
-        def mock_run(cmd, **kwargs):
-            if "commit" in cmd:
-                result = mocker.MagicMock()
-                result.returncode = 1
-                return result
-            return original_run(cmd, **kwargs)
-
-        mocker.patch("kagan.git_utils.subprocess.run", side_effect=mock_run)
-        assert init_git_repo(tmp_path, "main") is False
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess):
+            assert await init_git_repo(tmp_path, "main") is False

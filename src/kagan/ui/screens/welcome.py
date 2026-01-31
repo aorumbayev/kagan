@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from textual.containers import Center, Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Label, Select, Switch
 
@@ -21,6 +22,8 @@ from kagan.keybindings import WELCOME_BINDINGS, to_textual_bindings
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
+    from kagan.app import KaganApp
+
 DEFAULT_BASE_BRANCHES = ("main", "master", "develop", "trunk")
 
 
@@ -34,13 +37,11 @@ class WelcomeScreen(Screen):
         self._agents = list_builtin_agents()
         self._agent_availability = get_all_agent_availability()
         self._repo_root = Path.cwd()
-        self._has_git_repo = has_git_repo(self._repo_root)
-        self._branches = list_local_branches(self._repo_root) if self._has_git_repo else []
-        self._default_base_branch = self._get_default_base_branch(self._branches)
-        self._branch_options = self._build_branch_options(
-            self._branches,
-            self._default_base_branch,
-        )
+        # Git state - populated in on_mount
+        self._has_git_repo: bool = False
+        self._branches: list[str] = []
+        self._default_base_branch: str = "main"
+        self._branch_options: list[str] = list(DEFAULT_BASE_BRANCHES)
 
     def _build_branch_options(self, branches: list[str], default_branch: str) -> list[str]:
         options: list[str] = []
@@ -49,9 +50,9 @@ class WelcomeScreen(Screen):
                 options.append(name)
         return options
 
-    def _get_default_base_branch(self, branches: list[str]) -> str:
+    async def _get_default_base_branch(self, branches: list[str]) -> str:
         if self._has_git_repo:
-            current = get_current_branch(self._repo_root)
+            current = await get_current_branch(self._repo_root)
             if current:
                 return current
             for candidate in DEFAULT_BASE_BRANCHES:
@@ -86,6 +87,7 @@ class WelcomeScreen(Screen):
         if default_agent is None:
             default_agent = "claude"
 
+        # Initial branch options - will be updated in on_mount with git data
         base_branch_options = [(name, name) for name in self._branch_options]
 
         with Vertical(id="welcome-container"):
@@ -111,13 +113,13 @@ class WelcomeScreen(Screen):
                 id="base-branch-select",
             )
 
-            if not self._has_git_repo:
-                yield Label(
-                    "No git repo detected. A fresh git repo will be initialized\n"
-                    "because Kagan requires git worktrees.",
-                    id="git-init-hint",
-                    classes="info-label",
-                )
+            # Git init hint - hidden by default, shown in on_mount if no git repo
+            yield Label(
+                "No git repo detected. A fresh git repo will be initialized\n"
+                "because Kagan requires git worktrees.",
+                id="git-init-hint",
+                classes="info-label hidden",
+            )
 
             # AUTO Mode Settings section
             yield Label("Agent Settings:", classes="section-label settings-header")
@@ -131,6 +133,46 @@ class WelcomeScreen(Screen):
 
             # Footer with key bindings
             yield Footer()
+
+    async def on_mount(self) -> None:
+        """Load git info and update UI after mount."""
+        # Fetch git state asynchronously
+        self._has_git_repo = await has_git_repo(self._repo_root)
+        if self._has_git_repo:
+            self._branches = await list_local_branches(self._repo_root)
+        else:
+            self._branches = []
+
+        self._default_base_branch = await self._get_default_base_branch(self._branches)
+        self._branch_options = self._build_branch_options(
+            self._branches,
+            self._default_base_branch,
+        )
+
+        # Update branch select with loaded options
+        self._update_branch_select()
+
+        # Show git init hint if no git repo
+        if not self._has_git_repo:
+            self._show_git_init_hint()
+
+    def _update_branch_select(self) -> None:
+        """Update branch select with loaded options."""
+        try:
+            select = self.query_one("#base-branch-select", Select)
+            options = [(name, name) for name in self._branch_options]
+            select.set_options(options)
+            select.value = self._default_base_branch
+        except NoMatches:
+            pass
+
+    def _show_git_init_hint(self) -> None:
+        """Show the git init hint label."""
+        try:
+            hint = self.query_one("#git-init-hint", Label)
+            hint.remove_class("hidden")
+        except NoMatches:
+            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -164,8 +206,8 @@ class WelcomeScreen(Screen):
 
     def _notify_setup_complete(self) -> None:
         """Notify app that setup is complete and it should continue mounting."""
-        if hasattr(self.app, "_continue_after_welcome"):
-            self.app._continue_after_welcome()
+        app = cast("KaganApp", self.app)
+        app._continue_after_welcome()
 
     def _write_config(
         self,
