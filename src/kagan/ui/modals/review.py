@@ -103,6 +103,7 @@ class ReviewModal(ModalScreen[str | None]):
     async def on_mount(self) -> None:
         """Load commits and diff immediately."""
         commits = await self._worktree.get_commit_log(self.ticket.id, self._base_branch)
+
         diff_stats = await self._worktree.get_diff_stats(self.ticket.id, self._base_branch)
 
         log = self.query_one("#commits-log", RichLog)

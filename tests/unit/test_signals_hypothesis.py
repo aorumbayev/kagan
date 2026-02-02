@@ -154,3 +154,81 @@ class TestCaseInsensitivity:
         """Continue signal is case-insensitive."""
         result = parse_signal(tag)
         assert result.signal == Signal.CONTINUE
+
+    @given(
+        st.sampled_from(
+            [
+                '<APPROVE summary="test"/>',
+                '<Approve summary="test"/>',
+                '<approve summary="test"/>',
+                '<ApPrOvE summary="test"/>',
+            ]
+        )
+    )
+    def test_approve_case_insensitive(self, tag: str) -> None:
+        """Approve signal is case-insensitive."""
+        result = parse_signal(tag)
+        assert result.signal == Signal.APPROVE
+        assert result.reason == "test"
+
+    @given(
+        st.sampled_from(
+            [
+                '<REJECT reason="test"/>',
+                '<Reject reason="test"/>',
+                '<reject reason="test"/>',
+                '<ReJeCt reason="test"/>',
+            ]
+        )
+    )
+    def test_reject_case_insensitive(self, tag: str) -> None:
+        """Reject signal is case-insensitive."""
+        result = parse_signal(tag)
+        assert result.signal == Signal.REJECT
+        assert result.reason == "test"
+
+
+class TestApproveEdgeCases:
+    """Tests for approve signal edge cases.
+
+    These tests cover edge cases that could occur in real agent responses,
+    particularly around attribute handling and whitespace.
+    """
+
+    def test_approve_without_attributes(self) -> None:
+        """Approve signal without any attributes still parses as APPROVE.
+
+        This is an edge case where the agent might emit a bare <approve/>
+        without the summary attribute. While the prompt asks for summary,
+        we should still recognize this as an approve signal.
+        """
+        result = parse_signal("<approve/>")
+        assert result.signal == Signal.APPROVE
+        assert result.reason == ""
+
+    def test_approve_with_only_whitespace(self) -> None:
+        """Approve signal with whitespace but no attributes."""
+        result = parse_signal("<approve />")
+        assert result.signal == Signal.APPROVE
+        assert result.reason == ""
+
+    def test_approve_no_self_closing(self) -> None:
+        """Approve signal without self-closing slash."""
+        result = parse_signal('<approve summary="done">')
+        assert result.signal == Signal.APPROVE
+        assert result.reason == "done"
+
+    def test_approve_multiline_attributes(self) -> None:
+        """Approve signal with attributes on multiple lines.
+
+        LLM outputs often format XML with line breaks between attributes.
+        """
+        signal = """<approve
+  summary="Added validation"
+  approach="Pydantic"
+  key_files="src/v.py"/>"""
+        result = parse_signal(signal)
+        assert result.signal == Signal.APPROVE
+        assert result.reason == "Added validation"
+        assert result.approach == "Pydantic"
+        assert result.key_files == "src/v.py"

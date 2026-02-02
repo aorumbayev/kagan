@@ -235,6 +235,46 @@ TicketCard.session-active.agent-active {
 }
 
 /* ============================================
+   REVIEW STATE INDICATORS
+   ============================================ */
+
+/* Review passed - green border */
+TicketCard.-review-passed {
+    border: solid $success;
+}
+
+TicketCard.-review-passed:focus {
+    border: solid $success;
+}
+
+/* Review failed - red border */
+TicketCard.-review-failed {
+    border: solid $error;
+}
+
+TicketCard.-review-failed:focus {
+    border: solid $error;
+}
+
+/* Review pending - yellow/warning border */
+TicketCard.-review-pending {
+    border: solid $warning;
+}
+
+TicketCard.-review-pending:focus {
+    border: solid $warning;
+}
+
+/* Merge failed - orange border (review passed but merge failed) */
+TicketCard.-review-merge-failed {
+    border: solid $warning;
+}
+
+TicketCard.-review-merge-failed:focus {
+    border: solid $warning;
+}
+
+/* ============================================
    CARD CONTENT STYLES
    ============================================ */
 
@@ -288,6 +328,19 @@ TicketCard .card-checks {
     width: 100%;
     height: 1;
     color: $success;
+}
+
+/* Review state colors for checks line */
+TicketCard .card-checks.passed {
+    color: $success;
+}
+
+TicketCard .card-checks.failed {
+    color: $error;
+}
+
+TicketCard .card-checks.pending {
+    color: $warning;
 }
 
 TicketCard .card-iteration {
@@ -366,6 +419,11 @@ TicketDetailsModal .badge-type {
 
 .badge-agent {
     background: $secondary;
+    color: $background;
+}
+
+.badge-model {
+    background: $accent;
     color: $background;
 }
 
@@ -841,6 +899,7 @@ AgentOutputModal {
     background: $surface;
     border: thick $secondary;
     padding: 1 2;
+    overflow: hidden;
 }
 
 AgentOutputModal .modal-title {
@@ -863,6 +922,8 @@ AgentOutputModal .modal-hint {
     text-align: center;
     color: $text-muted;
     padding-top: 1;
+    height: auto;
+    min-height: 1;
 }
 
 #agent-output {
@@ -881,6 +942,39 @@ AgentOutputModal .button-row {
 
 AgentOutputModal .button-row Button {
     margin: 0 1;
+}
+
+/* Tabbed content takes remaining space, not unlimited */
+AgentOutputModal TabbedContent {
+    height: 1fr;
+    max-height: 100%;
+}
+
+AgentOutputModal TabbedContent > ContentSwitcher {
+    height: 1fr;
+}
+
+AgentOutputModal TabPane {
+    height: 1fr;
+}
+
+/* StreamingOutput inside tabs must be constrained */
+AgentOutputModal TabPane StreamingOutput {
+    height: 1fr;
+    max-height: 100%;
+}
+
+/* Specific output containers for implementation and review tabs */
+#implementation-output,
+#review-output {
+    height: 1fr;
+    max-height: 100%;
+    background: $background;
+    border: round $border;
+}
+
+AgentOutputModal > Vertical > Rule:last-of-type {
+    height: auto;
 }
 
 /* PlannerScreen styles */
@@ -1362,7 +1456,7 @@ ReviewModal .section-title {
     background: $background;
     border: round $border;
     height: auto;
-    max-height: 4;
+    min-height: 4;
 }
 
 /* AI Review section - expandable, takes remaining space */
@@ -2270,4 +2364,27 @@ DuplicateTicketModal Button {
     text-align: center;
     color: $text-muted;
     padding-top: 1;
+}
+
+/* =============================================================================
+   DEBUG LOG MODAL
+   ============================================================================= */
+
+DebugLogModal {
+    align: center middle;
+}
+
+#debug-log-container {
+    width: 90%;
+    height: 90%;
+    background: $surface;
+    border: thick $primary;
+    padding: 1;
+}
+
+#debug-log {
+    height: 1fr;
+    background: $surface-darken-1;
+    border: round $primary-lighten-2;
+    padding: 0 1;
 }

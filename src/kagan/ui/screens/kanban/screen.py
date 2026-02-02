@@ -148,6 +148,8 @@ class KanbanScreen(KaganScreen):
 
     async def _on_ticket_changed(self, _ticket_id: str) -> None:
         await self._refresh_board()
+        self._sync_iterations()
+        self._sync_agent_states()
 
     def _on_iteration_changed(self, data: tuple[str, int]) -> None:
         ticket_id, iteration = data

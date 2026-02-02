@@ -68,6 +68,40 @@ class TestSettingsSwitches:
 
                 assert switch.value != initial_value
 
+    async def test_retry_switch_disabled_when_auto_merge_off(self, e2e_app: KaganApp):
+        """Retry on merge conflict switch is disabled when auto-merge is off."""
+        async with e2e_app.run_test(size=(120, 40)) as pilot:
+            async with open_settings_modal(pilot):
+                auto_merge_switch = pilot.app.screen.query_one("#auto-merge-switch", Switch)
+                retry_switch = pilot.app.screen.query_one(
+                    "#auto-retry-merge-conflict-switch", Switch
+                )
+
+                # Auto-merge is off by default, retry switch should be disabled
+                assert auto_merge_switch.value is False
+                assert retry_switch.disabled is True
+
+                # Enable auto-merge
+                await pilot.click("#auto-merge-switch")
+                await pilot.pause()
+
+                # Retry switch should now be enabled
+                assert auto_merge_switch.value is True
+                assert retry_switch.disabled is False
+
+                # Now we can toggle the retry switch
+                initial_retry_value = retry_switch.value
+                await pilot.click("#auto-retry-merge-conflict-switch")
+                await pilot.pause()
+                assert retry_switch.value != initial_retry_value
+
+                # Disable auto-merge again
+                await pilot.click("#auto-merge-switch")
+                await pilot.pause()
+
+                # Retry switch should be disabled again
+                assert retry_switch.disabled is True
+
 
 class TestSettingsSave:
     """Test save persists config."""

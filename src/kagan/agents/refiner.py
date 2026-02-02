@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from textual import log
-
 from kagan.acp.agent import Agent
 from kagan.agents.refinement_rules import build_refinement_prompt
+from kagan.debug_log import log
 from kagan.limits import AGENT_TIMEOUT
 
 if TYPE_CHECKING:

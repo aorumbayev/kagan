@@ -284,3 +284,239 @@ class TestMCPToolsEdgeCases:
         updated = await state_manager.get_ticket(ticket.id)
         assert updated is not None
         assert updated.review_summary == ""
+
+
+class TestGetParallelTickets:
+    """Tests for get_parallel_tickets MCP tool."""
+
+    async def test_returns_in_progress_tickets(self, state_manager):
+        """Returns all IN_PROGRESS tickets."""
+        t1 = await state_manager.create_ticket(
+            Ticket.create(title="Task 1", status=TicketStatus.IN_PROGRESS)
+        )
+        t2 = await state_manager.create_ticket(
+            Ticket.create(title="Task 2", status=TicketStatus.IN_PROGRESS)
+        )
+        await state_manager.create_ticket(
+            Ticket.create(title="Backlog", status=TicketStatus.BACKLOG)
+        )
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_parallel_tickets()
+
+        assert len(result) == 2
+        ids = {t["ticket_id"] for t in result}
+        assert t1.id in ids
+        assert t2.id in ids
+
+    async def test_excludes_specified_ticket(self, state_manager):
+        """Excludes ticket when exclude_ticket_id provided."""
+        t1 = await state_manager.create_ticket(
+            Ticket.create(title="My ticket", status=TicketStatus.IN_PROGRESS)
+        )
+        t2 = await state_manager.create_ticket(
+            Ticket.create(title="Other ticket", status=TicketStatus.IN_PROGRESS)
+        )
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_parallel_tickets(exclude_ticket_id=t1.id)
+
+        assert len(result) == 1
+        assert result[0]["ticket_id"] == t2.id
+
+    async def test_returns_empty_when_no_parallel_work(self, state_manager):
+        """Returns empty list when no IN_PROGRESS tickets."""
+        await state_manager.create_ticket(
+            Ticket.create(title="Backlog", status=TicketStatus.BACKLOG)
+        )
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_parallel_tickets()
+
+        assert result == []
+
+    async def test_includes_scratchpad(self, state_manager):
+        """Result includes scratchpad for each ticket."""
+        t1 = await state_manager.create_ticket(
+            Ticket.create(title="Task", status=TicketStatus.IN_PROGRESS)
+        )
+        await state_manager.update_scratchpad(t1.id, "Progress notes")
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_parallel_tickets()
+
+        assert result[0]["scratchpad"] == "Progress notes"
+
+    async def test_returns_required_fields(self, state_manager):
+        """Result contains ticket_id, title, description, scratchpad."""
+        await state_manager.create_ticket(
+            Ticket.create(
+                title="Task",
+                description="Details",
+                status=TicketStatus.IN_PROGRESS,
+            )
+        )
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_parallel_tickets()
+
+        assert "ticket_id" in result[0]
+        assert "title" in result[0]
+        assert "description" in result[0]
+        assert "scratchpad" in result[0]
+
+
+class TestGetAgentLogs:
+    """Tests for get_agent_logs MCP tool."""
+
+    async def test_returns_logs_for_ticket(self, state_manager):
+        """Returns agent logs for specified ticket."""
+        ticket = await state_manager.create_ticket(Ticket.create(title="Task"))
+        await state_manager.append_agent_log(ticket.id, "implementation", 1, '{"msg": "log1"}')
+        await state_manager.append_agent_log(ticket.id, "implementation", 2, '{"msg": "log2"}')
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_agent_logs(ticket.id, limit=5)
+
+        assert len(result) == 2
+        assert result[0]["iteration"] == 1
+        assert result[1]["iteration"] == 2
+
+    async def test_raises_for_nonexistent_ticket(self, state_manager):
+        """Raises ValueError for non-existent ticket."""
+        server = KaganMCPServer(state_manager)
+
+        with pytest.raises(ValueError, match="Ticket not found"):
+            await server.get_agent_logs("nonexistent")
+
+    async def test_returns_empty_for_no_logs(self, state_manager):
+        """Returns empty list when ticket has no logs."""
+        ticket = await state_manager.create_ticket(Ticket.create(title="Task"))
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_agent_logs(ticket.id)
+
+        assert result == []
+
+    async def test_filters_by_log_type(self, state_manager):
+        """Filters logs by log_type parameter."""
+        ticket = await state_manager.create_ticket(Ticket.create(title="Task"))
+        await state_manager.append_agent_log(ticket.id, "implementation", 1, '{"type": "impl"}')
+        await state_manager.append_agent_log(ticket.id, "review", 1, '{"type": "review"}')
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_agent_logs(ticket.id, log_type="review")
+
+        assert len(result) == 1
+        assert "review" in result[0]["content"]
+
+    async def test_limits_results(self, state_manager):
+        """Limits results to specified count (most recent)."""
+        ticket = await state_manager.create_ticket(Ticket.create(title="Task"))
+        for i in range(10):
+            await state_manager.append_agent_log(
+                ticket.id, "implementation", i + 1, f'{{"i": {i}}}'
+            )
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_agent_logs(ticket.id, limit=3)
+
+        assert len(result) == 3
+        # Should return most recent (highest iteration numbers)
+        iterations = [r["iteration"] for r in result]
+        assert max(iterations) == 10
+
+    async def test_default_limit_is_one(self, state_manager):
+        """Default limit returns only most recent iteration."""
+        ticket = await state_manager.create_ticket(Ticket.create(title="Task"))
+        for i in range(5):
+            await state_manager.append_agent_log(
+                ticket.id, "implementation", i + 1, f'{{"i": {i}}}'
+            )
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_agent_logs(ticket.id)
+
+        assert len(result) == 1
+        assert result[0]["iteration"] == 5
+
+    async def test_returns_required_fields(self, state_manager):
+        """Result contains iteration, content, created_at."""
+        ticket = await state_manager.create_ticket(Ticket.create(title="Task"))
+        await state_manager.append_agent_log(ticket.id, "implementation", 1, '{"data": "test"}')
+        server = KaganMCPServer(state_manager)
+
+        result = await server.get_agent_logs(ticket.id)
+
+        assert "iteration" in result[0]
+        assert "content" in result[0]
+        assert "created_at" in result[0]
+
+
+class TestReadonlyMode:
+    """Tests for --readonly mode tool filtering."""
+
+    def test_readonly_registers_only_coordination_tools(self):
+        """Readonly mode should only register get_parallel_tickets and get_agent_logs."""
+        from kagan.mcp.server import _create_mcp_server
+
+        mcp = _create_mcp_server(readonly=True)
+
+        # Get registered tool names - FastMCP stores tools in _tool_manager._tools dict
+        tools = mcp._tool_manager._tools
+        tool_names = set(tools.keys())
+
+        # Should have exactly the read-only tools
+        assert "get_parallel_tickets" in tool_names
+        assert "get_agent_logs" in tool_names
+
+        # Should NOT have full-mode tools
+        assert "get_context" not in tool_names
+        assert "update_scratchpad" not in tool_names
+        assert "request_review" not in tool_names
+
+    def test_full_mode_registers_all_tools(self):
+        """Full mode (readonly=False) should register all tools."""
+        from kagan.mcp.server import _create_mcp_server
+
+        mcp = _create_mcp_server(readonly=False)
+
+        tools = mcp._tool_manager._tools
+        tool_names = set(tools.keys())
+
+        # Should have all tools
+        assert "get_parallel_tickets" in tool_names
+        assert "get_agent_logs" in tool_names
+        assert "get_context" in tool_names
+        assert "update_scratchpad" in tool_names
+        assert "request_review" in tool_names
+
+    def test_readonly_tool_count(self):
+        """Verify exact tool count in readonly mode."""
+        from kagan.mcp.server import _create_mcp_server
+
+        mcp = _create_mcp_server(readonly=True)
+        assert len(mcp._tool_manager._tools) == 2
+
+    def test_full_mode_tool_count(self):
+        """Verify exact tool count in full mode."""
+        from kagan.mcp.server import _create_mcp_server
+
+        mcp = _create_mcp_server(readonly=False)
+        assert len(mcp._tool_manager._tools) == 5
+
+
+class TestMCPCLI:
+    """Tests for MCP CLI command."""
+
+    def test_mcp_readonly_flag_in_help(self):
+        """Verify --readonly flag appears in CLI help."""
+        from click.testing import CliRunner
+
+        from kagan.__main__ import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["mcp", "--help"])
+        assert result.exit_code == 0
+        assert "--readonly" in result.output
+        assert "read-only" in result.output.lower() or "coordination" in result.output.lower()

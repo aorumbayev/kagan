@@ -179,7 +179,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
         title = self.ticket.title if self.ticket else ""
 
         yield Label("Title", classes="section-title view-only", id="title-section-label")
-        yield Static(title, classes="ticket-title view-only", id="title-display")
+        yield Static(title, classes="ticket-title view-only", id="title-display", markup=False)
 
         with Vertical(classes="form-field edit-fields", id="title-field"):
             yield TitleInput(value=title)
@@ -193,7 +193,12 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
             yield Static(expand_text, classes="expand-hint", id="expand-btn")
 
         description = (self.ticket.description if self.ticket else "") or "(No description)"
-        yield Static(description, classes="ticket-description view-only", id="description-content")
+        yield Static(
+            description,
+            classes="ticket-description view-only",
+            id="description-content",
+            markup=False,
+        )
 
         with Vertical(classes="form-field edit-fields", id="description-field"):
             yield DescriptionArea(text=self.ticket.description if self.ticket else "")

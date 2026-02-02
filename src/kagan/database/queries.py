@@ -36,6 +36,8 @@ def row_to_ticket(row: aiosqlite.Row) -> Ticket:
         checks_passed=None if row["checks_passed"] is None else bool(row["checks_passed"]),
         session_active=bool(row["session_active"]),
         total_iterations=row["total_iterations"] or 0,
+        merge_failed=bool(row["merge_failed"]) if row["merge_failed"] is not None else False,
+        merge_error=cast("str | None", row["merge_error"]),
         created_at=(
             datetime.fromisoformat(row["created_at"]) if row["created_at"] else datetime.now()
         ),
@@ -86,7 +88,7 @@ def build_update_params_from_dict(
             db_value = value.value
         elif field == "acceptance_criteria" and value is not None:
             db_value = serialize_fn(value)
-        elif field in ("checks_passed", "session_active") and value is not None:
+        elif field in ("checks_passed", "session_active", "merge_failed") and value is not None:
             db_value = 1 if value else 0
         else:
             db_value = value
@@ -121,6 +123,8 @@ def build_insert_params(
         None if ticket.checks_passed is None else (1 if ticket.checks_passed else 0),
         1 if ticket.session_active else 0,
         ticket.total_iterations,
+        1 if ticket.merge_failed else 0,
+        ticket.merge_error,
         ticket.created_at.isoformat(),
         ticket.updated_at.isoformat(),
     )
@@ -133,8 +137,9 @@ INSERT INTO tickets
      assigned_hat, agent_backend, parent_id,
      acceptance_criteria, review_summary,
      checks_passed, session_active, total_iterations,
+     merge_failed, merge_error,
      created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 SELECT_ALL_TICKETS_SQL = """
@@ -161,4 +166,20 @@ INSERT INTO scratchpads (ticket_id, content, updated_at)
 VALUES (?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(ticket_id) DO UPDATE SET
 content = excluded.content, updated_at = CURRENT_TIMESTAMP
+"""
+
+INSERT_AGENT_LOG_SQL = """
+INSERT INTO agent_logs (ticket_id, log_type, iteration, content)
+VALUES (?, ?, ?, ?)
+"""
+
+SELECT_AGENT_LOGS_SQL = """
+SELECT id, ticket_id, log_type, iteration, content, created_at
+FROM agent_logs
+WHERE ticket_id = ? AND log_type = ?
+ORDER BY iteration ASC, created_at ASC
+"""
+
+DELETE_AGENT_LOGS_SQL = """
+DELETE FROM agent_logs WHERE ticket_id = ?
 """

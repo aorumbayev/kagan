@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -177,7 +178,7 @@ class TestOnTicketModalResult:
         """Updates ticket when result is a dict and editing_ticket_id is set."""
         from kagan.ui.screens.kanban.screen import KanbanScreen
 
-        mock_screen._editing_ticket_id = "test-ticket-id"
+        mock_screen._editing_ticket_id = cast("str | None", "test-ticket-id")
         updates = {"title": "Updated title", "description": "Updated desc"}
 
         await KanbanScreen._on_ticket_modal_result(mock_screen, updates)

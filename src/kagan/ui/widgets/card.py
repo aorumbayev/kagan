@@ -34,6 +34,7 @@ class TicketCard(Widget):
     is_agent_active: var[bool] = var(False, toggle_class="agent-active", always_update=True)
     is_session_active: var[bool] = var(False, toggle_class="session-active")
     iteration_info: reactive[str] = reactive("", recompose=True)
+    review_state: var[str] = var("")
 
     @dataclass
     class Selected(Message):
@@ -42,20 +43,23 @@ class TicketCard(Widget):
     def __init__(self, ticket: Ticket, **kwargs) -> None:
         super().__init__(id=f"card-{ticket.id}", **kwargs)
         self.ticket = ticket
-        # Sync session state from ticket
         self.is_session_active = ticket.session_active
+        self._update_review_state()
 
     def compose(self) -> ComposeResult:
         """Compose the card layout."""
         if self.ticket is None:
             return
 
-        # Line 1-2: Type badge + Title (supports 2 lines)
         type_badge = self._get_type_badge()
         title_lines = self._wrap_title(self.ticket.title, CARD_TITLE_LINE_WIDTH)
+        title_text = title_lines[0] if title_lines else "Untitled"
 
-        # First line with badge
-        first_line = f"{type_badge} {title_lines[0]}" if title_lines else f"{type_badge} Untitled"
+        if self.ticket.status == TicketStatus.REVIEW:
+            review_badge = self._get_review_badge()
+            first_line = f"{type_badge} {title_text} {review_badge}"
+        else:
+            first_line = f"{type_badge} {title_text}"
         yield Label(first_line, classes="card-title")
 
         # Second line for long titles (indented to align with first line)
@@ -181,15 +185,41 @@ class TicketCard(Widget):
 
         return ""
 
-    def _format_checks_status(self) -> str:
-        """Format checks status for review display."""
+    def _get_review_badge(self) -> str:
         if self.ticket is None:
-            return "Checks: unknown"
+            return "⏳"
+        if self.ticket.merge_failed:
+            return "⚠"
         if self.ticket.checks_passed is True:
-            return "Checks: passed"
+            return "✓"
         if self.ticket.checks_passed is False:
-            return "Checks: failed"
-        return "Checks: not run"
+            return "✗"
+        return "⏳"
+
+    def _format_checks_status(self) -> str:
+        if self.ticket is None:
+            return "⏳ Review pending"
+        if self.ticket.merge_failed:
+            error = self.ticket.merge_error or "unknown error"
+            return f"⚠ Merge failed: {error[:40]}"
+        if self.ticket.checks_passed is True:
+            return "✓ Ready to merge"
+        if self.ticket.checks_passed is False:
+            return "✗ Needs revision"
+        return "⏳ Review pending"
+
+    def _update_review_state(self) -> None:
+        if self.ticket is None or self.ticket.status != TicketStatus.REVIEW:
+            self.review_state = ""
+            return
+        if self.ticket.merge_failed:
+            self.review_state = "-review-merge-failed"
+        elif self.ticket.checks_passed is True:
+            self.review_state = "-review-passed"
+        elif self.ticket.checks_passed is False:
+            self.review_state = "-review-failed"
+        else:
+            self.review_state = "-review-pending"
 
     def on_click(self, event: events.Click) -> None:
         """Handle click: single-click focuses, double-click opens details."""
@@ -200,7 +230,14 @@ class TicketCard(Widget):
             # Double click - open details
             self.post_message(self.Selected(self.ticket))
 
+    def watch_ticket(self, ticket: Ticket | None) -> None:
+        self._update_review_state()
+
+    def watch_review_state(self, old_state: str, new_state: str) -> None:
+        if old_state:
+            self.remove_class(old_state)
+        if new_state:
+            self.add_class(new_state)
+
     def watch_is_agent_active(self, active: bool) -> None:
-        """Update card display when agent state changes."""
-        # Trigger recompose to update badge
         self.refresh(recompose=True)

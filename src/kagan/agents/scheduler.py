@@ -7,18 +7,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-from textual import log
+from typing import TYPE_CHECKING, Any, Literal
 
 from kagan.acp.agent import Agent
-from kagan.agents.config_resolver import resolve_agent_config
+from kagan.agents.config_resolver import resolve_agent_config, resolve_model
 from kagan.agents.prompt import build_prompt
 from kagan.agents.prompt_loader import get_review_prompt
 from kagan.agents.signals import Signal, SignalResult, parse_signal
 from kagan.constants import MODAL_TITLE_MAX_LENGTH
 from kagan.database.models import TicketStatus, TicketType
+from kagan.debug_log import log
+from kagan.git_utils import get_git_user_identity
 from kagan.limits import AGENT_TIMEOUT_LONG
 
 if TYPE_CHECKING:
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from kagan.agents.worktree import WorktreeManager
+    from kagan.app import KaganApp
     from kagan.config import AgentConfig, KaganConfig
     from kagan.database.manager import StateManager
     from kagan.database.models import Ticket
@@ -39,6 +41,8 @@ class RunningTicketState:
     task: asyncio.Task[None] | None = None
     agent: Agent | None = None
     iteration: int = 0
+    review_agent: Agent | None = None  # Review agent for watching
+    is_reviewing: bool = False  # Currently in review phase
 
 
 class Scheduler:
@@ -58,6 +62,7 @@ class Scheduler:
         on_ticket_changed: Callable[[], None] | None = None,
         on_iteration_changed: Callable[[str, int], None] | None = None,
         on_error: Callable[[str, str], None] | None = None,
+        app: KaganApp | None = None,
     ) -> None:
         self._state = state_manager
         self._worktrees = worktree_manager
@@ -67,6 +72,7 @@ class Scheduler:
         self._on_ticket_changed = on_ticket_changed
         self._on_iteration_changed = on_iteration_changed
         self._on_error = on_error
+        self._app = app
 
         # Event queue for reactive processing
         self._event_queue: asyncio.Queue[tuple[str, TicketStatus | None, TicketStatus | None]] = (
@@ -74,6 +80,10 @@ class Scheduler:
         )
         self._worker_task: asyncio.Task[None] | None = None
         self._started = False
+
+        # Lock to serialize merge operations (prevents race conditions when
+        # multiple tickets complete around the same time)
+        self._merge_lock = asyncio.Lock()
 
     def start(self) -> None:
         """Start the scheduler's event processing loop."""
@@ -150,8 +160,9 @@ class Scheduler:
         # React to status
         if new_status == TicketStatus.IN_PROGRESS:
             await self._ensure_running(ticket)
-        elif old_status == TicketStatus.IN_PROGRESS:
-            # Moved OUT of IN_PROGRESS - stop if running
+        elif old_status == TicketStatus.IN_PROGRESS and new_status != TicketStatus.REVIEW:
+            # Moved OUT of IN_PROGRESS to non-REVIEW status - stop if running
+            # Don't stop for REVIEW transitions as that's part of normal completion flow
             await self._stop_if_running(ticket_id)
 
     async def _ensure_running(self, ticket: Ticket) -> None:
@@ -174,6 +185,18 @@ class Scheduler:
         """Spawn an agent for a ticket. Called only from worker loop."""
         title = ticket.title[:MODAL_TITLE_MAX_LENGTH]
         log.info(f"Spawning agent for AUTO ticket {ticket.id}: {title}")
+
+        # Reset review state from previous attempts
+        await self._state.update_ticket(
+            ticket.id,
+            checks_passed=None,
+            review_summary=None,
+            merge_failed=False,
+            merge_error=None,
+        )
+
+        # Clear previous agent logs for fresh retry
+        await self._state.clear_agent_logs(ticket.id)
 
         # Add to _running BEFORE creating task to avoid race condition
         # where task checks _running before we've added the entry
@@ -249,6 +272,16 @@ class Scheduler:
         else:
             log.debug(f"Cannot reset iterations for {ticket_id}: not running")
 
+    def is_reviewing(self, ticket_id: str) -> bool:
+        """Check if ticket is currently in review phase."""
+        state = self._running.get(ticket_id)
+        return state.is_reviewing if state else False
+
+    def get_review_agent(self, ticket_id: str) -> Agent | None:
+        """Get the running review agent for a ticket (for watch functionality)."""
+        state = self._running.get(ticket_id)
+        return state.review_agent if state else None
+
     async def stop_ticket(self, ticket_id: str) -> bool:
         """Request to stop a ticket. Returns True if was running."""
         if ticket_id not in self._running:
@@ -319,6 +352,10 @@ class Scheduler:
                 )
             log.info(f"Worktree path: {wt_path}")
 
+            # Get git user identity for Co-authored-by attribution in commits
+            user_name, user_email = await get_git_user_identity()
+            log.debug(f"Git user identity: {user_name} <{user_email}>")
+
             # Get agent config
             agent_config = self._get_agent_config(ticket)
             log.debug(f"Agent config: {agent_config.name}")
@@ -342,7 +379,13 @@ class Scheduler:
                 log.debug(f"Ticket {ticket.id} iteration {iteration}/{max_iterations}")
 
                 signal = await self._run_iteration(
-                    ticket, wt_path, agent_config, iteration, max_iterations
+                    ticket,
+                    wt_path,
+                    agent_config,
+                    iteration,
+                    max_iterations,
+                    user_name=user_name,
+                    user_email=user_email,
                 )
                 log.debug(f"Ticket {ticket.id} iteration {iteration} signal: {signal}")
 
@@ -380,6 +423,84 @@ class Scheduler:
         """Get agent config for a ticket using unified resolver."""
         return resolve_agent_config(ticket, self._config)
 
+    def _notify_user(
+        self, message: str, title: str, severity: Literal["information", "warning", "error"]
+    ) -> None:
+        """Send a notification to the user via the app if available.
+
+        Args:
+            message: The notification message.
+            title: The notification title.
+            severity: The severity level (information, warning, error).
+        """
+        if self._app is not None:
+            self._app.notify(message, title=title, severity=severity)
+
+    def _apply_model_override(self, agent: Agent, agent_config: AgentConfig, context: str) -> None:
+        """Apply model override to agent if configured.
+
+        Args:
+            agent: The agent to configure.
+            agent_config: The agent configuration.
+            context: Context string for logging (e.g., "ticket ABC-123" or "review").
+        """
+        model = resolve_model(self._config, agent_config.identity)
+        if model:
+            agent.set_model_override(model)
+            log.info(f"Applied model override for {context}: {model}")
+
+    def _serialize_agent_output(self, agent: Agent) -> str:
+        """Serialize agent output including tool calls, thinking, and response to JSON."""
+        from kagan.acp import messages as msg_types
+
+        serialized_messages: list[dict[str, Any]] = []
+        for message in agent._buffers.messages:
+            if isinstance(message, msg_types.AgentUpdate):
+                serialized_messages.append({"type": "response", "content": message.text})
+            elif isinstance(message, msg_types.Thinking):
+                serialized_messages.append({"type": "thinking", "content": message.text})
+            elif isinstance(message, msg_types.ToolCall):
+                serialized_messages.append(
+                    {
+                        "type": "tool_call",
+                        "id": str(message.tool_call.get("id", "")),
+                        "title": str(message.tool_call.get("title", "")),
+                        "kind": str(message.tool_call.get("kind", "")),
+                    }
+                )
+            elif isinstance(message, msg_types.ToolCallUpdate):
+                serialized_messages.append(
+                    {
+                        "type": "tool_call_update",
+                        "id": str(message.update.get("id", "")),
+                        "status": str(message.update.get("status", "")),
+                    }
+                )
+            elif isinstance(message, msg_types.Plan):
+                serialized_messages.append(
+                    {
+                        "type": "plan",
+                        "entries": [dict(e) for e in message.entries] if message.entries else [],
+                    }
+                )
+            elif isinstance(message, msg_types.AgentReady):
+                serialized_messages.append({"type": "agent_ready"})
+            elif isinstance(message, msg_types.AgentFail):
+                serialized_messages.append(
+                    {
+                        "type": "agent_fail",
+                        "message": message.message,
+                        "details": message.details,
+                    }
+                )
+
+        return json.dumps(
+            {
+                "messages": serialized_messages,
+                "response_text": agent.get_response_text(),
+            }
+        )
+
     async def _run_iteration(
         self,
         ticket: Ticket,
@@ -387,8 +508,23 @@ class Scheduler:
         agent_config: AgentConfig,
         iteration: int,
         max_iterations: int,
+        user_name: str = "Developer",
+        user_email: str = "developer@localhost",
     ) -> SignalResult:
-        """Run a single iteration for a ticket."""
+        """Run a single iteration for a ticket.
+
+        Args:
+            ticket: The ticket being worked on.
+            wt_path: Path to the worktree.
+            agent_config: Agent configuration.
+            iteration: Current iteration number.
+            max_iterations: Maximum allowed iterations.
+            user_name: Git user name for Co-authored-by attribution.
+            user_email: Git user email for Co-authored-by attribution.
+
+        Returns:
+            Signal result from the agent.
+        """
         # Get or create agent
         state = self._running.get(ticket.id)
         agent = state.agent if state else None
@@ -396,6 +532,10 @@ class Scheduler:
         if agent is None:
             agent = Agent(wt_path, agent_config)
             agent.set_auto_approve(self._config.general.auto_approve)
+
+            # Apply model override if configured
+            self._apply_model_override(agent, agent_config, f"ticket {ticket.id}")
+
             agent.start()
             if state:
                 state.agent = agent
@@ -416,6 +556,8 @@ class Scheduler:
             iteration=iteration,
             max_iterations=max_iterations,
             scratchpad=scratchpad,
+            user_name=user_name,
+            user_email=user_email,
         )
 
         # Send prompt and get response
@@ -430,27 +572,61 @@ class Scheduler:
         response = agent.get_response_text()
         signal_result = parse_signal(response)
 
-        # Update scratchpad with progress
+        # Persist FULL agent output (including tool calls, thinking, etc.) as JSON
+        serialized_output = self._serialize_agent_output(agent)
+        await self._state.append_agent_log(
+            ticket.id, "implementation", iteration, serialized_output
+        )
+
+        # Update scratchpad with progress (truncated for prompt context)
         progress_note = f"\n\n--- Iteration {iteration} ---\n{response[-2000:]}"
         await self._state.update_scratchpad(ticket.id, scratchpad + progress_note)
 
         return signal_result
 
     async def _handle_complete(self, ticket: Ticket) -> None:
-        """Handle ticket completion - run review, optionally auto-merge."""
+        """Handle ticket completion - move to REVIEW immediately, then run review."""
+        # 1. Move to REVIEW status IMMEDIATELY (before review agent runs)
+        await self._state.update_ticket(ticket.id, status=TicketStatus.REVIEW)
+        self._notify_ticket_changed()
+
         wt_path = await self._worktrees.get_path(ticket.id)
         checks_passed = False
         review_summary = ""
 
         if wt_path is not None:
-            checks_passed, review_summary = await self._run_review(ticket, wt_path)
+            # Mark as reviewing and run review agent
+            state = self._running.get(ticket.id)
+            if state:
+                state.is_reviewing = True
+
+            try:
+                checks_passed, review_summary = await self._run_review(ticket, wt_path)
+            finally:
+                if state:
+                    state.is_reviewing = False
+                    state.review_agent = None
+
             status = "approved" if checks_passed else "rejected"
             log.info(f"Ticket {ticket.id} review: {status}")
 
-        # Update ticket with review results and move to REVIEW
+            # Emit toast notification for review result
+            if checks_passed:
+                self._notify_user(
+                    f"✓ Review passed: {ticket.title[:30]}",
+                    title="Review Complete",
+                    severity="information",
+                )
+            else:
+                self._notify_user(
+                    f"✗ Review failed: {review_summary[:50]}",
+                    title="Review Complete",
+                    severity="warning",
+                )
+
+        # 2. Update ticket with review results (status already REVIEW)
         await self._state.update_ticket(
             ticket.id,
-            status=TicketStatus.REVIEW,
             checks_passed=checks_passed,
             review_summary=review_summary,
         )
@@ -463,17 +639,30 @@ class Scheduler:
 
     async def _run_review(self, ticket: Ticket, wt_path: Path) -> tuple[bool, str]:
         """Run agent-based review and return (passed, summary)."""
+        state = self._running.get(ticket.id)
         agent_config = self._get_agent_config(ticket)
         prompt = await self._build_review_prompt(ticket)
 
         agent = Agent(wt_path, agent_config, read_only=True)
         agent.set_auto_approve(True)
+
+        # Track the review agent for watch functionality
+        if state:
+            state.review_agent = agent
+
+        # Apply model override for review (same as work iterations)
+        self._apply_model_override(agent, agent_config, f"review of ticket {ticket.id}")
+
         agent.start()
 
         try:
             await agent.wait_ready(timeout=AGENT_TIMEOUT_LONG)
             await agent.send_prompt(prompt)
             response = agent.get_response_text()
+
+            # Persist review logs (including tool calls, thinking, etc.) as JSON
+            serialized_output = self._serialize_agent_output(agent)
+            await self._state.append_agent_log(ticket.id, "review", 1, serialized_output)
 
             signal = parse_signal(response)
             if signal.signal == Signal.APPROVE:
@@ -490,6 +679,8 @@ class Scheduler:
             return False, f"Review agent error: {e}"
         finally:
             await agent.stop()
+            if state:
+                state.review_agent = None
 
     async def _build_review_prompt(self, ticket: Ticket) -> str:
         """Build review prompt from template with commits and diff."""
@@ -506,20 +697,168 @@ class Scheduler:
         )
 
     async def _auto_merge(self, ticket: Ticket) -> None:
-        """Auto-merge ticket to main and move to DONE."""
-        base = self._config.general.default_base_branch
-        success, message = await self._worktrees.merge_to_main(ticket.id, base_branch=base)
+        """Auto-merge ticket to main and move to DONE.
 
-        if success:
-            await self._worktrees.delete(ticket.id, delete_branch=True)
-            if self._sessions is not None:
-                await self._sessions.kill_session(ticket.id)
-            await self._update_ticket_status(ticket.id, TicketStatus.DONE)
-            log.info(f"Auto-merged ticket {ticket.id}: {ticket.title}")
+        Only called when auto_merge config is enabled.
+        If merge fails due to conflict and auto_retry_on_merge_conflict is also enabled,
+        attempts to rebase the branch and retry the ticket from IN_PROGRESS.
+
+        Uses a lock to serialize merge operations, preventing race conditions when
+        multiple tickets complete around the same time.
+        """
+        async with self._merge_lock:
+            log.info(f"Acquired merge lock for ticket {ticket.id}")
+            base = self._config.general.default_base_branch
+            success, message = await self._worktrees.merge_to_main(ticket.id, base_branch=base)
+
+            if success:
+                await self._worktrees.delete(ticket.id, delete_branch=True)
+                if self._sessions is not None:
+                    await self._sessions.kill_session(ticket.id)
+                await self._update_ticket_status(ticket.id, TicketStatus.DONE)
+                log.info(f"Auto-merged ticket {ticket.id}: {ticket.title}")
+            else:
+                # Check if this is a merge conflict and auto-retry is enabled
+                is_conflict = "conflict" in message.lower()
+                should_retry = is_conflict and self._config.general.auto_retry_on_merge_conflict
+
+                if should_retry:
+                    log.info(f"Merge conflict for {ticket.id}, attempting rebase and retry")
+                    await self._handle_merge_conflict_retry(ticket, base, message)
+                else:
+                    # Standard failure handling - stay in REVIEW with error
+                    log.warning(f"Auto-merge failed for {ticket.id}: {message}")
+                    await self._state.update_ticket(
+                        ticket.id,
+                        merge_failed=True,
+                        merge_error=message[:500] if message else "Unknown error",
+                    )
+                    self._notify_user(
+                        f"⚠ Merge failed: {message[:50]}",
+                        title="Merge Error",
+                        severity="error",
+                    )
+
+            self._notify_ticket_changed()
+            log.info(f"Released merge lock for ticket {ticket.id}")
+
+    async def _handle_merge_conflict_retry(
+        self, ticket: Ticket, base_branch: str, original_error: str
+    ) -> None:
+        """Handle merge conflict by rebasing and sending ticket back to IN_PROGRESS.
+
+        This gives the agent a chance to resolve conflicts after rebasing onto
+        the latest base branch.
+        """
+        wt_path = await self._worktrees.get_path(ticket.id)
+        if wt_path is None:
+            log.error(f"Cannot retry {ticket.id}: worktree not found")
+            await self._state.update_ticket(
+                ticket.id,
+                merge_failed=True,
+                merge_error="Worktree not found for conflict retry",
+            )
+            return
+
+        # Get info about what changed on base branch (for context)
+        files_on_base = await self._worktrees.get_files_changed_on_base(ticket.id, base_branch)
+
+        # Attempt to rebase onto latest base branch
+        rebase_success, rebase_msg, conflict_files = await self._worktrees.rebase_onto_base(
+            ticket.id, base_branch
+        )
+
+        if not rebase_success and conflict_files:
+            # Rebase had conflicts - this is expected, the agent needs to fix them
+            # The rebase was aborted, so we'll let the agent handle it manually
+            log.info(f"Rebase conflict for {ticket.id}, agent will resolve: {conflict_files}")
+
+        # Build detailed context for the scratchpad
+        scratchpad = await self._state.get_scratchpad(ticket.id)
+        conflict_note = self._build_merge_conflict_note(
+            original_error=original_error,
+            rebase_success=rebase_success,
+            rebase_msg=rebase_msg,
+            conflict_files=conflict_files,
+            files_on_base=files_on_base,
+            base_branch=base_branch,
+        )
+        await self._state.update_scratchpad(ticket.id, scratchpad + conflict_note)
+
+        # Clear the review state since we're retrying
+        await self._state.update_ticket(
+            ticket.id,
+            status=TicketStatus.IN_PROGRESS,
+            checks_passed=None,
+            review_summary=None,
+            merge_failed=False,
+            merge_error=None,
+        )
+
+        # Notify user about the retry
+        self._notify_user(
+            f"🔄 Merge conflict - retrying: {ticket.title[:30]}",
+            title="Auto-Retry",
+            severity="warning",
+        )
+
+        log.info(f"Ticket {ticket.id} sent back to IN_PROGRESS for merge conflict resolution")
+
+        # Queue the ticket for processing (it's now IN_PROGRESS again)
+        await self._event_queue.put((ticket.id, TicketStatus.REVIEW, TicketStatus.IN_PROGRESS))
+
+    def _build_merge_conflict_note(
+        self,
+        original_error: str,
+        rebase_success: bool,
+        rebase_msg: str,
+        conflict_files: list[str],
+        files_on_base: list[str],
+        base_branch: str,
+    ) -> str:
+        """Build a detailed scratchpad note about merge conflict for agent context."""
+        lines = [
+            "\n\n--- MERGE CONFLICT - AUTO RETRY ---",
+            f"Original merge error: {original_error}",
+            "",
+        ]
+
+        if rebase_success:
+            lines.append(f"✓ Successfully rebased onto origin/{base_branch}")
+            lines.append("The branch is now up to date. Please verify changes and signal COMPLETE.")
         else:
-            log.warning(f"Auto-merge failed for {ticket.id}: {message}")
+            lines.append(f"⚠ Rebase onto origin/{base_branch} had conflicts: {rebase_msg}")
+            lines.append("")
+            lines.append("ACTION REQUIRED: You need to manually resolve the conflicts.")
+            lines.append("")
+            lines.append("Steps to resolve:")
+            lines.append(f"1. Run: git fetch origin {base_branch}")
+            lines.append(f"2. Run: git rebase origin/{base_branch}")
+            lines.append("3. For each conflict, edit the file to resolve, then: git add <file>")
+            lines.append("4. Run: git rebase --continue")
+            lines.append("5. Once resolved, signal COMPLETE to retry the merge")
 
-        self._notify_ticket_changed()
+        if conflict_files:
+            lines.append("")
+            lines.append("Files with conflicts:")
+            for f in conflict_files[:10]:  # Limit to first 10
+                lines.append(f"  - {f}")
+            if len(conflict_files) > 10:
+                lines.append(f"  ... and {len(conflict_files) - 10} more")
+
+        if files_on_base:
+            lines.append("")
+            lines.append(f"Files recently changed on {base_branch} (potential conflict sources):")
+            for f in files_on_base[:10]:  # Limit to first 10
+                lines.append(f"  - {f}")
+            if len(files_on_base) > 10:
+                lines.append(f"  ... and {len(files_on_base) - 10} more")
+
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        return "\n".join(lines)
 
     async def _handle_blocked(self, ticket: Ticket, reason: str) -> None:
         """Handle blocked ticket - move back to BACKLOG with reason."""

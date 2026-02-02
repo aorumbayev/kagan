@@ -46,14 +46,25 @@ class RefinementConfig(BaseModel):
 class GeneralConfig(BaseModel):
     """General configuration settings."""
 
-    max_concurrent_agents: int = Field(default=3)
+    max_concurrent_agents: int = Field(default=1)
     default_base_branch: str = Field(default="main")
     auto_start: bool = Field(default=False)
     auto_approve: bool = Field(default=False)
     auto_merge: bool = Field(default=False)
+    auto_retry_on_merge_conflict: bool = Field(
+        default=True,
+        description="When auto_merge is enabled and fails due to conflict, "
+        "rebase and retry automatically",
+    )
     max_iterations: int = Field(default=10)
     iteration_delay_seconds: float = Field(default=2.0)
     default_worker_agent: str = Field(default="claude")
+    default_model_claude: str | None = Field(
+        default=None, description="Default Claude model alias or full name (None = agent default)"
+    )
+    default_model_opencode: str | None = Field(
+        default=None, description="Default OpenCode model (None = agent default)"
+    )
 
 
 class UIConfig(BaseModel):
@@ -81,6 +92,7 @@ class AgentConfig(BaseModel):
         description="OS-specific CLI commands for PAIR mode (e.g., 'claude')",
     )
     active: bool = Field(default=True, description="Whether this agent is active")
+    model_env_var: str = Field(default="", description="Environment variable for model selection")
 
 
 class KaganConfig(BaseModel):
@@ -121,4 +133,5 @@ def get_fallback_agent_config() -> AgentConfig:
         short_name="claude",
         run_command={"*": "npx claude-code-acp"},
         interactive_command={"*": "claude"},
+        model_env_var="ANTHROPIC_MODEL",
     )

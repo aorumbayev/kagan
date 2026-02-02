@@ -9,6 +9,35 @@ if TYPE_CHECKING:
     from kagan.database.models import Ticket
 
 
+def resolve_model(
+    config: KaganConfig,
+    agent_identity: str,
+) -> str | None:
+    """Resolve the model to use based on config defaults.
+
+    Priority:
+    1. config.general.default_model_<agent> (project default for agent type)
+    2. None (agent uses its own default)
+
+    Args:
+        config: The Kagan configuration
+        agent_identity: The agent identity (e.g., 'claude.com', 'opencode')
+
+    Returns:
+        The model identifier to use, or None to use agent's default
+    """
+    # Priority 1: config's default model for this agent type
+    if "claude" in agent_identity.lower():
+        if config.general.default_model_claude:
+            return config.general.default_model_claude
+    elif "opencode" in agent_identity.lower():
+        if config.general.default_model_opencode:
+            return config.general.default_model_opencode
+
+    # Priority 2: no override, agent uses its default
+    return None
+
+
 def resolve_agent_config(
     ticket: Ticket,
     config: KaganConfig,

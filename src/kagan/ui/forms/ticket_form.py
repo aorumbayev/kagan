@@ -132,7 +132,7 @@ class TicketFormBuilder:
 
         # View mode: show static display
         yield Label("Title", classes="section-title view-only", id="title-section-label")
-        yield Static(title, classes="ticket-title view-only", id="title-display")
+        yield Static(title, classes="ticket-title view-only", id="title-display", markup=False)
 
         # Edit mode: show input
         with Vertical(classes="form-field edit-fields", id="title-field"):
@@ -163,7 +163,12 @@ class TicketFormBuilder:
             yield Static(expand_text, classes="expand-hint", id="expand-btn")
 
         # View mode display
-        yield Static(description, classes="ticket-description view-only", id="description-content")
+        yield Static(
+            description,
+            classes="ticket-description view-only",
+            id="description-content",
+            markup=False,
+        )
 
         # Edit mode input
         edit_text = ticket.description if ticket else ""

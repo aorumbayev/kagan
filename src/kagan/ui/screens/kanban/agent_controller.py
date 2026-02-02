@@ -44,6 +44,7 @@ class AgentController:
         """Open agent output modal to watch running agent.
 
         Shows appropriate message if agent is not running.
+        For REVIEW status tickets, shows tabbed interface with historical logs.
 
         Args:
             ticket: The AUTO ticket to watch.
@@ -54,10 +55,37 @@ class AgentController:
             return
 
         scheduler = self._kagan_app.scheduler
+        status = coerce_enum(ticket.status, TicketStatus)
+
+        # Handle REVIEW status - show tabbed modal with historical logs
+        if status == TicketStatus.REVIEW:
+            from kagan.ui.modals.agent_output import AgentOutputModal
+
+            # Load historical logs from database
+            state_manager = self._kagan_app.state_manager
+            impl_logs = await state_manager.get_agent_logs(ticket.id, "implementation")
+            review_logs = await state_manager.get_agent_logs(ticket.id, "review")
+
+            # Check if review is still running
+            review_agent = scheduler.get_review_agent(ticket.id)
+            is_reviewing = scheduler.is_reviewing(ticket.id)
+
+            modal = AgentOutputModal(
+                ticket=ticket,
+                agent=None,  # No implementation agent when in review
+                review_agent=review_agent,
+                is_reviewing=is_reviewing,
+                historical_logs={
+                    "implementation": impl_logs,
+                    "review": review_logs,
+                },
+            )
+            await self._push_screen(modal)
+            return
+
+        # Handle IN_PROGRESS status - current behavior
         if not scheduler.is_running(ticket.id):
             # Provide more helpful message based on ticket status
-            status = coerce_enum(ticket.status, TicketStatus)
-
             if status == TicketStatus.BACKLOG:
                 self._notify(
                     "Agent not started. Press [a] to start or move to IN_PROGRESS.",

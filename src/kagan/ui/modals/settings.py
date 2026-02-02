@@ -53,6 +53,13 @@ class SettingsModal(ModalScreen[bool]):
                     id="auto-merge-switch",
                 )
                 yield Label("Auto-merge completed tickets", classes="setting-label")
+            with Horizontal(classes="setting-row"):
+                yield Switch(
+                    value=self._config.general.auto_retry_on_merge_conflict,
+                    id="auto-retry-merge-conflict-switch",
+                    disabled=not self._config.general.auto_merge,
+                )
+                yield Label("Retry on merge conflict", classes="setting-label")
 
             yield Rule()
 
@@ -91,6 +98,25 @@ class SettingsModal(ModalScreen[bool]):
 
             yield Rule()
 
+            # Model Defaults Section
+            yield Label("Model Defaults", classes="section-title")
+            with Vertical(classes="input-group"):
+                yield Label("Default Claude Model", classes="input-label")
+                yield Input(
+                    value=self._config.general.default_model_claude or "",
+                    id="default-model-claude-input",
+                    placeholder="sonnet",
+                )
+            with Vertical(classes="input-group"):
+                yield Label("Default OpenCode Model", classes="input-label")
+                yield Input(
+                    value=self._config.general.default_model_opencode or "",
+                    id="default-model-opencode-input",
+                    placeholder="anthropic/claude-sonnet-4-5",
+                )
+
+            yield Rule()
+
             # UI Preferences Section
             yield Label("UI Preferences", classes="section-title")
             with Horizontal(classes="setting-row"):
@@ -116,17 +142,31 @@ class SettingsModal(ModalScreen[bool]):
         elif event.button.id == "cancel-btn":
             self.action_cancel()
 
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Handle switch changes to update dependent settings."""
+        if event.switch.id == "auto-merge-switch":
+            # Enable/disable the retry switch based on auto-merge state
+            retry_switch = self.query_one("#auto-retry-merge-conflict-switch", Switch)
+            retry_switch.disabled = not event.value
+
     def action_save(self) -> None:
         """Save settings to config file."""
         # Read values from widgets
         auto_start = self.query_one("#auto-start-switch", Switch).value
         auto_approve = self.query_one("#auto-approve-switch", Switch).value
         auto_merge = self.query_one("#auto-merge-switch", Switch).value
+        auto_retry_on_merge_conflict = self.query_one(
+            "#auto-retry-merge-conflict-switch", Switch
+        ).value
         skip_tmux_gateway = self.query_one("#skip-tmux-gateway-switch", Switch).value
         base_branch = self.query_one("#base-branch-input", Input).value
         max_agents_str = self.query_one("#max-agents-input", Input).value
         max_iterations_str = self.query_one("#max-iterations-input", Input).value
         iteration_delay_str = self.query_one("#iteration-delay-input", Input).value
+        default_model_claude = self.query_one("#default-model-claude-input", Input).value
+        default_model_claude = default_model_claude.strip() or None
+        default_model_opencode = self.query_one("#default-model-opencode-input", Input).value
+        default_model_opencode = default_model_opencode.strip() or None
 
         # Parse numeric values with validation
         try:
@@ -141,10 +181,13 @@ class SettingsModal(ModalScreen[bool]):
         self._config.general.auto_start = auto_start
         self._config.general.auto_approve = auto_approve
         self._config.general.auto_merge = auto_merge
+        self._config.general.auto_retry_on_merge_conflict = auto_retry_on_merge_conflict
         self._config.general.default_base_branch = base_branch
         self._config.general.max_concurrent_agents = max_agents
         self._config.general.max_iterations = max_iterations
         self._config.general.iteration_delay_seconds = iteration_delay
+        self._config.general.default_model_claude = default_model_claude
+        self._config.general.default_model_opencode = default_model_opencode
         self._config.ui.skip_tmux_gateway = skip_tmux_gateway
 
         # Write to TOML file
@@ -174,17 +217,42 @@ active = true'''
 
         general = self._config.general
         ui = self._config.ui
+
+        # Build model lines conditionally (only include if set)
+        model_claude_line = (
+            f'default_model_claude = "{general.default_model_claude}"'
+            if general.default_model_claude
+            else ""
+        )
+        model_opencode_line = (
+            f'default_model_opencode = "{general.default_model_opencode}"'
+            if general.default_model_opencode
+            else ""
+        )
+
+        # Build the general section with optional model lines
+        general_lines = [
+            f"auto_start = {str(general.auto_start).lower()}",
+            f"auto_approve = {str(general.auto_approve).lower()}",
+            f"auto_merge = {str(general.auto_merge).lower()}",
+            f"auto_retry_on_merge_conflict = {str(general.auto_retry_on_merge_conflict).lower()}",
+            f'default_base_branch = "{general.default_base_branch}"',
+            f'default_worker_agent = "{general.default_worker_agent}"',
+            f"max_concurrent_agents = {general.max_concurrent_agents}",
+            f"max_iterations = {general.max_iterations}",
+            f"iteration_delay_seconds = {general.iteration_delay_seconds}",
+        ]
+        if model_claude_line:
+            general_lines.append(model_claude_line)
+        if model_opencode_line:
+            general_lines.append(model_opencode_line)
+
+        general_section = "\n".join(general_lines)
+
         config_content = f"""# Kagan Configuration
 
 [general]
-auto_start = {str(general.auto_start).lower()}
-auto_approve = {str(general.auto_approve).lower()}
-auto_merge = {str(general.auto_merge).lower()}
-default_base_branch = "{general.default_base_branch}"
-default_worker_agent = "{general.default_worker_agent}"
-max_concurrent_agents = {general.max_concurrent_agents}
-max_iterations = {general.max_iterations}
-iteration_delay_seconds = {general.iteration_delay_seconds}
+{general_section}
 
 [ui]
 skip_tmux_gateway = {str(ui.skip_tmux_gateway).lower()}

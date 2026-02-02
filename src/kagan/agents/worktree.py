@@ -7,6 +7,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from kagan.debug_log import log
+
 
 class WorktreeError(Exception):
     """Raised when git worktree operations fail."""
@@ -321,6 +323,138 @@ class WorktreeManager:
         except WorktreeError:
             return ""
 
+    async def rebase_onto_base(
+        self, ticket_id: str, base_branch: str = "main"
+    ) -> tuple[bool, str, list[str]]:
+        """Rebase the worktree branch onto the latest base branch.
+
+        This fetches the latest base branch and rebases the worktree branch onto it.
+        Used to resolve merge conflicts by updating the branch before retry.
+
+        Args:
+            ticket_id: Unique ticket identifier
+            base_branch: Base branch to rebase onto
+
+        Returns:
+            Tuple of (success, message, conflicting_files)
+            - success: True if rebase completed without conflicts
+            - message: Description of what happened
+            - conflicting_files: List of files with conflicts (empty if success)
+        """
+        wt_path = await self.get_path(ticket_id)
+        if wt_path is None:
+            return False, f"Worktree not found for ticket {ticket_id}", []
+
+        try:
+            # Fetch latest changes from origin
+            await self._run_git("fetch", "origin", base_branch, cwd=wt_path, check=False)
+
+            # Get the current branch name
+            branch_name = await self.get_branch_name(ticket_id)
+            if branch_name is None:
+                return False, "Could not determine branch name", []
+
+            # Check for uncommitted changes before rebase
+            status_out, _ = await self._run_git("status", "--porcelain", cwd=wt_path, check=False)
+            if status_out.strip():
+                return False, "Cannot rebase: worktree has uncommitted changes", []
+
+            # Start rebase onto origin/base_branch
+            stdout, stderr = await self._run_git(
+                "rebase", f"origin/{base_branch}", cwd=wt_path, check=False
+            )
+
+            # Check if rebase succeeded or had conflicts
+            combined_output = f"{stdout}\n{stderr}".lower()
+            if "conflict" in combined_output or "could not apply" in combined_output:
+                # Get list of conflicting files
+                status_out, _ = await self._run_git(
+                    "status", "--porcelain", cwd=wt_path, check=False
+                )
+                conflicting_files = []
+                for line in status_out.split("\n"):
+                    if line.startswith("UU ") or line.startswith("AA ") or line.startswith("DD "):
+                        # Extract filename (after the status prefix)
+                        filename = line[3:].strip()
+                        conflicting_files.append(filename)
+
+                # Abort the rebase to leave worktree in clean state
+                await self._run_git("rebase", "--abort", cwd=wt_path, check=False)
+
+                log.info(f"Rebase conflict for {ticket_id}: {conflicting_files}")
+                return (
+                    False,
+                    f"Rebase conflict in {len(conflicting_files)} file(s)",
+                    conflicting_files,
+                )
+
+            log.info(f"Successfully rebased {ticket_id} onto {base_branch}")
+            return True, f"Successfully rebased onto {base_branch}", []
+
+        except WorktreeError as e:
+            # Abort any in-progress rebase
+            await self._run_git("rebase", "--abort", cwd=wt_path, check=False)
+            return False, f"Rebase failed: {e}", []
+        except Exception as e:
+            # Abort any in-progress rebase
+            await self._run_git("rebase", "--abort", cwd=wt_path, check=False)
+            return False, f"Unexpected error during rebase: {e}", []
+
+    async def get_files_changed_on_base(
+        self, ticket_id: str, base_branch: str = "main"
+    ) -> list[str]:
+        """Get list of files changed on the base branch since our branch diverged.
+
+        Useful for understanding what might cause merge conflicts.
+
+        Args:
+            ticket_id: Unique ticket identifier
+            base_branch: Base branch to compare against
+
+        Returns:
+            List of files changed on base branch since divergence
+        """
+        wt_path = await self.get_path(ticket_id)
+        if wt_path is None:
+            return []
+
+        try:
+            # Find the merge base (where we diverged from base)
+            merge_base_out, _ = await self._run_git(
+                "merge-base", "HEAD", f"origin/{base_branch}", cwd=wt_path, check=False
+            )
+            if not merge_base_out.strip():
+                return []
+
+            merge_base = merge_base_out.strip()
+
+            # Get files changed on base branch since merge base
+            diff_out, _ = await self._run_git(
+                "diff", "--name-only", merge_base, f"origin/{base_branch}", cwd=wt_path, check=False
+            )
+            if not diff_out.strip():
+                return []
+
+            return [f.strip() for f in diff_out.split("\n") if f.strip()]
+        except WorktreeError:
+            return []
+
+    async def cleanup_orphans(self, valid_ticket_ids: set[str]) -> list[str]:
+        """Remove worktrees not associated with any known ticket.
+
+        Args:
+            valid_ticket_ids: Set of ticket IDs that exist in database.
+
+        Returns:
+            List of orphan ticket IDs that were cleaned up.
+        """
+        cleaned = []
+        for ticket_id in await self.list_all():
+            if ticket_id not in valid_ticket_ids:
+                await self.delete(ticket_id, delete_branch=True)
+                cleaned.append(ticket_id)
+        return cleaned
+
     async def merge_to_main(
         self, ticket_id: str, base_branch: str = "main", squash: bool = True
     ) -> tuple[bool, str]:
@@ -334,10 +468,6 @@ class WorktreeManager:
         Returns:
             Tuple of (success, message)
         """
-        import logging
-
-        log = logging.getLogger(__name__)
-
         # Get worktree path and branch
         wt_path = await self.get_path(ticket_id)
         if wt_path is None:

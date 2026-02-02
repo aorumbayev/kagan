@@ -86,6 +86,58 @@ async def get_git_version() -> GitVersion | None:
         return None
 
 
+async def get_git_user_identity() -> tuple[str, str]:
+    """Get the configured git user name and email.
+
+    Checks environment variables first (GIT_AUTHOR_NAME, GIT_COMMITTER_NAME,
+    GIT_AUTHOR_EMAIL, GIT_COMMITTER_EMAIL), then falls back to git config.
+
+    Returns (name, email) tuple. Returns fallback values if not configured.
+    """
+    import os
+
+    # Check environment variables first (takes precedence for git operations)
+    env_name = os.environ.get("GIT_AUTHOR_NAME") or os.environ.get("GIT_COMMITTER_NAME")
+    env_email = os.environ.get("GIT_AUTHOR_EMAIL") or os.environ.get("GIT_COMMITTER_EMAIL")
+
+    name = env_name or ""
+    email = env_email or ""
+
+    try:
+        # Get user.name from git config if not in env
+        if not name:
+            proc_name = await asyncio.create_subprocess_exec(
+                "git",
+                "config",
+                "--get",
+                "user.name",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_name, _ = await proc_name.communicate()
+            if proc_name.returncode == 0:
+                name = stdout_name.decode().strip()
+
+        # Get user.email from git config if not in env
+        if not email:
+            proc_email = await asyncio.create_subprocess_exec(
+                "git",
+                "config",
+                "--get",
+                "user.email",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout_email, _ = await proc_email.communicate()
+            if proc_email.returncode == 0:
+                email = stdout_email.decode().strip()
+    except FileNotFoundError:
+        pass
+
+    # Fallback if still not set
+    return name or "Developer", email or "developer@localhost"
+
+
 async def check_git_user_configured() -> tuple[bool, str | None]:
     """Check if git user.name and user.email are configured.
 

@@ -11,13 +11,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from kagan.mcp.server import (
+    _create_mcp_server,
     _get_server,
     _get_state_manager,
     find_kagan_dir,
-    get_context,
     main,
-    request_review,
-    update_scratchpad,
 )
 
 pytestmark = pytest.mark.integration
@@ -138,7 +136,7 @@ class TestGetServer:
 
 
 class TestMCPTools:
-    """Tests for MCP tool functions."""
+    """Tests for MCP tool functions created via factory."""
 
     @pytest.fixture(autouse=True)
     def reset_globals(self) -> Generator[None, None, None]:
@@ -152,35 +150,32 @@ class TestMCPTools:
         server_module._server = None
         server_module._kagan_dir = None
 
-    async def test_get_context_delegates_to_server(self, mocker) -> None:
-        mock_server = mocker.MagicMock()
-        mock_server.get_context = mocker.AsyncMock(return_value={"ticket_id": "123"})
+    def test_factory_creates_full_mode_tools(self) -> None:
+        """Factory creates all 5 tools in full mode."""
+        mcp = _create_mcp_server(readonly=False)
+        tool_names = set(mcp._tool_manager._tools.keys())
 
-        mocker.patch("kagan.mcp.server._get_server", return_value=mock_server)
+        assert "get_context" in tool_names
+        assert "update_scratchpad" in tool_names
+        assert "request_review" in tool_names
+        assert "get_parallel_tickets" in tool_names
+        assert "get_agent_logs" in tool_names
 
-        result = await get_context("123")
-        assert result == {"ticket_id": "123"}
-        mock_server.get_context.assert_called_once_with("123")
+    def test_factory_creates_readonly_mode_tools(self) -> None:
+        """Factory creates only 2 tools in readonly mode."""
+        mcp = _create_mcp_server(readonly=True)
+        tool_names = set(mcp._tool_manager._tools.keys())
 
-    async def test_update_scratchpad_delegates_to_server(self, mocker) -> None:
-        mock_server = mocker.MagicMock()
-        mock_server.update_scratchpad = mocker.AsyncMock(return_value=True)
+        assert "get_parallel_tickets" in tool_names
+        assert "get_agent_logs" in tool_names
+        assert "get_context" not in tool_names
+        assert "update_scratchpad" not in tool_names
+        assert "request_review" not in tool_names
 
-        mocker.patch("kagan.mcp.server._get_server", return_value=mock_server)
-
-        result = await update_scratchpad("123", "content")
-        assert result is True
-        mock_server.update_scratchpad.assert_called_once_with("123", "content")
-
-    async def test_request_review_delegates_to_server(self, mocker) -> None:
-        mock_server = mocker.MagicMock()
-        mock_server.request_review = mocker.AsyncMock(return_value={"status": "ok"})
-
-        mocker.patch("kagan.mcp.server._get_server", return_value=mock_server)
-
-        result = await request_review("123", "summary")
-        assert result == {"status": "ok"}
-        mock_server.request_review.assert_called_once_with("123", "summary")
+    def test_full_mode_is_default(self) -> None:
+        """Factory defaults to full mode (readonly=False)."""
+        mcp = _create_mcp_server()
+        assert len(mcp._tool_manager._tools) == 5
 
 
 class TestMain:
@@ -196,9 +191,20 @@ class TestMain:
         kagan_dir = tmp_path / ".kagan"
         kagan_dir.mkdir()
 
-        mock_mcp = mocker.MagicMock()
+        mock_mcp_instance = mocker.MagicMock()
         mocker.patch("kagan.mcp.server.find_kagan_dir", return_value=kagan_dir)
-        mocker.patch("kagan.mcp.server.mcp", mock_mcp)
+        mocker.patch("kagan.mcp.server._create_mcp_server", return_value=mock_mcp_instance)
 
         main()
-        mock_mcp.run.assert_called_once_with(transport="stdio")
+        mock_mcp_instance.run.assert_called_once_with(transport="stdio")
+
+    def test_main_accepts_readonly_parameter(self, tmp_path: Path, mocker) -> None:
+        kagan_dir = tmp_path / ".kagan"
+        kagan_dir.mkdir()
+
+        mock_create = mocker.patch("kagan.mcp.server._create_mcp_server")
+        mock_create.return_value.run = mocker.MagicMock()
+        mocker.patch("kagan.mcp.server.find_kagan_dir", return_value=kagan_dir)
+
+        main(readonly=True)
+        mock_create.assert_called_once_with(readonly=True)

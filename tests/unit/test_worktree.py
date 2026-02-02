@@ -260,6 +260,112 @@ class TestMergeToMain:
         assert s.mock_run_git.call_count == 2
 
 
+class TestRebaseOntoBase:
+    """Tests for WorktreeManager.rebase_onto_base() method."""
+
+    @pytest.fixture
+    def scenario(self, tmp_path: Path) -> MergeScenarioBuilder:
+        return MergeScenarioBuilder(tmp_path)
+
+    async def test_successful_rebase(self, scenario: MergeScenarioBuilder):
+        """Rebase succeeds when no conflicts."""
+        s = scenario.with_worktree("ticket-rebase").with_branch("kagan/ticket-rebase-feature")
+
+        s.mock_run_git.side_effect = [
+            ("", ""),  # fetch origin main
+            (s.branch_name, ""),  # rev-parse (get branch)
+            ("", ""),  # status --porcelain (clean)
+            ("Rebasing...", ""),  # rebase origin/main (success)
+        ]
+
+        success, message, conflicts = await s.manager.rebase_onto_base(s.ticket_id, "main")
+        assert success is True
+        assert "Successfully rebased" in message
+        assert conflicts == []
+
+    async def test_rebase_with_conflicts(self, scenario: MergeScenarioBuilder):
+        """Rebase fails and returns conflict files when conflicts occur."""
+        s = scenario.with_worktree("ticket-conflict").with_branch("kagan/ticket-conflict-feature")
+
+        s.mock_run_git.side_effect = [
+            ("", ""),  # fetch origin main
+            (s.branch_name, ""),  # rev-parse (get branch)
+            ("", ""),  # status --porcelain (clean before rebase)
+            ("", "CONFLICT in file.py"),  # rebase origin/main (conflict)
+            ("UU src/file.py\nUU tests/test.py", ""),  # status --porcelain (show conflicts)
+            ("", ""),  # rebase --abort
+        ]
+
+        success, message, conflicts = await s.manager.rebase_onto_base(s.ticket_id, "main")
+        assert success is False
+        assert "conflict" in message.lower()
+        assert "src/file.py" in conflicts
+        assert "tests/test.py" in conflicts
+
+    async def test_rebase_worktree_not_found(self, scenario: MergeScenarioBuilder):
+        """Rebase fails gracefully when worktree doesn't exist."""
+        success, message, conflicts = await scenario.manager.rebase_onto_base(
+            "nonexistent-ticket", "main"
+        )
+        assert success is False
+        assert "Worktree not found" in message
+        assert conflicts == []
+
+    async def test_rebase_with_uncommitted_changes(self, scenario: MergeScenarioBuilder):
+        """Rebase fails when worktree has uncommitted changes."""
+        s = scenario.with_worktree("ticket-dirty").with_branch("kagan/ticket-dirty-feature")
+
+        s.mock_run_git.side_effect = [
+            ("", ""),  # fetch origin main
+            (s.branch_name, ""),  # rev-parse (get branch)
+            ("M dirty_file.py", ""),  # status --porcelain (uncommitted changes)
+        ]
+
+        success, message, conflicts = await s.manager.rebase_onto_base(s.ticket_id, "main")
+        assert success is False
+        assert "uncommitted changes" in message
+        assert conflicts == []
+
+
+class TestGetFilesChangedOnBase:
+    """Tests for WorktreeManager.get_files_changed_on_base() method."""
+
+    @pytest.fixture
+    def scenario(self, tmp_path: Path) -> MergeScenarioBuilder:
+        return MergeScenarioBuilder(tmp_path)
+
+    async def test_returns_changed_files(self, scenario: MergeScenarioBuilder):
+        """Returns list of files changed on base branch."""
+        s = scenario.with_worktree("ticket-changes").with_branch("kagan/ticket-changes-feature")
+
+        s.mock_run_git.side_effect = [
+            ("abc123def456", ""),  # merge-base HEAD origin/main
+            ("src/app.py\nsrc/utils.py\nREADME.md", ""),  # diff --name-only
+        ]
+
+        files = await s.manager.get_files_changed_on_base(s.ticket_id, "main")
+        assert "src/app.py" in files
+        assert "src/utils.py" in files
+        assert "README.md" in files
+
+    async def test_returns_empty_for_no_changes(self, scenario: MergeScenarioBuilder):
+        """Returns empty list when no files changed on base."""
+        s = scenario.with_worktree("ticket-no-changes").with_branch("kagan/ticket-no-changes")
+
+        s.mock_run_git.side_effect = [
+            ("abc123def456", ""),  # merge-base
+            ("", ""),  # diff --name-only (empty)
+        ]
+
+        files = await s.manager.get_files_changed_on_base(s.ticket_id, "main")
+        assert files == []
+
+    async def test_returns_empty_for_nonexistent_worktree(self, scenario: MergeScenarioBuilder):
+        """Returns empty list when worktree doesn't exist."""
+        files = await scenario.manager.get_files_changed_on_base("nonexistent", "main")
+        assert files == []
+
+
 class TestSlugify:
     """Tests for slugify helper function."""
 
@@ -274,3 +380,83 @@ class TestSlugify:
     )
     def test_slugify(self, input_text: str, expected: str):
         assert slugify(input_text) == expected
+
+
+class TestCleanupOrphans:
+    """Tests for WorktreeManager.cleanup_orphans() method."""
+
+    @pytest.fixture
+    def scenario(self, tmp_path: Path) -> MergeScenarioBuilder:
+        return MergeScenarioBuilder(tmp_path)
+
+    async def test_removes_orphan_worktrees(self, scenario: MergeScenarioBuilder):
+        """Orphan worktrees are deleted."""
+        from unittest.mock import AsyncMock
+
+        s = scenario.with_worktree("ticket-1")
+
+        # Mock list_all to return worktrees including an orphan
+        s.manager.list_all = AsyncMock(return_value=["ticket-1", "ticket-2", "orphan-1"])  # type: ignore[method-assign]
+
+        # Track delete calls
+        deleted = []
+
+        async def track_delete(ticket_id: str, delete_branch: bool = False) -> None:
+            deleted.append((ticket_id, delete_branch))
+
+        s.manager.delete = track_delete  # type: ignore[method-assign]
+
+        # Only ticket-1 and ticket-2 are valid
+        cleaned = await s.manager.cleanup_orphans({"ticket-1", "ticket-2"})
+
+        assert cleaned == ["orphan-1"]
+        assert deleted == [("orphan-1", True)]
+
+    async def test_keeps_valid_worktrees(self, scenario: MergeScenarioBuilder):
+        """Valid worktrees are not touched."""
+        from unittest.mock import AsyncMock
+
+        s = scenario.with_worktree("ticket-1")
+
+        s.manager.list_all = AsyncMock(return_value=["ticket-1", "ticket-2"])  # type: ignore[method-assign]
+
+        deleted = []
+
+        async def track_delete(ticket_id: str, delete_branch: bool = False) -> None:
+            deleted.append(ticket_id)
+
+        s.manager.delete = track_delete  # type: ignore[method-assign]
+
+        cleaned = await s.manager.cleanup_orphans({"ticket-1", "ticket-2"})
+
+        assert cleaned == []
+        assert deleted == []
+
+    async def test_returns_all_cleaned_ids(self, scenario: MergeScenarioBuilder):
+        """Returns list of all cleaned up ticket IDs."""
+        from unittest.mock import AsyncMock
+
+        s = scenario.with_worktree("valid")
+
+        s.manager.list_all = AsyncMock(return_value=["valid", "orphan-1", "orphan-2", "orphan-3"])  # type: ignore[method-assign]
+
+        async def noop_delete(ticket_id: str, delete_branch: bool = False) -> None:
+            pass
+
+        s.manager.delete = noop_delete  # type: ignore[method-assign]
+
+        cleaned = await s.manager.cleanup_orphans({"valid"})
+
+        assert set(cleaned) == {"orphan-1", "orphan-2", "orphan-3"}
+
+    async def test_empty_worktrees_returns_empty(self, scenario: MergeScenarioBuilder):
+        """Returns empty list when no worktrees exist."""
+        from unittest.mock import AsyncMock
+
+        s = scenario.with_worktree("ticket-1")
+
+        s.manager.list_all = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+        cleaned = await s.manager.cleanup_orphans({"ticket-1"})
+
+        assert cleaned == []

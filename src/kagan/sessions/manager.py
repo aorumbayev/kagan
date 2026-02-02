@@ -8,7 +8,7 @@ import logging
 import subprocess
 from typing import TYPE_CHECKING
 
-from kagan.agents.config_resolver import resolve_agent_config
+from kagan.agents.config_resolver import resolve_agent_config, resolve_model
 from kagan.config import get_os_value
 from kagan.sessions.tmux import TmuxError, run_tmux
 
@@ -56,9 +56,12 @@ class SessionManager:
         await self._write_context_files(worktree_path, agent_config)
         await self._state.mark_session_active(ticket.id, True)
 
+        # Resolve model from config
+        model = resolve_model(self._config, agent_config.identity)
+
         # Auto-launch the agent's interactive CLI with the startup prompt
         startup_prompt = self._build_startup_prompt(ticket)
-        launch_cmd = self._build_launch_command(agent_config, startup_prompt)
+        launch_cmd = self._build_launch_command(agent_config, startup_prompt, model)
         if launch_cmd:
             await run_tmux("send-keys", "-t", session_name, launch_cmd, "Enter")
 
@@ -68,8 +71,22 @@ class SessionManager:
         """Get agent config for ticket using unified resolver."""
         return resolve_agent_config(ticket, self._config)
 
-    def _build_launch_command(self, agent_config: AgentConfig, prompt: str) -> str | None:
-        """Build CLI launch command with prompt for the agent."""
+    def _build_launch_command(
+        self,
+        agent_config: AgentConfig,
+        prompt: str,
+        model: str | None = None,
+    ) -> str | None:
+        """Build CLI launch command with prompt for the agent.
+
+        Args:
+            agent_config: The agent configuration
+            prompt: The startup prompt to send
+            model: Optional model override to pass via --model flag
+
+        Returns:
+            The command string to execute, or None if no interactive command
+        """
         import shlex
 
         base_cmd = get_os_value(agent_config.interactive_command)
@@ -78,13 +95,15 @@ class SessionManager:
 
         escaped_prompt = shlex.quote(prompt)
 
-        # Agent-specific command formats
+        # Agent-specific command formats with optional model flag
         if agent_config.short_name == "claude":
-            # claude "prompt"
-            return f"{base_cmd} {escaped_prompt}"
+            # claude --model opus "prompt"
+            model_flag = f"--model {model} " if model else ""
+            return f"{base_cmd} {model_flag}{escaped_prompt}"
         elif agent_config.short_name == "opencode":
-            # opencode --prompt "prompt"
-            return f"{base_cmd} --prompt {escaped_prompt}"
+            # opencode --model anthropic/claude-sonnet-4-5 --prompt "prompt"
+            model_flag = f"--model {model} " if model else ""
+            return f"{base_cmd} {model_flag}--prompt {escaped_prompt}"
         else:
             # Fallback: just run the base command (no auto-prompt)
             return base_cmd
@@ -226,17 +245,40 @@ Act as a Senior Developer collaborating with me on this implementation.
 - When complete: commit your work, then call `kagan_request_review` MCP tool
 
 ## MCP Tools Available
+
+**Context Tools:**
 - `kagan_get_context` - Get full ticket details (acceptance criteria, scratchpad)
-- `kagan_update_scratchpad` - Save progress notes
+- `kagan_update_scratchpad` - Save progress notes for future reference
+
+**Coordination Tools (USE THESE):**
+- `kagan_get_parallel_tickets` - Discover concurrent work to avoid merge conflicts
+- `kagan_get_agent_logs` - Get execution logs from any ticket to learn from prior work
+
+**Completion Tools:**
 - `kagan_request_review` - Submit work for review (commit first!)
 
+## Coordination Workflow
+
+Before implementing, check for parallel work and historical context:
+
+1. **Check parallel work**: Call `kagan_get_parallel_tickets` with your ticket_id to exclude self.
+   Review concurrent tickets to identify overlapping file modifications or shared dependencies.
+
+2. **Learn from history**: Call `kagan_get_agent_logs` on related completed tickets.
+   Avoid repeating failed approaches; reuse successful patterns.
+
+3. **Coordinate strategy**: If overlap exists, plan which files to modify first or wait for.
+
 ## Setup Verification
-Please confirm you have access to the Kagan MCP tools by calling the `kagan_get_context` tool.
-Use ticket_id: `{ticket.id}`.
+
+Please confirm you have access to the Kagan MCP tools by:
+1. Calling `kagan_get_context` with ticket_id: `{ticket.id}`
+2. Calling `kagan_get_parallel_tickets` to check for concurrent work
 
 After confirming MCP access, please:
 1. Summarize your understanding of this task (including acceptance criteria from MCP)
-2. Ask me if I'm ready to proceed with the implementation
+2. Report any parallel work that might affect our implementation
+3. Ask me if I'm ready to proceed with the implementation
 
 **Wait for my confirmation before beginning any implementation.**
 """

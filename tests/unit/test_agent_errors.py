@@ -242,3 +242,106 @@ async def test_permission_manages_tool_call_state(harness: AgentTestHarness):
     harness.agent.tool_calls["old"] = {"toolCallId": "old", "title": "Old"}
     await harness.agent._rpc_request_permission("s1", [], {"toolCallId": "old", "title": "Updated"})
     assert harness.agent.tool_calls["old"]["title"] == "Updated"
+
+
+# === Process Exit Code Handling ===
+async def test_non_zero_exit_code_posts_fail(harness: AgentTestHarness):
+    """Agent process exiting with non-zero code should post AgentFail with stderr."""
+    proc = harness.mock_process([])  # Empty read loop
+    proc.returncode = 1
+    proc.stderr = MagicMock()
+    proc.stderr.read = AsyncMock(return_value=b"Rate limit exceeded: quota exhausted")
+
+    with (
+        patch("asyncio.create_subprocess_shell", return_value=proc),
+        patch.object(harness.agent, "_initialize", new=AsyncMock()),
+    ):
+        await harness.agent._run_agent()
+
+    harness.assert_posted_fail("exited with code 1")
+    # Check that stderr was included in details
+    fail_msg = harness.posted_messages[0]
+    assert "Rate limit exceeded" in fail_msg.details
+
+
+async def test_zero_exit_code_no_fail(harness: AgentTestHarness):
+    """Agent process exiting with code 0 should not post AgentFail."""
+    proc = harness.mock_process([])
+    proc.returncode = 0
+
+    with (
+        patch("asyncio.create_subprocess_shell", return_value=proc),
+        patch.object(harness.agent, "_initialize", new=AsyncMock()),
+    ):
+        await harness.agent._run_agent()
+
+    # No AgentFail should be posted
+    assert not any(isinstance(m, messages.AgentFail) for m in harness.posted_messages), (
+        f"Unexpected AgentFail: {harness.posted_messages}"
+    )
+
+
+async def test_stderr_read_error_handled(harness: AgentTestHarness):
+    """If stderr read fails, should still post AgentFail with fallback message."""
+    proc = harness.mock_process([])
+    proc.returncode = 2
+    proc.stderr = MagicMock()
+    proc.stderr.read = AsyncMock(side_effect=OSError("Pipe broken"))
+
+    with (
+        patch("asyncio.create_subprocess_shell", return_value=proc),
+        patch.object(harness.agent, "_initialize", new=AsyncMock()),
+    ):
+        await harness.agent._run_agent()
+
+    harness.assert_posted_fail("exited with code 2")
+    fail_msg = harness.posted_messages[0]
+    assert "Failed to read stderr" in fail_msg.details
+
+
+# === send_prompt Error Handling ===
+async def test_send_prompt_rpc_error_posts_fail_and_reraises(harness: AgentTestHarness):
+    """RPC errors during send_prompt should post AgentFail and re-raise for scheduler."""
+    harness.agent.session_id = "test-session"
+    mock_call = MagicMock(
+        wait=AsyncMock(
+            side_effect=RPCError(
+                "Rate limit exceeded",
+                code=-32000,
+                data={"details": "You have exceeded your API quota"},
+            )
+        )
+    )
+
+    with patch.object(harness.agent._client, "call", return_value=mock_call):
+        with pytest.raises(RPCError, match="Rate limit exceeded"):
+            await harness.agent.send_prompt("Test prompt")
+
+    # Should still post AgentFail for visibility before re-raising
+    harness.assert_posted_fail("Rate limit exceeded")
+    fail_msg = harness.posted_messages[0]
+    assert "API quota" in fail_msg.details
+
+
+async def test_send_prompt_rpc_error_no_data_reraises(harness: AgentTestHarness):
+    """RPC errors without data should still post AgentFail and re-raise."""
+    harness.agent.session_id = "test-session"
+    mock_call = MagicMock(wait=AsyncMock(side_effect=RPCError("Internal error", code=-32603)))
+
+    with patch.object(harness.agent._client, "call", return_value=mock_call):
+        with pytest.raises(RPCError, match="Internal error"):
+            await harness.agent.send_prompt("Test prompt")
+
+    harness.assert_posted_fail("Internal error")
+
+
+async def test_send_prompt_success_posts_complete(harness: AgentTestHarness):
+    """Successful send_prompt should post AgentComplete."""
+    harness.agent.session_id = "test-session"
+    mock_call = MagicMock(wait=AsyncMock(return_value={"stopReason": "end_turn"}))
+
+    with patch.object(harness.agent._client, "call", return_value=mock_call):
+        result = await harness.agent.send_prompt("Test prompt")
+
+    assert result == "end_turn"
+    assert any(isinstance(m, messages.AgentComplete) for m in harness.posted_messages)

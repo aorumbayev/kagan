@@ -88,6 +88,17 @@ def _coerce_priority(v: Any, allow_none: bool = False) -> TicketPriority | None:
     return TicketPriority(v) if isinstance(v, (str, int)) else v
 
 
+class AgentLogEntry(BaseModel):
+    """Entry for agent execution log."""
+
+    id: int
+    ticket_id: str
+    log_type: str  # 'implementation' or 'review'
+    iteration: int
+    content: str
+    created_at: datetime
+
+
 class Ticket(BaseModel):
     """Ticket model representing a Kanban card."""
 
@@ -105,6 +116,8 @@ class Ticket(BaseModel):
     checks_passed: bool | None = Field(default=None)
     session_active: bool = Field(default=False)
     total_iterations: int = Field(default=0)
+    merge_failed: bool = Field(default=False)
+    merge_error: str | None = Field(default=None, max_length=500)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -150,6 +163,8 @@ class Ticket(BaseModel):
         review_summary: str | None = None,
         checks_passed: bool | None = None,
         session_active: bool = False,
+        merge_failed: bool = False,
+        merge_error: str | None = None,
     ) -> Ticket:
         """Create a new ticket with generated ID and timestamps."""
         return cls(
@@ -165,6 +180,8 @@ class Ticket(BaseModel):
             review_summary=review_summary,
             checks_passed=checks_passed,
             session_active=session_active,
+            merge_failed=merge_failed,
+            merge_error=merge_error,
         )
 
     def to_insert_params(

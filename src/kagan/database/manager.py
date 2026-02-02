@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -10,7 +11,7 @@ import aiosqlite
 
 from kagan.database import queries
 from kagan.database.migrations import auto_migrate
-from kagan.database.models import Ticket, TicketStatus
+from kagan.database.models import AgentLogEntry, Ticket, TicketStatus
 from kagan.limits import SCRATCHPAD_LIMIT
 
 if TYPE_CHECKING:
@@ -279,3 +280,69 @@ class StateManager:
             )
             await conn.commit()
         self._notify_change(ticket_id)
+
+    async def append_agent_log(
+        self, ticket_id: str, log_type: str, iteration: int, content: str
+    ) -> None:
+        """Append a log entry for agent execution.
+
+        Args:
+            ticket_id: The ticket ID
+            log_type: Either 'implementation' or 'review'
+            iteration: The iteration number
+            content: The full log content
+        """
+        from kagan.database.queries import INSERT_AGENT_LOG_SQL
+
+        conn = await self._get_connection()
+        async with self._lock:
+            await conn.execute(
+                INSERT_AGENT_LOG_SQL,
+                (ticket_id, log_type, iteration, content),
+            )
+            await conn.commit()
+
+    async def get_agent_logs(self, ticket_id: str, log_type: str) -> list[AgentLogEntry]:
+        """Get all log entries for a ticket and log type.
+
+        Args:
+            ticket_id: The ticket ID
+            log_type: Either 'implementation' or 'review'
+
+        Returns:
+            List of AgentLogEntry objects ordered by iteration
+        """
+        from kagan.database.queries import SELECT_AGENT_LOGS_SQL
+
+        conn = await self._get_connection()
+        cursor = await conn.execute(
+            SELECT_AGENT_LOGS_SQL,
+            (ticket_id, log_type),
+        )
+        rows = await cursor.fetchall()
+        return [
+            AgentLogEntry(
+                id=row[0],
+                ticket_id=row[1],
+                log_type=row[2],
+                iteration=row[3],
+                content=row[4],
+                created_at=datetime.fromisoformat(row[5]) if row[5] else datetime.now(),
+            )
+            for row in rows
+        ]
+
+    async def clear_agent_logs(self, ticket_id: str) -> None:
+        """Clear all agent logs for a ticket.
+
+        Called when a ticket is retried to start fresh.
+
+        Args:
+            ticket_id: The ticket ID
+        """
+        from kagan.database.queries import DELETE_AGENT_LOGS_SQL
+
+        conn = await self._get_connection()
+        async with self._lock:
+            await conn.execute(DELETE_AGENT_LOGS_SQL, (ticket_id,))
+            await conn.commit()

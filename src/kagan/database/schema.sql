@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     checks_passed INTEGER CHECK(checks_passed IN (0, 1)),  -- NULL=not run, 0=false, 1=true
     session_active INTEGER DEFAULT 0 CHECK(session_active IN (0, 1)),  -- 0=false, 1=true
     total_iterations INTEGER DEFAULT 0,  -- Lifetime iteration counter (monotonically increasing)
+    merge_failed INTEGER DEFAULT 0 CHECK(merge_failed IN (0, 1)),  -- 0=false, 1=true
+    merge_error TEXT,  -- Error message when merge fails
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -45,3 +47,14 @@ CREATE TABLE IF NOT EXISTS scratchpads (
     content TEXT DEFAULT '',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Agent execution logs (implementation and review phases)
+CREATE TABLE IF NOT EXISTS agent_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    log_type TEXT NOT NULL CHECK(log_type IN ('implementation', 'review')),
+    iteration INTEGER DEFAULT 1,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_agent_logs_ticket ON agent_logs(ticket_id, log_type, iteration);

@@ -21,6 +21,14 @@ class Mode(NamedTuple):
     description: str | None
 
 
+class Model(NamedTuple):
+    """An available LLM model."""
+
+    id: str
+    name: str
+    description: str | None
+
+
 class Answer(NamedTuple):
     """Permission dialog answer."""
 
@@ -115,6 +123,21 @@ class ModeUpdate(AgentMessage):
     """Agent informed us about a mode change."""
 
     current_mode: str
+
+
+@dataclass
+class SetModels(AgentMessage):
+    """Agent reported available models."""
+
+    current_model: str
+    models: dict[str, Model]
+
+
+@dataclass
+class ModelUpdate(AgentMessage):
+    """Agent informed us about a model change."""
+
+    current_model: str
 
 
 @dataclass

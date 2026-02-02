@@ -20,7 +20,7 @@ auto_approve = false
 auto_merge = false
 default_base_branch = "main"
 default_worker_agent = "claude"
-max_concurrent_agents = 3
+max_concurrent_agents = 1
 max_iterations = 10
 iteration_delay_seconds = 2.0
 ```
@@ -32,7 +32,7 @@ iteration_delay_seconds = 2.0
 | `auto_merge`              | `false`    | Auto-merge tickets after review passes             |
 | `default_base_branch`     | `"main"`   | Base branch for worktrees and merges               |
 | `default_worker_agent`    | `"claude"` | Default agent for new tickets                      |
-| `max_concurrent_agents`   | `3`        | Maximum parallel AUTO agents                       |
+| `max_concurrent_agents`   | `1`        | Maximum parallel AUTO agents                       |
 | `max_iterations`          | `10`       | Max agent iterations before BACKLOG                |
 | `iteration_delay_seconds` | `2.0`      | Delay between agent iterations                     |
 

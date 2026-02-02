@@ -16,6 +16,7 @@ APP_BINDINGS: list[BindingType] = [
     Binding("f1", "show_help", "Help", key_display="F1", priority=True),
     Binding("question_mark", "show_help", "", show=False, key_display="?"),
     Binding("ctrl+p", "command_palette", "Palette", show=False),
+    Binding("f12", "toggle_debug_log", "Debug", show=False),
 ]
 
 # =============================================================================
@@ -138,6 +139,11 @@ REVIEW_BINDINGS: list[BindingType] = [
 SETTINGS_BINDINGS: list[BindingType] = [
     Binding("escape", "cancel", "Cancel"),
     Binding("ctrl+s", "save", "Save"),
+]
+
+DEBUG_LOG_BINDINGS: list[BindingType] = [
+    Binding("escape", "close", "Close"),
+    Binding("c", "clear_logs", "Clear"),
 ]
 
 TICKET_DETAILS_BINDINGS: list[BindingType] = [
