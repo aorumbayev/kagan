@@ -56,12 +56,37 @@ jobs:
           enable-cache: true
       - run: uv sync --dev
       - name: Test
+        # Snapshot tests are excluded here because they are image-based and
+        # sensitive to parallel execution and runner rendering differences.
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            uv run pytest tests/ -n auto --cov=src/kagan --cov-report=term-missing
+            uv run pytest tests/ -m "not snapshot" -n auto --cov=src/kagan --cov-report=term-missing
           else
-            uv run pytest tests/ -n auto
+            uv run pytest tests/ -m "not snapshot" -n auto
           fi
+
+  snapshot:
+    needs: lint
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux git
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "test@kagan.local"
+          git config --global user.name "Kagan Test"
+          git config --global commit.gpgsign false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --dev
+      - name: Snapshot tests (sequential)
+        # Run snapshots in a dedicated, deterministic lane.
+        run: uv run pytest tests/snapshots/ -n 0 -v
 
   test-all-platforms:
     needs: lint
@@ -90,4 +115,5 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --dev
-      - run: uv run pytest tests/ -n auto --cov=src/kagan --cov-report=term-missing
+      # Exclude snapshot tests from matrix runs; covered by dedicated job.
+      - run: uv run pytest tests/ -m "not snapshot" -n auto --cov=src/kagan --cov-report=term-missing

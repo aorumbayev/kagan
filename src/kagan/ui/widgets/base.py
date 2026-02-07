@@ -1,7 +1,6 @@
 """Reusable base widget classes for forms and modals.
 
 Provides consistent styling and configuration for common form components.
-Based on patterns from JiraTUI.
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual.theme import Theme
 
-# Khagan Night Theme - Inspired by the Mongol steppe and Silk Road
+# Khagan Night Theme
 # This is the full truecolor (24-bit) theme for modern terminals
 KAGAN_THEME = Theme(
     name="kagan",

@@ -7,6 +7,7 @@ when moved using leader keys (gl/gh) or other navigation.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from textual.pilot import Pilot
 
     from tests.snapshots.conftest import MockAgentFactory
+
+
+SNAPSHOT_TIME = datetime(2024, 1, 1, 12, 0, 0)
 
 
 def _create_fake_tmux(sessions: dict[str, Any]) -> object:
@@ -70,6 +74,8 @@ async def _setup_movement_tickets(db_path: str) -> None:
             priority=TicketPriority.MEDIUM,
             status=TicketStatus.BACKLOG,
             ticket_type=TicketType.PAIR,
+            created_at=SNAPSHOT_TIME,
+            updated_at=SNAPSHOT_TIME,
         ),
         Ticket(
             id="pair0002",
@@ -78,6 +84,8 @@ async def _setup_movement_tickets(db_path: str) -> None:
             priority=TicketPriority.HIGH,
             status=TicketStatus.IN_PROGRESS,
             ticket_type=TicketType.PAIR,
+            created_at=SNAPSHOT_TIME,
+            updated_at=SNAPSHOT_TIME,
         ),
     ]
 
@@ -98,6 +106,8 @@ async def _setup_auto_movement_ticket(db_path: str) -> None:
         priority=TicketPriority.HIGH,
         status=TicketStatus.IN_PROGRESS,
         ticket_type=TicketType.AUTO,
+        created_at=SNAPSHOT_TIME,
+        updated_at=SNAPSHOT_TIME,
     )
 
     await manager.create_ticket(ticket)

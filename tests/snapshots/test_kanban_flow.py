@@ -14,6 +14,7 @@ internally calls asyncio.run(), which conflicts with async test functions.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
     from textual.pilot import Pilot
 
     from tests.snapshots.conftest import MockAgentFactory
+
+
+SNAPSHOT_TIME = datetime(2024, 1, 1, 12, 0, 0)
 
 
 def _create_fake_tmux(sessions: dict[str, Any]) -> object:
@@ -80,6 +84,8 @@ async def _setup_kanban_tickets(db_path: str) -> None:
             priority=TicketPriority.LOW,
             status=TicketStatus.BACKLOG,
             ticket_type=TicketType.PAIR,
+            created_at=SNAPSHOT_TIME,
+            updated_at=SNAPSHOT_TIME,
         ),
         Ticket(
             id="backlog2",
@@ -88,6 +94,8 @@ async def _setup_kanban_tickets(db_path: str) -> None:
             priority=TicketPriority.HIGH,
             status=TicketStatus.BACKLOG,
             ticket_type=TicketType.AUTO,
+            created_at=SNAPSHOT_TIME,
+            updated_at=SNAPSHOT_TIME,
         ),
         Ticket(
             id="inprog01",
@@ -96,6 +104,8 @@ async def _setup_kanban_tickets(db_path: str) -> None:
             priority=TicketPriority.HIGH,
             status=TicketStatus.IN_PROGRESS,
             ticket_type=TicketType.PAIR,
+            created_at=SNAPSHOT_TIME,
+            updated_at=SNAPSHOT_TIME,
         ),
         Ticket(
             id="review01",
@@ -104,6 +114,8 @@ async def _setup_kanban_tickets(db_path: str) -> None:
             priority=TicketPriority.MEDIUM,
             status=TicketStatus.REVIEW,
             ticket_type=TicketType.AUTO,
+            created_at=SNAPSHOT_TIME,
+            updated_at=SNAPSHOT_TIME,
         ),
         Ticket(
             id="done0001",
@@ -112,6 +124,8 @@ async def _setup_kanban_tickets(db_path: str) -> None:
             priority=TicketPriority.LOW,
             status=TicketStatus.DONE,
             ticket_type=TicketType.PAIR,
+            created_at=SNAPSHOT_TIME,
+            updated_at=SNAPSHOT_TIME,
         ),
     ]
 

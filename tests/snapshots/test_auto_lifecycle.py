@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     from types import SimpleNamespace
 
     from textual.pilot import Pilot
+
+
+SNAPSHOT_TIME = datetime(2024, 1, 1, 12, 0, 0)
 
 
 # =============================================================================
@@ -120,6 +124,8 @@ async def _create_auto_ticket(db_path: str) -> str:
         priority=TicketPriority.HIGH,
         status=TicketStatus.BACKLOG,
         ticket_type=TicketType.AUTO,
+        created_at=SNAPSHOT_TIME,
+        updated_at=SNAPSHOT_TIME,
     )
     await manager.create_ticket(ticket)
     await manager.close()
@@ -511,6 +517,8 @@ class TestAutoTicketLifecycleWithReview:
                 ticket_type=TicketType.AUTO,
                 checks_passed=True,
                 review_summary="Implementation is correct and well-tested",
+                created_at=SNAPSHOT_TIME,
+                updated_at=SNAPSHOT_TIME,
             )
             loop.run_until_complete(manager.create_ticket(ticket))
 
@@ -754,6 +762,8 @@ class TestAutoTicketLifecycleDone:
                 ticket_type=TicketType.AUTO,
                 checks_passed=True,
                 review_summary="All tests pass, implementation complete",
+                created_at=SNAPSHOT_TIME,
+                updated_at=SNAPSHOT_TIME,
             )
             loop.run_until_complete(manager.create_ticket(done_ticket))
 
@@ -765,6 +775,8 @@ class TestAutoTicketLifecycleDone:
                 priority=TicketPriority.MEDIUM,
                 status=TicketStatus.IN_PROGRESS,
                 ticket_type=TicketType.AUTO,
+                created_at=SNAPSHOT_TIME,
+                updated_at=SNAPSHOT_TIME,
             )
             loop.run_until_complete(manager.create_ticket(in_progress_ticket))
 
@@ -776,6 +788,8 @@ class TestAutoTicketLifecycleDone:
                 priority=TicketPriority.LOW,
                 status=TicketStatus.BACKLOG,
                 ticket_type=TicketType.AUTO,
+                created_at=SNAPSHOT_TIME,
+                updated_at=SNAPSHOT_TIME,
             )
             loop.run_until_complete(manager.create_ticket(backlog_ticket))
 

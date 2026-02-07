@@ -1,7 +1,6 @@
 """Form field factory for ticket modals.
 
 Separates form generation logic from modal behavior.
-Based on the factory pattern from JiraTUI.
 """
 
 from __future__ import annotations
