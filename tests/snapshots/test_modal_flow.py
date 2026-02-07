@@ -18,9 +18,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from kagan.adapters.db.repositories import TaskRepository
+from kagan.adapters.db.schema import Task
 from kagan.app import KaganApp
-from kagan.database import TicketRepository
-from kagan.database.models import Ticket, TicketPriority, TicketStatus, TicketType
+from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
 
 if TYPE_CHECKING:
     from types import SimpleNamespace
@@ -68,34 +69,44 @@ async def _setup_modal_test_tickets(db_path: str) -> None:
 
     Uses fixed IDs for snapshot reproducibility.
     """
-    manager = TicketRepository(db_path)
+    manager = TaskRepository(db_path)
     await manager.initialize()
+    project_id = manager.default_project_id
+    if project_id is None:
+        raise RuntimeError("TaskRepository defaults not initialized")
+    repo_id = manager.default_repo_id
 
     tickets = [
-        Ticket(
+        Task(
             id="modal001",
+            project_id=project_id,
+            repo_id=repo_id,
             title="Test ticket for modals",
             description="A ticket to test modal interactions with detailed content.",
-            priority=TicketPriority.MEDIUM,
-            status=TicketStatus.BACKLOG,
-            ticket_type=TicketType.PAIR,
+            priority=TaskPriority.MEDIUM,
+            status=TaskStatus.BACKLOG,
+            task_type=TaskType.PAIR,
             acceptance_criteria=["First criterion", "Second criterion"],
         ),
-        Ticket(
+        Task(
             id="modal002",
+            project_id=project_id,
+            repo_id=repo_id,
             title="Review ticket for diff modal",
             description="This ticket is ready for review and diff viewing.",
-            priority=TicketPriority.HIGH,
-            status=TicketStatus.REVIEW,
-            ticket_type=TicketType.AUTO,
+            priority=TaskPriority.HIGH,
+            status=TaskStatus.REVIEW,
+            task_type=TaskType.AUTO,
         ),
-        Ticket(
+        Task(
             id="modal003",
+            project_id=project_id,
+            repo_id=repo_id,
             title="Another backlog ticket",
             description="Secondary test ticket",
-            priority=TicketPriority.LOW,
-            status=TicketStatus.BACKLOG,
-            ticket_type=TicketType.AUTO,
+            priority=TaskPriority.LOW,
+            status=TaskStatus.BACKLOG,
+            task_type=TaskType.AUTO,
         ),
     ]
 
@@ -119,7 +130,7 @@ class TestModalFlow:
         sessions: dict[str, Any] = {}
         fake_tmux = _create_fake_tmux(sessions)
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", fake_tmux)
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", fake_tmux)
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", fake_tmux)
 
         # Set up tickets synchronously
         loop = asyncio.new_event_loop()

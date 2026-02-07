@@ -8,14 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from kagan.paths import ensure_directories, get_database_path
+LEGACY_TABLES = ("ticket_events", "agent_logs", "scratchpads", "tickets")
 
 
-async def create_db_engine(db_path: str | Path | None = None) -> AsyncEngine:
+async def create_db_engine(db_path: str | Path) -> AsyncEngine:
     """Create async SQLite engine with WAL mode."""
-    ensure_directories()
-    resolved = Path(db_path) if db_path else get_database_path()
-    db_path_str = str(resolved)
+    db_path_str = str(db_path)
     if db_path_str == ":memory:":
         engine = create_async_engine(
             "sqlite+aiosqlite:///:memory:",
@@ -41,6 +39,8 @@ async def create_db_engine(db_path: str | Path | None = None) -> AsyncEngine:
 async def create_db_tables(engine: AsyncEngine) -> None:
     """Create all tables from SQLModel metadata."""
     async with engine.begin() as conn:
+        for table in LEGACY_TABLES:
+            await conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table}")
         await conn.run_sync(SQLModel.metadata.create_all)
 
 

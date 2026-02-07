@@ -90,7 +90,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,
@@ -124,7 +124,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,
@@ -165,7 +165,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,
@@ -213,7 +213,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,
@@ -266,7 +266,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,
@@ -319,7 +319,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,
@@ -372,7 +372,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,
@@ -423,7 +423,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,
@@ -474,7 +474,7 @@ class TestPlannerFlow:
         # Mock tmux
         sessions: dict[str, Any] = {}
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", _create_fake_tmux(sessions))
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", _create_fake_tmux(sessions))
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", _create_fake_tmux(sessions))
 
         app = KaganApp(
             db_path=snapshot_project.db,

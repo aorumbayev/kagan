@@ -9,24 +9,25 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, TabbedContent, TabPane, TextArea
 
-from kagan.database.models import Ticket, TicketPriority, TicketType
+from kagan.core.models.entities import Task
+from kagan.core.models.enums import TaskPriority, TaskType
 from kagan.keybindings import TICKET_EDITOR_BINDINGS
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
 
-class TicketEditorScreen(ModalScreen[list[Ticket] | None]):
+class TicketEditorScreen(ModalScreen[list[Task] | None]):
     """Edit proposed tickets before approval.
 
     Returns:
-        list[Ticket]: Edited tickets
+        list[Task]: Edited tickets
         None: User cancelled
     """
 
     BINDINGS = TICKET_EDITOR_BINDINGS
 
-    def __init__(self, tickets: list[Ticket]) -> None:
+    def __init__(self, tickets: list[Task]) -> None:
         super().__init__()
         self._tickets = list(tickets)  # Mutable copy
 
@@ -49,9 +50,9 @@ class TicketEditorScreen(ModalScreen[list[Ticket] | None]):
                             )
                             yield Select(
                                 options=[
-                                    ("Low", TicketPriority.LOW.value),
-                                    ("Medium", TicketPriority.MEDIUM.value),
-                                    ("High", TicketPriority.HIGH.value),
+                                    ("Low", TaskPriority.LOW.value),
+                                    ("Medium", TaskPriority.MEDIUM.value),
+                                    ("High", TaskPriority.HIGH.value),
                                 ],
                                 value=ticket.priority.value,
                                 id=f"priority-{i}",
@@ -59,10 +60,10 @@ class TicketEditorScreen(ModalScreen[list[Ticket] | None]):
                             )
                             yield Select(
                                 options=[
-                                    ("AUTO - AI completes autonomously", TicketType.AUTO.value),
-                                    ("PAIR - Human collaboration needed", TicketType.PAIR.value),
+                                    ("AUTO - AI completes autonomously", TaskType.AUTO.value),
+                                    ("PAIR - Human collaboration needed", TaskType.PAIR.value),
                                 ],
-                                value=ticket.ticket_type.value,
+                                value=ticket.task_type.value,
                                 id=f"type-{i}",
                                 classes="ticket-select",
                             )
@@ -87,9 +88,9 @@ class TicketEditorScreen(ModalScreen[list[Ticket] | None]):
             first_input = self.query_one("#title-1", Input)
             first_input.focus()
 
-    def _collect_edited_tickets(self) -> list[Ticket]:
+    def _collect_edited_tickets(self) -> list[Task]:
         """Collect all edited tickets from the form fields."""
-        edited_tickets: list[Ticket] = []
+        edited_tickets: list[Task] = []
 
         for i, original in enumerate(self._tickets, 1):
             title_input = self.query_one(f"#title-{i}", Input)
@@ -110,28 +111,39 @@ class TicketEditorScreen(ModalScreen[list[Ticket] | None]):
             if priority_value is Select.BLANK:
                 priority = original.priority
             else:
-                priority = TicketPriority(cast("int", priority_value))
+                priority = TaskPriority(cast("int", priority_value))
 
             type_value = type_select.value
             if type_value is Select.BLANK:
-                ticket_type = original.ticket_type
+                ticket_type = original.task_type
             else:
-                ticket_type = TicketType(cast("str", type_value))
+                ticket_type = TaskType(cast("str", type_value))
 
             edited_tickets.append(
-                Ticket.create(
+                Task(
+                    id=original.id,
+                    project_id=original.project_id,
+                    repo_id=original.repo_id,
                     title=title,
                     description=description,
-                    priority=priority,
-                    ticket_type=ticket_type,
-                    assigned_hat=original.assigned_hat,
                     status=original.status,
-                    parent_id=original.parent_id,
+                    priority=priority,
+                    task_type=ticket_type,
+                    assigned_hat=original.assigned_hat,
                     agent_backend=original.agent_backend,
+                    parent_id=original.parent_id,
                     acceptance_criteria=acceptance_criteria,
                     review_summary=original.review_summary,
                     checks_passed=original.checks_passed,
                     session_active=original.session_active,
+                    total_iterations=original.total_iterations,
+                    merge_failed=original.merge_failed,
+                    merge_error=original.merge_error,
+                    merge_readiness=original.merge_readiness,
+                    last_error=original.last_error,
+                    block_reason=original.block_reason,
+                    created_at=original.created_at,
+                    updated_at=original.updated_at,
                 )
             )
 

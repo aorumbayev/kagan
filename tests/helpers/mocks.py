@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
     from kagan.config import AgentConfig, KaganConfig
 
-from kagan.agents.worktree import WorktreeManager
+from kagan.adapters.git.worktrees import WorktreeManager
 
 
 class MessageCapture:
@@ -202,7 +202,7 @@ class MergeScenarioBuilder:
 
 def create_mock_worktree_manager() -> MagicMock:
     """Create a mock WorktreeManager with async methods."""
-    from kagan.agents.worktree import WorktreeManager
+    from kagan.adapters.git.worktrees import WorktreeManager
 
     manager = MagicMock(spec=WorktreeManager)
     manager.get_path = AsyncMock(return_value=Path("/tmp/worktree"))
@@ -228,17 +228,6 @@ def create_mock_agent(response: str = "Done! <complete/>") -> MagicMock:
     agent.get_response_text = MagicMock(return_value=response)
     agent.stop = AsyncMock()
     return agent
-
-
-def create_mock_session_manager() -> MagicMock:
-    """Create a mock SessionManager."""
-    manager = MagicMock()
-    manager.create_session = AsyncMock(return_value="session-123")
-    manager.kill_session = AsyncMock()
-    manager.kill_resolution_session = AsyncMock()
-    manager.list_sessions = AsyncMock(return_value=[])
-    manager.send_keys = AsyncMock()
-    return manager
 
 
 def create_mock_process(pid: int = 12345, returncode: int | None = None) -> MagicMock:
@@ -272,15 +261,6 @@ def create_test_agent_config(
         short_name=short_name,
         run_command={"*": run_command},
     )
-
-
-def create_mock_scheduler() -> MagicMock:
-    """Create a mock Scheduler."""
-    manager = MagicMock()
-    manager.is_running = MagicMock(return_value=False)
-    manager.stop_ticket = AsyncMock()
-    manager.start_ticket = AsyncMock()
-    return manager
 
 
 def create_test_config(

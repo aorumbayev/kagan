@@ -11,13 +11,8 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Button, Footer, Input, Label, Rule, Select, Static, TextArea
 
-from kagan.database.models import (
-    MergeReadiness,
-    Ticket,
-    TicketPriority,
-    TicketStatus,
-    TicketType,
-)
+from kagan.core.models.entities import Task
+from kagan.core.models.enums import MergeReadiness, TaskPriority, TaskStatus, TaskType
 from kagan.keybindings import TICKET_DETAILS_BINDINGS
 from kagan.sessions.tmux import TmuxError
 from kagan.ui.modals.actions import ModalAction
@@ -29,7 +24,7 @@ from kagan.ui.widgets.base import (
     DescriptionArea,
     PrioritySelect,
     StatusSelect,
-    TicketTypeSelect,
+    TaskTypeSelect,
     TitleInput,
 )
 
@@ -43,7 +38,7 @@ if TYPE_CHECKING:
 TicketUpdateDict = dict[str, object]
 
 
-class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | None]):
+class TicketDetailsModal(ModalScreen[ModalAction | TicketUpdateDict | None]):
     """Unified modal for viewing, editing, and creating tickets."""
 
     editing = reactive(False)
@@ -52,10 +47,10 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
 
     def __init__(
         self,
-        ticket: Ticket | None = None,
+        ticket: Task | None = None,
         *,
         start_editing: bool = False,
-        initial_type: TicketType | None = None,
+        initial_type: TaskType | None = None,
         merge_readiness: str | None = None,
         **kwargs,
     ) -> None:
@@ -68,7 +63,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
         self._is_done = False
         if ticket is not None:
             status = ticket.status
-            self._is_done = status == TicketStatus.DONE
+            self._is_done = status == TaskStatus.DONE
         # Never allow editing Done tickets
         if self._is_done:
             start_editing = False
@@ -86,7 +81,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
         if self.editing:
             if title_input := safe_query_one(self, "#title-input", Input):
                 title_input.focus()
-        if self.ticket and self.ticket.status == TicketStatus.REVIEW:
+        if self.ticket and self.ticket.status == TaskStatus.REVIEW:
             self.run_worker(self._load_review_data())
 
     def compose(self) -> ComposeResult:
@@ -156,7 +151,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
                 id="type-badge",
             )
             yield Label(
-                self._format_status(self.ticket.status if self.ticket else TicketStatus.BACKLOG),
+                self._format_status(self.ticket.status if self.ticket else TaskStatus.BACKLOG),
                 classes="badge badge-status",
                 id="status-badge",
             )
@@ -169,10 +164,10 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
 
     def _compose_edit_fields_row(self) -> ComposeResult:
         """Compose the edit fields row (priority, type, agent)."""
-        current_priority = self.ticket.priority if self.ticket else TicketPriority.MEDIUM
+        current_priority = self.ticket.priority if self.ticket else TaskPriority.MEDIUM
 
         current_type = self._initial_type or (
-            self.ticket.ticket_type if self.ticket else TicketType.PAIR
+            self.ticket.task_type if self.ticket else TaskType.PAIR
         )
 
         with Horizontal(classes="field-row edit-fields", id="edit-fields-row"):
@@ -183,7 +178,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
             with Vertical(classes="form-field field-third"):
                 yield Label("Type:", classes="form-label")
                 # Disable type selector when editing existing ticket
-                yield TicketTypeSelect(value=current_type, disabled=self.ticket is not None)
+                yield TaskTypeSelect(value=current_type, disabled=self.ticket is not None)
 
             with Vertical(classes="form-field field-third"):
                 yield Label("Agent:", classes="form-label")
@@ -267,10 +262,10 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
                     id="review-summary-display",
                 )
             if self.ticket and self.ticket.merge_failed:
-                ticket_type = self.ticket.ticket_type
+                ticket_type = self.ticket.task_type
                 mode_line = (
                     "AUTO ticket: move back to IN_PROGRESS to let the agent resolve."
-                    if ticket_type == TicketType.AUTO
+                    if ticket_type == TaskType.AUTO
                     else "PAIR ticket: resolve conflicts manually and retry merge."
                 )
                 yield Static(mode_line, classes="merge-help-text")
@@ -287,7 +282,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
 
     def _compose_parallel_work_section(self) -> ComposeResult:
         """Compose parallel work awareness section (view mode only)."""
-        if self.is_create or not self.ticket or self.ticket.status != TicketStatus.REVIEW:
+        if self.is_create or not self.ticket or self.ticket.status != TaskStatus.REVIEW:
             return
         with Vertical(classes="parallel-work-section view-only", id="parallel-work-section"):
             yield Label("Parallel Work", classes="section-title")
@@ -296,7 +291,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
 
     def _compose_audit_section(self) -> ComposeResult:
         """Compose audit trail section (view mode only)."""
-        if self.is_create or not self.ticket or self.ticket.status != TicketStatus.REVIEW:
+        if self.is_create or not self.ticket or self.ticket.status != TaskStatus.REVIEW:
             return
         with Vertical(classes="audit-section view-only", id="audit-section"):
             yield Label("Activity", classes="section-title")
@@ -345,7 +340,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
     def _should_show_resolve(self) -> bool:
         if self.editing or self.is_create or not self.ticket:
             return False
-        return self.ticket.merge_failed and self.ticket.status == TicketStatus.REVIEW
+        return self.ticket.merge_failed and self.ticket.status == TaskStatus.REVIEW
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Control which bindings are shown based on editing state.
@@ -450,21 +445,10 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
         """Open tmux session to assist with conflict resolution."""
         if not self.ticket:
             return
-        from kagan.lifecycle.ticket_lifecycle import TicketLifecycle
-
-        kagan_app = self.kagan_app
-        session_manager = kagan_app.session_manager
-        worktree = kagan_app.worktree_manager
-        base = kagan_app.config.general.default_base_branch
+        session_manager = self.kagan_app.ctx.session_service
+        worktree = self.kagan_app.ctx.workspace_service
+        base = self.kagan_app.config.general.default_base_branch
         workdir = await worktree.get_merge_worktree_path(base)
-
-        lifecycle = TicketLifecycle(
-            kagan_app.state_manager,
-            kagan_app.worktree_manager,
-            kagan_app.session_manager,
-            kagan_app.scheduler,
-            kagan_app.config,
-        )
 
         try:
             prepared, prep_message = await worktree.prepare_merge_conflicts(
@@ -478,20 +462,20 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
                 await session_manager.create_resolution_session(self.ticket, workdir)
 
             with self.app.suspend():
-                attach_success = session_manager.attach_resolution_session(self.ticket.id)
+                attach_success = await session_manager.attach_resolution_session(self.ticket.id)
 
             await asyncio.sleep(0.1)
             if attach_success:
                 self.app.notify("Merging... (this may take a few seconds)", severity="information")
-                success, message = await lifecycle.merge_ticket(self.ticket)
+                success, message = await self.kagan_app.ctx.merge_service.merge_task(self.ticket)
                 if success:
                     await session_manager.kill_resolution_session(self.ticket.id)
                     self.app.notify(
                         f"Merged and completed: {self.ticket.title}", severity="information"
                     )
                 else:
-                    ticket_type = self.ticket.ticket_type
-                    prefix = "AUTO" if ticket_type == TicketType.AUTO else "PAIR"
+                    ticket_type = self.ticket.task_type
+                    prefix = "AUTO" if ticket_type == TaskType.AUTO else "PAIR"
                     self.app.notify(f"Merge failed ({prefix}): {message}", severity="error")
             else:
                 self.app.notify("Failed to attach to resolve session", severity="error")
@@ -525,11 +509,11 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
         """Get the type label for display."""
         if not self.ticket:
             return "PAIR"
-        if self.ticket.ticket_type == TicketType.AUTO:
+        if self.ticket.task_type == TaskType.AUTO:
             return "AUTO"
         return "PAIR"
 
-    def _format_status(self, status: TicketStatus) -> str:
+    def _format_status(self, status: TaskStatus) -> str:
         """Format status for display."""
         return status.value.replace("_", " ")
 
@@ -539,7 +523,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
             return False
         status = self.ticket.status
         return (
-            status == TicketStatus.REVIEW
+            status == TaskStatus.REVIEW
             or self.ticket.review_summary is not None
             or self.ticket.checks_passed is not None
             or self.ticket.merge_failed
@@ -610,7 +594,7 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
 
     async def _load_review_data(self) -> None:
         """Load both parallel work and audit trail in parallel (50% faster)."""
-        if not self.ticket or self.ticket.status != TicketStatus.REVIEW:
+        if not self.ticket or self.ticket.status != TaskStatus.REVIEW:
             return
         await asyncio.gather(
             self._load_parallel_work(),
@@ -619,18 +603,18 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
 
     async def _load_parallel_work(self) -> None:
         """Load parallel work data for the review panel."""
-        if not self.ticket or self.ticket.status != TicketStatus.REVIEW:
+        if not self.ticket or self.ticket.status != TaskStatus.REVIEW:
             return
         content = safe_query_one(self, "#parallel-work-content", Static)
         if content is None:
             return
 
         kagan_app = self.kagan_app
-        state = kagan_app.state_manager
-        worktree = kagan_app.worktree_manager
+        task_service = kagan_app.ctx.task_service
+        worktree = kagan_app.ctx.workspace_service
         base = kagan_app.config.general.default_base_branch
 
-        others = await state.get_by_status(TicketStatus.IN_PROGRESS)
+        others = await task_service.get_by_status(TaskStatus.IN_PROGRESS)
         others = [t for t in others if t.id != self.ticket.id]
 
         if not others:
@@ -669,20 +653,19 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
             return
 
         kagan_app = self.kagan_app
-        state = kagan_app.state_manager
-        events = await state.get_events(self.ticket.id, limit=10)
+        events = await kagan_app.ctx.task_service.get_events(self.ticket.id, limit=10)
 
         if not events:
             content.update("No activity recorded yet.")
             return
 
         lines = [
-            f"{event.created_at:%Y-%m-%d %H:%M} {event.event_type}: {event.message}"
+            f"{event.created_at:%Y-%m-%d %H:%M} {event.source}: {event.content}"
             for event in events
         ]
         content.update("\n".join(lines))
 
-    def _validate_and_build_result(self) -> Ticket | TicketUpdateDict | None:
+    def _validate_and_build_result(self) -> TicketUpdateDict | None:
         """Validate form and build result model. Returns None if validation fails."""
         title_input = self.query_one("#title-input", Input)
         description_input = self.query_one("#description-input", TextArea)
@@ -701,14 +684,14 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
             self.notify("Priority is required", severity="error")
             priority_select.focus()
             return None
-        priority = TicketPriority(cast("int", priority_value))
+        priority = TaskPriority(cast("int", priority_value))
 
         type_select: Select[str] = self.query_one("#type-select", Select)
         type_value = type_select.value
         if type_value is Select.BLANK:
-            ticket_type = TicketType.PAIR
+            ticket_type = TaskType.PAIR
         else:
-            ticket_type = TicketType(cast("str", type_value))
+            ticket_type = TaskType(cast("str", type_value))
 
         agent_backend_select: Select[str] = self.query_one("#agent-backend-select", Select)
         agent_backend_value = agent_backend_select.value
@@ -723,23 +706,23 @@ class TicketDetailsModal(ModalScreen[ModalAction | Ticket | TicketUpdateDict | N
                 self.notify("Status is required", severity="error")
                 status_select.focus()
                 return None
-            status = TicketStatus(cast("str", status_value))
-            return Ticket.create(
-                title=title,
-                description=description,
-                priority=priority,
-                ticket_type=ticket_type,
-                status=status,
-                agent_backend=agent_backend or None,
-                acceptance_criteria=acceptance_criteria,
-            )
+            status = TaskStatus(cast("str", status_value))
+            return {
+                "title": title,
+                "description": description,
+                "priority": priority,
+                "task_type": ticket_type,
+                "status": status,
+                "agent_backend": agent_backend or None,
+                "acceptance_criteria": acceptance_criteria,
+            }
         else:
             # Return dict of updates for existing ticket
             return {
                 "title": title,
                 "description": description,
                 "priority": priority,
-                "ticket_type": ticket_type,
+                "task_type": ticket_type,
                 "agent_backend": agent_backend or None,
                 "acceptance_criteria": acceptance_criteria,
             }

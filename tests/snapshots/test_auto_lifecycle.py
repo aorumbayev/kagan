@@ -23,9 +23,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from kagan.adapters.db.repositories import TaskRepository
+from kagan.adapters.db.schema import Task
 from kagan.app import KaganApp
-from kagan.database import TicketRepository
-from kagan.database.models import Ticket, TicketPriority, TicketStatus, TicketType
+from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -110,16 +111,22 @@ async def _create_auto_ticket(db_path: str) -> str:
     Returns:
         The ticket ID.
     """
-    manager = TicketRepository(db_path)
+    manager = TaskRepository(db_path)
     await manager.initialize()
+    project_id = manager.default_project_id
+    if project_id is None:
+        raise RuntimeError("TaskRepository defaults not initialized")
+    repo_id = manager.default_repo_id
 
-    ticket = Ticket(
+    ticket = Task(
         id="auto0001",
+        project_id=project_id,
+        repo_id=repo_id,
         title="Implement user authentication",
         description="Add JWT-based authentication to the API endpoints.",
-        priority=TicketPriority.HIGH,
-        status=TicketStatus.BACKLOG,
-        ticket_type=TicketType.AUTO,
+        priority=TaskPriority.HIGH,
+        status=TaskStatus.BACKLOG,
+        task_type=TaskType.AUTO,
     )
     await manager.create(ticket)
     await manager.close()
@@ -250,7 +257,7 @@ class TestAutoTicketLifecycle:
         sessions: dict[str, Any] = {}
         fake_tmux = _create_fake_tmux(sessions)
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", fake_tmux)
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", fake_tmux)
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", fake_tmux)
 
         # Create lifecycle mock factory
         mock_factory = LifecycleMockAgentFactory(project.root)
@@ -344,7 +351,9 @@ class TestAutoTicketLifecycle:
             max_wait = 2.0
             waited = 0.0
             while waited < max_wait:
-                agent = kagan_app.scheduler.get_running_agent(auto_mode_project.ticket_id)
+                agent = kagan_app.ctx.automation_service.get_running_agent(
+                    auto_mode_project.ticket_id
+                )
                 if agent is not None:
                     break
                 await asyncio.sleep(0.05)
@@ -381,7 +390,9 @@ class TestAutoTicketLifecycle:
             max_wait = 2.0
             waited = 0.0
             while waited < max_wait:
-                agent = kagan_app.scheduler.get_running_agent(auto_mode_project.ticket_id)
+                agent = kagan_app.ctx.automation_service.get_running_agent(
+                    auto_mode_project.ticket_id
+                )
                 if agent is not None:
                     break
                 await asyncio.sleep(0.05)
@@ -499,16 +510,22 @@ class TestAutoTicketLifecycleWithReview:
                 _setup_auto_lifecycle_project(tmp_path, AUTO_MODE_CONFIG)
             )
             # Create ticket directly in REVIEW status
-            manager = TicketRepository(project.db)
+            manager = TaskRepository(project.db)
             loop.run_until_complete(manager.initialize())
+            project_id = manager.default_project_id
+            if project_id is None:
+                raise RuntimeError("TaskRepository defaults not initialized")
+            repo_id = manager.default_repo_id
 
-            ticket = Ticket(
+            ticket = Task(
                 id="review01",
+                project_id=project_id,
+                repo_id=repo_id,
                 title="Add user profile endpoint",
                 description="Create GET /api/users/profile endpoint.",
-                priority=TicketPriority.HIGH,
-                status=TicketStatus.REVIEW,
-                ticket_type=TicketType.AUTO,
+                priority=TaskPriority.HIGH,
+                status=TaskStatus.REVIEW,
+                task_type=TaskType.AUTO,
                 checks_passed=True,
                 review_summary="Implementation is correct and well-tested",
             )
@@ -546,7 +563,7 @@ class TestAutoTicketLifecycleWithReview:
         sessions: dict[str, Any] = {}
         fake_tmux = _create_fake_tmux(sessions)
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", fake_tmux)
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", fake_tmux)
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", fake_tmux)
 
         # Create mock factory
         mock_factory = LifecycleMockAgentFactory(project.root)
@@ -741,41 +758,51 @@ class TestAutoTicketLifecycleDone:
                 _setup_auto_lifecycle_project(tmp_path, AUTO_MODE_CONFIG)
             )
 
-            manager = TicketRepository(project.db)
+            manager = TaskRepository(project.db)
             loop.run_until_complete(manager.initialize())
+            project_id = manager.default_project_id
+            if project_id is None:
+                raise RuntimeError("TaskRepository defaults not initialized")
+            repo_id = manager.default_repo_id
 
             # Create DONE ticket
-            done_ticket = Ticket(
+            done_ticket = Task(
                 id="done0001",
+                project_id=project_id,
+                repo_id=repo_id,
                 title="Completed authentication feature",
                 description="JWT auth fully implemented and merged.",
-                priority=TicketPriority.HIGH,
-                status=TicketStatus.DONE,
-                ticket_type=TicketType.AUTO,
+                priority=TaskPriority.HIGH,
+                status=TaskStatus.DONE,
+                task_type=TaskType.AUTO,
                 checks_passed=True,
                 review_summary="All tests pass, implementation complete",
             )
             loop.run_until_complete(manager.create(done_ticket))
 
             # Create IN_PROGRESS ticket for comparison
-            in_progress_ticket = Ticket(
+            in_progress_ticket = Task(
                 id="inprog01",
+                project_id=project_id,
+                repo_id=repo_id,
                 title="Working on new feature",
                 description="Currently in progress.",
-                priority=TicketPriority.MEDIUM,
-                status=TicketStatus.IN_PROGRESS,
-                ticket_type=TicketType.AUTO,
+                priority=TaskPriority.MEDIUM,
+                status=TaskStatus.IN_PROGRESS,
+                task_type=TaskType.AUTO,
             )
             loop.run_until_complete(manager.create(in_progress_ticket))
 
             # Create BACKLOG ticket
-            backlog_ticket = Ticket(
+            backlog_ticket = Task(
                 id="backlog1",
+                project_id=project_id,
+                repo_id=repo_id,
                 title="Future enhancement",
                 description="To be done later.",
-                priority=TicketPriority.LOW,
-                status=TicketStatus.BACKLOG,
-                ticket_type=TicketType.AUTO,
+                priority=TaskPriority.LOW,
+                status=TaskStatus.BACKLOG,
+                task_type=TaskType.AUTO,
             )
             loop.run_until_complete(manager.create(backlog_ticket))
 
@@ -787,7 +814,7 @@ class TestAutoTicketLifecycleDone:
         sessions: dict[str, Any] = {}
         fake_tmux = _create_fake_tmux(sessions)
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", fake_tmux)
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", fake_tmux)
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", fake_tmux)
 
         # Create mock factory
         mock_factory = LifecycleMockAgentFactory(project.root)

@@ -14,7 +14,7 @@ from kagan.ui.utils.clipboard import copy_with_notification
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
-    from kagan.database.models import Ticket
+    from kagan.core.models.entities import Task
 
 
 class DiffModal(ModalScreen[str | None]):
@@ -29,7 +29,7 @@ class DiffModal(ModalScreen[str | None]):
 
     BINDINGS = DIFF_BINDINGS
 
-    def __init__(self, title: str, diff_text: str, ticket: Ticket | None = None, **kwargs) -> None:
+    def __init__(self, title: str, diff_text: str, ticket: Task | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
         self._title = title
         self._diff_text = diff_text

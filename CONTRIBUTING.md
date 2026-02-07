@@ -50,13 +50,13 @@ uv run poe check      # lint + typecheck + test
 uv run pytest tests/ -v
 
 # Single file
-uv run pytest tests/test_database.py -v
+uv run pytest tests/features/test_agent_automation.py -v
 
 # Single class
-uv run pytest tests/test_database.py::TestTicketCRUD -v
+uv run pytest tests/features/test_agent_automation.py::TestIterationLoop -v
 
 # Single test
-uv run pytest tests/test_database.py::TestTicketCRUD::test_create_ticket -v
+uv run pytest tests/features/test_agent_automation.py::TestIterationLoop::test_complete_signal_moves_to_review -v
 ```
 
 ## UI Snapshots
@@ -78,6 +78,7 @@ Open `http://127.0.0.1:8000/` in your browser.
 ```
 src/kagan/
 ├── app.py              # Main KaganApp class
+├── bootstrap.py        # AppContext + event bus wiring
 ├── constants.py        # COLUMN_ORDER, STATUS_LABELS, PRIORITY_LABELS
 ├── config.py           # Configuration models (Pydantic)
 ├── limits.py           # Timeouts and buffer limits
@@ -85,26 +86,35 @@ src/kagan/
 ├── lock.py             # Instance lock (single instance)
 ├── git_utils.py        # Git helper functions
 ├── keybindings.py      # Centralized keybinding registry (single file)
+├── adapters/
+│   ├── db/             # SQLModel schema + repositories
+│   ├── git/            # Worktree/diff/merge adapters
+│   └── executors/      # ACP/tmux/script executors
+├── core/
+│   ├── models/         # Domain entities + enums
+│   ├── events.py       # Domain events + bus contracts
+│   └── policies.py     # Status transition policies
+├── services/           # Task/workspace/session/merge automation services
+│   ├── automation.py
+│   ├── tasks.py
+│   ├── workspaces.py
+│   ├── sessions.py
+│   ├── executions.py
+│   └── merges.py
 ├── cli/                # CLI commands
 │   ├── update.py       # Update command
 │   └── tools.py        # Prompt enhancement tools
 ├── ansi/               # ANSI escape code handling
 │   └── cleaner.py      # ANSI code cleaning utilities
-├── database/
-│   ├── models.py       # SQLModel models: Ticket, TicketCreate, TicketUpdate
-│   └── repository.py   # TicketRepository async database operations
 ├── mcp/                # Model Context Protocol server
 │   ├── server.py       # FastMCP server setup
 │   └── tools.py        # MCP tool implementations
-├── sessions/           # tmux session management
-│   ├── manager.py      # SessionManager class
+├── sessions/           # tmux helpers
 │   └── tmux.py         # tmux command helpers
-├── agents/             # Planner agent + scheduler
+├── agents/             # Planner agent + prompts
 │   ├── planner.py      # Planner prompt + XML parsing
 │   ├── refiner.py      # Prompt refinement agent
 │   ├── refinement_rules.py  # Refinement rules
-│   ├── scheduler.py    # AUTO mode ticket-to-agent scheduler
-│   ├── worktree.py     # Git worktree management
 │   ├── signals.py      # Agent completion signals parser
 │   ├── prompt.py       # Prompt building for AUTO mode
 │   ├── prompt_loader.py    # Template loading for prompts
@@ -129,12 +139,11 @@ src/kagan/
     │   ├── kanban/         # Main Kanban board
     │   │   ├── screen.py   # KanbanScreen implementation
     │   │   ├── focus.py    # Focus management helpers
-    │   │   └── actions.py  # Ticket action handlers
-    │   ├── planner.py      # Planner screen (chat-first)
+    │   │   └── hints.py    # Keybinding hints
+    │   ├── planner/        # Planner screen (chat-first)
     │   ├── welcome.py      # First-boot setup screen
-    │   ├── approval.py     # Ticket approval screen
     │   ├── ticket_editor.py    # Ticket editor screen
-    │   └── troubleshooting.py  # Pre-flight check failures
+    │   └── troubleshooting/    # Pre-flight check failures
     ├── widgets/
     │   ├── card.py         # TicketCard widget
     │   ├── column.py       # KanbanColumn widget
@@ -173,7 +182,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 from textual.app import ComposeResult
 from kagan.constants import COLUMN_ORDER
-from kagan.database.models import Ticket
+from kagan.core.models.entities import Task
 
 if TYPE_CHECKING:
     from kagan.app import KaganApp
@@ -191,10 +200,10 @@ if TYPE_CHECKING:
 | Type      | Convention        | Example                             |
 | --------- | ----------------- | ----------------------------------- |
 | Classes   | PascalCase        | `TicketCard`, `KanbanScreen`        |
-| Functions | snake_case        | `get_all_tickets`, `_refresh_board` |
+| Functions | snake_case        | `get_all_tasks`, `_refresh_board` |
 | Private   | underscore prefix | `_get_focused_card`                 |
 | Constants | UPPER_SNAKE       | `COLUMN_ORDER`, `MIN_WIDTH`         |
-| Enums     | PascalCase/UPPER  | `TicketStatus.BACKLOG`              |
+| Enums     | PascalCase/UPPER  | `TaskStatus.BACKLOG`                |
 
 ### Textual Patterns
 
@@ -202,7 +211,7 @@ if TYPE_CHECKING:
 # Messages as dataclasses
 @dataclass
 class Selected(Message):
-    ticket: Ticket
+    task: Task
 
 
 # Button handlers with @on decorator
@@ -212,12 +221,12 @@ def on_save(self) -> None:
 
 
 # Reactive with recompose
-tickets: reactive[list[Ticket]] = reactive(list, recompose=True)
+tasks: reactive[list[Task]] = reactive(list, recompose=True)
 
 
 # Widget IDs in __init__
-def __init__(self, ticket: Ticket, **kwargs) -> None:
-    super().__init__(id=f"card-{ticket.id}", **kwargs)
+def __init__(self, task: Task, **kwargs) -> None:
+    super().__init__(id=f"card-{task.id}", **kwargs)
 ```
 
 ### CSS in TCSS Only
@@ -235,7 +244,7 @@ git config commit.gpgsign false
 ## Key Rules
 
 1. **CSS in `.tcss` only** - All styles in `kagan.tcss`, never use `DEFAULT_CSS`
-1. **Async database** - All DB operations via SQLModel TicketRepository
+1. **Async database** - All DB operations via SQLModel TaskRepository
 1. **Constants module** - Use `kagan.constants` for shared values
 1. **Property assertions** - Use `@property` with `assert` for required state
 1. **Module size limits** - Keep modules ~150-250 LOC; test files < 200 LOC

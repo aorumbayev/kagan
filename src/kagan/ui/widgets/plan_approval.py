@@ -9,12 +9,12 @@ from textual.containers import Horizontal, Vertical, VerticalGroup
 from textual.message import Message
 from textual.widgets import Button, Static
 
-from kagan.database.models import TicketType
+from kagan.core.models.enums import TaskType
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
-    from kagan.database.models import Ticket
+    from kagan.core.models.entities import Task
 
 
 class PlanApprovalWidget(VerticalGroup):
@@ -32,14 +32,14 @@ class PlanApprovalWidget(VerticalGroup):
     class Approved(Message):
         """Message posted when the plan is approved."""
 
-        def __init__(self, tickets: list[Ticket]) -> None:
+        def __init__(self, tickets: list[Task]) -> None:
             super().__init__()
             self.tickets = tickets
 
     class EditRequested(Message):
         """Message posted when user wants to edit tickets."""
 
-        def __init__(self, tickets: list[Ticket]) -> None:
+        def __init__(self, tickets: list[Task]) -> None:
             super().__init__()
             self.tickets = tickets
 
@@ -48,7 +48,7 @@ class PlanApprovalWidget(VerticalGroup):
 
     def __init__(
         self,
-        tickets: list[Ticket],
+        tickets: list[Task],
         *,
         id: str | None = None,
         classes: str | None = None,
@@ -73,10 +73,10 @@ class PlanApprovalWidget(VerticalGroup):
             yield Button("[e] Edit", id="btn-edit", variant="warning")
             yield Button("[d] Dismiss", id="btn-dismiss", variant="error")
 
-    def _make_ticket_row(self, ticket: Ticket, index: int) -> Static:
+    def _make_ticket_row(self, ticket: Task, index: int) -> Static:
         """Create a row displaying a single ticket."""
         # Type badge
-        type_badge = "⚡ AUTO" if ticket.ticket_type == TicketType.AUTO else "👤 PAIR"
+        type_badge = "⚡ AUTO" if ticket.task_type == TaskType.AUTO else "👤 PAIR"
 
         # Priority badge
         priority_label = ticket.priority.label.upper()
@@ -130,7 +130,7 @@ class PlanApprovalWidget(VerticalGroup):
             # Build preview text
             type_str = (
                 "AUTO (AI autonomous)"
-                if ticket.ticket_type == TicketType.AUTO
+                if ticket.task_type == TaskType.AUTO
                 else "PAIR (human collaboration)"
             )
             ac_text = (

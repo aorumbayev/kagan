@@ -11,9 +11,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from kagan.adapters.db.repositories import TaskRepository
+from kagan.adapters.db.schema import Task
 from kagan.app import KaganApp
-from kagan.database import TicketRepository
-from kagan.database.models import Ticket, TicketPriority, TicketStatus, TicketType
+from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
 
 if TYPE_CHECKING:
     from types import SimpleNamespace
@@ -58,26 +59,34 @@ def _create_fake_tmux(sessions: dict[str, Any]) -> object:
 
 async def _setup_movement_tickets(db_path: str) -> None:
     """Create tickets for movement testing."""
-    manager = TicketRepository(db_path)
+    manager = TaskRepository(db_path)
     await manager.initialize()
+    project_id = manager.default_project_id
+    if project_id is None:
+        raise RuntimeError("TaskRepository defaults not initialized")
+    repo_id = manager.default_repo_id
 
     # Create PAIR tickets in different columns
     tickets = [
-        Ticket(
+        Task(
             id="pair0001",
+            project_id=project_id,
+            repo_id=repo_id,
             title="PAIR in Backlog",
             description="PAIR ticket ready to move",
-            priority=TicketPriority.MEDIUM,
-            status=TicketStatus.BACKLOG,
-            ticket_type=TicketType.PAIR,
+            priority=TaskPriority.MEDIUM,
+            status=TaskStatus.BACKLOG,
+            task_type=TaskType.PAIR,
         ),
-        Ticket(
+        Task(
             id="pair0002",
+            project_id=project_id,
+            repo_id=repo_id,
             title="PAIR in Progress",
             description="PAIR ticket in progress",
-            priority=TicketPriority.HIGH,
-            status=TicketStatus.IN_PROGRESS,
-            ticket_type=TicketType.PAIR,
+            priority=TaskPriority.HIGH,
+            status=TaskStatus.IN_PROGRESS,
+            task_type=TaskType.PAIR,
         ),
     ]
 
@@ -88,16 +97,22 @@ async def _setup_movement_tickets(db_path: str) -> None:
 
 async def _setup_auto_movement_ticket(db_path: str) -> None:
     """Create an AUTO ticket in progress for movement confirmation testing."""
-    manager = TicketRepository(db_path)
+    manager = TaskRepository(db_path)
     await manager.initialize()
+    project_id = manager.default_project_id
+    if project_id is None:
+        raise RuntimeError("TaskRepository defaults not initialized")
+    repo_id = manager.default_repo_id
 
-    ticket = Ticket(
+    ticket = Task(
         id="auto0001",
+        project_id=project_id,
+        repo_id=repo_id,
         title="AUTO in Progress",
         description="AUTO ticket in progress",
-        priority=TicketPriority.HIGH,
-        status=TicketStatus.IN_PROGRESS,
-        ticket_type=TicketType.AUTO,
+        priority=TaskPriority.HIGH,
+        status=TaskStatus.IN_PROGRESS,
+        task_type=TaskType.AUTO,
     )
 
     await manager.create(ticket)
@@ -119,7 +134,7 @@ class TestTicketMovement:
         sessions: dict[str, Any] = {}
         fake_tmux = _create_fake_tmux(sessions)
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", fake_tmux)
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", fake_tmux)
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", fake_tmux)
 
         # Set up tickets synchronously
         loop = asyncio.new_event_loop()
@@ -146,7 +161,7 @@ class TestTicketMovement:
         sessions: dict[str, Any] = {}
         fake_tmux = _create_fake_tmux(sessions)
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", fake_tmux)
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", fake_tmux)
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", fake_tmux)
 
         loop = asyncio.new_event_loop()
         try:

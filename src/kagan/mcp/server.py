@@ -8,10 +8,12 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from kagan.agents import planner as planner_models
-from kagan.database import TicketRepository
+from kagan.adapters.db.repositories import TaskRepository
+from kagan.bootstrap import InMemoryEventBus
 from kagan.mcp.tools import KaganMCPServer
+from kagan.services.tasks import TaskServiceImpl
 
-_state_manager: TicketRepository | None = None
+_state_manager: TaskServiceImpl | None = None
 _server: KaganMCPServer | None = None
 _kagan_dir: Path | None = None
 
@@ -26,15 +28,16 @@ def find_kagan_dir(start: Path) -> Path | None:
     return None
 
 
-async def _get_state_manager() -> TicketRepository:
-    """Get or create the global TicketRepository."""
+async def _get_state_manager() -> TaskServiceImpl:
+    """Get or create the global TaskService."""
     global _state_manager
     if _state_manager is None:
         kagan_dir = _kagan_dir or find_kagan_dir(Path.cwd())
         if kagan_dir is None:
             raise RuntimeError("Not in a Kagan-managed project (.kagan not found)")
-        _state_manager = TicketRepository(kagan_dir / "state.db")
-        await _state_manager.initialize()
+        repo = TaskRepository(kagan_dir / "state.db", project_root=kagan_dir.parent)
+        await repo.initialize()
+        _state_manager = TaskServiceImpl(repo, InMemoryEventBus())
     return _state_manager
 
 

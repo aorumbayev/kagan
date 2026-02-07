@@ -485,7 +485,7 @@ async def snapshot_app(
     sessions: dict[str, dict[str, Any]] = {}
     fake_tmux = _create_fake_tmux(sessions)
     monkeypatch.setattr("kagan.sessions.tmux.run_tmux", fake_tmux)
-    monkeypatch.setattr("kagan.sessions.manager.run_tmux", fake_tmux)
+    monkeypatch.setattr("kagan.services.sessions.run_tmux", fake_tmux)
 
     app = KaganApp(
         db_path=snapshot_project.db,

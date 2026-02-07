@@ -88,4 +88,3 @@ kagan --help       # Show all options
     </picture>
   </a>
 </p>
-

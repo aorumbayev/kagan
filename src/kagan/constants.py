@@ -1,4 +1,4 @@
-from kagan.database.models import TicketPriority, TicketStatus
+from kagan.core.models.enums import TaskPriority, TaskStatus
 from kagan.limits import (
     AGENT_TIMEOUT,
     AGENT_TIMEOUT_LONG,
@@ -51,23 +51,23 @@ DEFAULT_CONFIG_PATH = ".kagan/config.toml"
 DEFAULT_LOCK_PATH = ".kagan/kagan.lock"
 
 COLUMN_ORDER = [
-    TicketStatus.BACKLOG,
-    TicketStatus.IN_PROGRESS,
-    TicketStatus.REVIEW,
-    TicketStatus.DONE,
+    TaskStatus.BACKLOG,
+    TaskStatus.IN_PROGRESS,
+    TaskStatus.REVIEW,
+    TaskStatus.DONE,
 ]
 
 STATUS_LABELS = {
-    TicketStatus.BACKLOG: "BACKLOG",
-    TicketStatus.IN_PROGRESS: "IN PROGRESS",
-    TicketStatus.REVIEW: "REVIEW",
-    TicketStatus.DONE: "DONE",
+    TaskStatus.BACKLOG: "BACKLOG",
+    TaskStatus.IN_PROGRESS: "IN PROGRESS",
+    TaskStatus.REVIEW: "REVIEW",
+    TaskStatus.DONE: "DONE",
 }
 
 PRIORITY_LABELS = {
-    TicketPriority.LOW: "Low",
-    TicketPriority.MEDIUM: "Medium",
-    TicketPriority.HIGH: "High",
+    TaskPriority.LOW: "Low",
+    TaskPriority.MEDIUM: "Medium",
+    TaskPriority.HIGH: "High",
 }
 
 # Box Drawing Characters

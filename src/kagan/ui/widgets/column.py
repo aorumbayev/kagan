@@ -11,7 +11,8 @@ from textual.widget import Widget
 from textual.widgets import Label
 
 from kagan.constants import STATUS_LABELS
-from kagan.database.models import Ticket, TicketStatus
+from kagan.core.models.entities import Task
+from kagan.core.models.enums import TaskStatus
 from kagan.ui.widgets.card import TicketCard
 
 if TYPE_CHECKING:
@@ -42,12 +43,12 @@ class KanbanColumn(Widget):
     ALLOW_SELECT = False
     can_focus = False
 
-    status: reactive[TicketStatus] = reactive(TicketStatus.BACKLOG)
+    status: reactive[TaskStatus] = reactive(TaskStatus.BACKLOG)
 
-    def __init__(self, status: TicketStatus, tickets: list[Ticket] | None = None, **kwargs) -> None:
+    def __init__(self, status: TaskStatus, tickets: list[Task] | None = None, **kwargs) -> None:
         super().__init__(id=f"column-{status.value.lower()}", **kwargs)
         self.status = status
-        self._tickets: list[Ticket] = tickets or []
+        self._tickets: list[Task] = tickets or []
 
     def compose(self) -> ComposeResult:
         with _NSVertical():
@@ -85,7 +86,7 @@ class KanbanColumn(Widget):
     def focus_first_card(self) -> bool:
         return self.focus_card(0)
 
-    def update_tickets(self, tickets: list[Ticket]) -> None:
+    def update_tickets(self, tickets: list[Task]) -> None:
         """Update tickets with minimal DOM changes - no full recompose.
 
         - Updates existing cards when ticket metadata changes

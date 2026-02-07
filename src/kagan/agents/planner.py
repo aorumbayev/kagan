@@ -8,7 +8,8 @@ from typing import Any, Literal
 from acp.schema import PlanEntry, ToolCall
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from kagan.database.models import Ticket, TicketPriority, TicketType
+from kagan.core.models.entities import Task
+from kagan.core.models.enums import MergeReadiness, TaskPriority, TaskStatus, TaskType
 
 # =============================================================================
 # PLANNER PROMPT (hardcoded - no customization)
@@ -313,23 +314,45 @@ class PlanProposal(BaseModel):
         # LLM sent invalid type (string, object, etc.) - gracefully handle
         return []
 
-    def to_tickets(self) -> list[Ticket]:
-        """Convert proposed tickets into Ticket models."""
-        tickets: list[Ticket] = []
+    def to_tickets(self) -> list[Task]:
+        """Convert proposed tickets into Task models."""
+        from datetime import datetime
+        from uuid import uuid4
+
+        tickets: list[Task] = []
         for item in self.tickets:
-            ticket_type = TicketType.AUTO if item.type == "AUTO" else TicketType.PAIR
+            ticket_type = TaskType.AUTO if item.type == "AUTO" else TaskType.PAIR
             priority_map = {
-                "low": TicketPriority.LOW,
-                "medium": TicketPriority.MEDIUM,
-                "high": TicketPriority.HIGH,
+                "low": TaskPriority.LOW,
+                "medium": TaskPriority.MEDIUM,
+                "high": TaskPriority.HIGH,
             }
+            now = datetime.now()
             tickets.append(
-                Ticket.create(
+                Task(
+                    id=uuid4().hex[:8],
+                    project_id="plan",
+                    repo_id=None,
                     title=item.title[:200],
                     description=item.description,
-                    ticket_type=ticket_type,
-                    priority=priority_map.get(item.priority, TicketPriority.MEDIUM),
+                    status=TaskStatus.BACKLOG,
+                    priority=priority_map.get(item.priority, TaskPriority.MEDIUM),
+                    task_type=ticket_type,
+                    assigned_hat=None,
+                    agent_backend=None,
+                    parent_id=None,
                     acceptance_criteria=item.acceptance_criteria,
+                    review_summary=None,
+                    checks_passed=None,
+                    session_active=False,
+                    total_iterations=0,
+                    merge_failed=False,
+                    merge_error=None,
+                    merge_readiness=MergeReadiness.RISK,
+                    last_error=None,
+                    block_reason=None,
+                    created_at=now,
+                    updated_at=now,
                 )
             )
         return tickets
@@ -384,10 +407,10 @@ def build_planner_prompt(
 
 def parse_proposed_plan(
     tool_calls: dict[str, ToolCall | dict[str, Any]],
-) -> tuple[list[Ticket], list[PlanEntry] | None, str | None]:
+) -> tuple[list[Task], list[PlanEntry] | None, str | None]:
     """Parse proposed tickets from tool calls.
 
-    Returns (tickets, todos, error). If no proposal is found, returns empty tickets and None.
+    Returns (tasks, todos, error). If no proposal is found, returns empty tasks and None.
     """
     if not tool_calls:
         return [], None, None

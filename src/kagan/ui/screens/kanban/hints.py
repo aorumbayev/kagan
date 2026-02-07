@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from kagan.database.models import TicketStatus, TicketType
+from kagan.core.models.enums import TaskStatus, TaskType
 
 
 def build_keybinding_hints(
-    status: TicketStatus | None,
-    ticket_type: TicketType | None,
+    status: TaskStatus | None,
+    ticket_type: TaskType | None,
 ) -> list[tuple[str, str]]:
     """Build context-sensitive keybinding hints based on ticket state.
 
@@ -28,7 +28,7 @@ def build_keybinding_hints(
             ("g", "more actions..."),
         ]
 
-    if status == TicketStatus.BACKLOG:
+    if status == TaskStatus.BACKLOG:
         return [
             ("Enter", "start"),
             ("e", "edit"),
@@ -37,8 +37,8 @@ def build_keybinding_hints(
             ("g", "more..."),
         ]
 
-    if status == TicketStatus.IN_PROGRESS:
-        if ticket_type == TicketType.AUTO:
+    if status == TaskStatus.IN_PROGRESS:
+        if ticket_type == TaskType.AUTO:
             return [
                 ("w", "watch agent"),
                 ("s", "stop agent"),
@@ -53,7 +53,7 @@ def build_keybinding_hints(
             ("g", "more..."),
         ]
 
-    if status == TicketStatus.REVIEW:
+    if status == TaskStatus.REVIEW:
         return [
             ("r", "AI review"),
             ("D", "view diff"),
@@ -62,7 +62,7 @@ def build_keybinding_hints(
             ("g", "more..."),
         ]
 
-    if status == TicketStatus.DONE:
+    if status == TaskStatus.DONE:
         return [
             ("v", "view details"),
             ("h", "reopen"),

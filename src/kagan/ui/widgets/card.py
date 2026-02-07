@@ -18,7 +18,8 @@ from kagan.constants import (
     CARD_REVIEW_MAX_LENGTH,
     CARD_TITLE_LINE_WIDTH,
 )
-from kagan.database.models import Ticket, TicketStatus, TicketType
+from kagan.core.models.entities import Task
+from kagan.core.models.enums import TaskStatus, TaskType
 from kagan.ui.formatters.card_formatters import (
     format_progress_bar,
     format_review_status,
@@ -38,7 +39,7 @@ class TicketCard(Widget):
 
     can_focus = True
 
-    ticket: reactive[Ticket | None] = reactive(None, recompose=True)
+    ticket: reactive[Task | None] = reactive(None, recompose=True)
     is_agent_active: var[bool] = var(False, toggle_class="agent-active", always_update=True)
     is_session_active: var[bool] = var(False, toggle_class="session-active")
     iteration_info: reactive[str] = reactive("", recompose=True)
@@ -47,9 +48,9 @@ class TicketCard(Widget):
 
     @dataclass
     class Selected(Message):
-        ticket: Ticket
+        ticket: Task
 
-    def __init__(self, ticket: Ticket, **kwargs) -> None:
+    def __init__(self, ticket: Task, **kwargs) -> None:
         super().__init__(id=f"card-{ticket.id}", **kwargs)
         self.ticket = ticket
         self.is_session_active = ticket.session_active
@@ -65,7 +66,7 @@ class TicketCard(Widget):
         title_lines = wrap_title(self.ticket.title.upper(), CARD_TITLE_LINE_WIDTH)
         title_text = title_lines[0] if title_lines else "UNTITLED"
 
-        if self.ticket.status == TicketStatus.REVIEW:
+        if self.ticket.status == TaskStatus.REVIEW:
             review_badge = get_review_badge(self.ticket)
             readiness_badge = get_readiness_badge(
                 self.ticket, self.merge_readiness, self.ticket.status
@@ -103,7 +104,7 @@ class TicketCard(Widget):
             yield Label(progress_text, classes="card-iteration")
 
         # Review info for REVIEW tickets
-        if self.ticket.status == TicketStatus.REVIEW:
+        if self.ticket.status == TaskStatus.REVIEW:
             summary = self.ticket.review_summary or "No summary"
             yield Label(
                 truncate_text(f"Summary: {summary}", CARD_REVIEW_MAX_LENGTH),
@@ -149,11 +150,11 @@ class TicketCard(Widget):
         if self.ticket is None:
             return "👤"
         ticket_type = self.ticket.ticket_type
-        if ticket_type == TicketType.AUTO:
+        if ticket_type == TaskType.AUTO:
             # Show running state for AUTO tickets
             if self.is_agent_active:
                 return "🔄"  # Running indicator
-            if self.ticket.status == TicketStatus.IN_PROGRESS:
+            if self.ticket.status == TaskStatus.IN_PROGRESS:
                 return "⏳"  # Waiting/pending indicator
             return "⚡"  # Normal AUTO badge
         return "👤"  # PAIR mode (human)
@@ -174,7 +175,7 @@ class TicketCard(Widget):
         return ""
 
     def _update_review_state(self) -> None:
-        if self.ticket is None or self.ticket.status != TicketStatus.REVIEW:
+        if self.ticket is None or self.ticket.status != TaskStatus.REVIEW:
             self.review_state = ""
             self.merge_readiness = ""
             return
@@ -204,7 +205,7 @@ class TicketCard(Widget):
             # Double click - open details
             self.post_message(self.Selected(self.ticket))
 
-    def watch_ticket(self, ticket: Ticket | None) -> None:
+    def watch_ticket(self, ticket: Task | None) -> None:
         self._update_review_state()
 
     def watch_review_state(self, old_state: str, new_state: str) -> None:

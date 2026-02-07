@@ -19,9 +19,7 @@ from typing import TYPE_CHECKING
 from textual.css.query import NoMatches
 
 from kagan.constants import COLUMN_ORDER, STATUS_LABELS
-from kagan.database.models import (
-    TicketType,
-)
+from kagan.core.models.enums import TaskType
 from kagan.ui.modals import ConfirmModal, DiffModal, HelpModal, TicketDetailsModal
 from kagan.ui.screens.kanban import KanbanScreen
 from kagan.ui.widgets.card import TicketCard
@@ -461,7 +459,7 @@ class TestTicketDetailsModal:
                 f"Expected TicketDetailsModal, got {type(screen).__name__}"
             )
             assert screen.is_create is True
-            assert screen._initial_type == TicketType.AUTO
+            assert screen._initial_type == TaskType.AUTO
 
     async def test_v_opens_view_details_modal(self, e2e_app_with_tickets: KaganApp):
         """Pressing v on a ticket opens details in view mode."""
@@ -610,7 +608,7 @@ class TestTicketCardDisplay:
             if isinstance(screen, KanbanScreen):
                 cards = list(screen.query(TicketCard))
                 auto_cards = [
-                    c for c in cards if c.ticket and c.ticket.ticket_type == TicketType.AUTO
+                    c for c in cards if c.ticket and c.ticket.task_type == TaskType.AUTO
                 ]
                 assert len(auto_cards) > 0
 

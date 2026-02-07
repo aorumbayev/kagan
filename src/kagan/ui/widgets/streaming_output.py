@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from textual.widget import Widget
 
     from kagan.acp.messages import Answer
-    from kagan.database.models import Ticket
+    from kagan.core.models.entities import Task
 
 # Phase state machine
 StreamPhase = Literal["idle", "thinking", "streaming", "complete"]
@@ -270,7 +270,7 @@ class StreamingOutput(VerticalScroll):
         widget.focus()
         return widget
 
-    async def post_plan_approval(self, tickets: list[Ticket]) -> PlanApprovalWidget:
+    async def post_plan_approval(self, tickets: list[Task]) -> PlanApprovalWidget:
         """Display inline plan approval widget.
 
         Args:

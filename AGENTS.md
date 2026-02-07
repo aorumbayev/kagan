@@ -123,8 +123,8 @@ if TYPE_CHECKING:  # At end
 
 ### Database
 
-- Use `TicketRepository` for all DB access
-- Use SQLModel for models (see `models.py`)
+- Use `TaskRepository` for all DB access (see `adapters/db/repositories.py`)
+- Use SQLModel for tables (see `adapters/db/schema.py`)
 - Always close: `await repo.close()` or `async with`
 - Register callbacks: `repo.set_status_change_callback()`
 
@@ -181,13 +181,14 @@ ci: fix cd failing due to lack of git profile
 
 ```
 src/kagan/
-├── database/           # SQLite (aiosqlite): manager.py, models.py, queries.py, schema.sql
-├── agents/             # Agent management: scheduler, worktree, installer
+├── adapters/           # DB/git/executor adapters
+├── agents/             # Agent prompts, planners, factories
+├── core/               # Domain models, events, policies
+├── services/           # Task/workspace/session/merge automation services
 ├── ui/                 # Textual components: screens/, modals/, forms/, widgets/
 ├── acp/                # Autonomous Coding Protocol (MCP server)
 ├── cli/                # Click CLI commands
-├── lifecycle/          # Ticket lifecycle logic
-├── sessions/           # tmux session management
+├── sessions/           # tmux helpers (run_tmux, errors)
 ├── styles/             # Textual CSS
 ├── app.py              # Main Textual App
 ├── config.py           # TOML configuration

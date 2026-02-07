@@ -9,19 +9,19 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Footer, Input, Label, Rule, Static
 
-from kagan.database.models import Ticket
+from kagan.core.models.entities import Task
 from kagan.keybindings import DUPLICATE_TICKET_BINDINGS
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
 
-class DuplicateTicketModal(ModalScreen[Ticket | None]):
+class DuplicateTicketModal(ModalScreen[dict[str, object] | None]):
     """Modal for duplicating a ticket with selectable fields to copy."""
 
     BINDINGS = DUPLICATE_TICKET_BINDINGS
 
-    def __init__(self, source_ticket: Ticket, **kwargs) -> None:
+    def __init__(self, source_ticket: Task, **kwargs) -> None:
         super().__init__(**kwargs)
         self.source = source_ticket
 
@@ -73,7 +73,7 @@ class DuplicateTicketModal(ModalScreen[Ticket | None]):
             self.notify("Title is required", severity="error")
             return
 
-        # Build Ticket based on checkbox selections
+        # Build task data based on checkbox selections
         description = ""
         if self.query_one("#copy-description", Checkbox).value:
             description = self.source.description
@@ -86,28 +86,28 @@ class DuplicateTicketModal(ModalScreen[Ticket | None]):
         if self.query_one("#copy-priority", Checkbox).value:
             priority = self.source.priority
 
-        ticket_type = None
+        task_type = None
         if self.query_one("#copy-type", Checkbox).value:
-            ticket_type = self.source.ticket_type
+            task_type = self.source.task_type
 
         agent_backend = None
         if self.query_one("#copy-agent", Checkbox).value:
             agent_backend = self.source.agent_backend
 
-        # Build kwargs for Ticket.create, only including set values
-        kwargs: dict = {
+        # Build kwargs for task creation, only including set values
+        kwargs: dict[str, object] = {
             "title": title,
             "description": description,
             "acceptance_criteria": acceptance_criteria,
         }
         if priority is not None:
             kwargs["priority"] = priority
-        if ticket_type is not None:
-            kwargs["ticket_type"] = ticket_type
+        if task_type is not None:
+            kwargs["task_type"] = task_type
         if agent_backend is not None:
             kwargs["agent_backend"] = agent_backend
 
-        self.dismiss(Ticket.create(**kwargs))
+        self.dismiss(kwargs)
 
     def action_cancel(self) -> None:
         """Cancel and close the modal."""

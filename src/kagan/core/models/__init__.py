@@ -1,10 +1,8 @@
 """Domain entities and enums for the Kagan core."""
 
 from kagan.core.models.entities import (
-    CodingAgentTurn,
+    AgentTurn,
     ExecutionProcess,
-    ExecutionProcessLog,
-    ExecutionProcessRepoState,
     Image,
     Merge,
     Project,
@@ -16,11 +14,10 @@ from kagan.core.models.entities import (
     Workspace,
 )
 from kagan.core.models.enums import (
-    ExecutionRunReason,
+    AgentTurnKind,
     ExecutionStatus,
+    MergeReadiness,
     MergeStatus,
-    MergeType,
-    ScratchType,
     SessionStatus,
     SessionType,
     TaskPriority,
@@ -30,20 +27,17 @@ from kagan.core.models.enums import (
 )
 
 __all__ = [
-    "CodingAgentTurn",
+    "AgentTurn",
+    "AgentTurnKind",
     "ExecutionProcess",
-    "ExecutionProcessLog",
-    "ExecutionProcessRepoState",
-    "ExecutionRunReason",
     "ExecutionStatus",
     "Image",
     "Merge",
+    "MergeReadiness",
     "MergeStatus",
-    "MergeType",
     "Project",
     "Repo",
     "Scratch",
-    "ScratchType",
     "Session",
     "SessionStatus",
     "SessionType",

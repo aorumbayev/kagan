@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from kagan.database.models import Ticket, TicketStatus
+    from kagan.core.models.entities import Task
+    from kagan.core.models.enums import TaskStatus
 
 
 def truncate_text(text: str, max_length: int) -> str:
@@ -93,7 +94,7 @@ def format_progress_bar(iteration_info: str) -> str:
     return iteration_info
 
 
-def get_review_badge(ticket: Ticket | None) -> str:
+def get_review_badge(ticket: Task | None) -> str:
     """Get review badge icon.
 
     Args:
@@ -113,7 +114,7 @@ def get_review_badge(ticket: Ticket | None) -> str:
     return "⏳"
 
 
-def format_checks_status(ticket: Ticket | None) -> str:
+def format_checks_status(ticket: Task | None) -> str:
     """Format checks status with icon and text.
 
     Args:
@@ -134,7 +135,7 @@ def format_checks_status(ticket: Ticket | None) -> str:
     return "⏳ Review pending"
 
 
-def format_review_status(ticket: Ticket | None, merge_readiness: str) -> str:
+def format_review_status(ticket: Task | None, merge_readiness: str) -> str:
     """Format consolidated review status with merge readiness.
 
     Args:
@@ -167,7 +168,7 @@ def format_review_status(ticket: Ticket | None, merge_readiness: str) -> str:
         return "⏳ Review pending"
 
 
-def get_readiness_badge(ticket: Ticket | None, merge_readiness: str, status: TicketStatus) -> str:
+def get_readiness_badge(ticket: Task | None, merge_readiness: str, status: TaskStatus) -> str:
     """Get merge readiness badge for REVIEW tickets.
 
     Args:
@@ -178,9 +179,9 @@ def get_readiness_badge(ticket: Ticket | None, merge_readiness: str, status: Tic
     Returns:
         Badge like "🟢 SAFE" or empty string for non-REVIEW
     """
-    from kagan.database.models import TicketStatus
+    from kagan.core.models.enums import TaskStatus
 
-    if ticket is None or status != TicketStatus.REVIEW:
+    if ticket is None or status != TaskStatus.REVIEW:
         return ""
     readiness = merge_readiness or "risk"
     if readiness == "ready":

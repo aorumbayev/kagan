@@ -9,26 +9,23 @@ from textual.app import App
 from textual.signal import Signal
 
 from kagan.agents.agent_factory import AgentFactory, create_agent
-from kagan.agents.scheduler import Scheduler
-from kagan.agents.worktree import WorktreeManager
+from kagan.bootstrap import AppContext, create_app_context, create_signal_bridge, wire_default_signals
 from kagan.config import KaganConfig
 from kagan.constants import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_DB_PATH,
     DEFAULT_LOCK_PATH,
 )
-from kagan.database import TicketRepository
 from kagan.debug_log import setup_debug_logging
 from kagan.git_utils import GitInitResult, has_git_repo, init_git_repo
 from kagan.keybindings import APP_BINDINGS
 from kagan.lock import InstanceLock, exit_if_already_running
-from kagan.sessions import SessionManager
 from kagan.terminal import supports_truecolor
 from kagan.theme import KAGAN_THEME, KAGAN_THEME_256
 from kagan.ui.screens.kanban import KanbanScreen
 
 if TYPE_CHECKING:
-    from kagan.database.models import TicketStatus
+    from kagan.core.models.enums import TaskStatus
     from kagan.ui.screens.planner.state import PersistentPlannerState
 
 
@@ -65,34 +62,17 @@ class KaganApp(App):
         self.db_path = Path(db_path)
         self.config_path = Path(config_path)
         self.lock_path = Path(lock_path) if lock_path else None
-        self._state_manager: TicketRepository | None = None
-        self._worktree_manager: WorktreeManager | None = None
-        self._session_manager: SessionManager | None = None
-        self._scheduler: Scheduler | None = None
         self._instance_lock: InstanceLock | None = None
+        self._ctx: AppContext | None = None
         self.config: KaganConfig = KaganConfig()
         self.planner_state: PersistentPlannerState | None = None
         self._agent_factory = agent_factory
 
     @property
-    def state_manager(self) -> TicketRepository:
-        assert self._state_manager is not None
-        return self._state_manager
-
-    @property
-    def worktree_manager(self) -> WorktreeManager:
-        assert self._worktree_manager is not None
-        return self._worktree_manager
-
-    @property
-    def session_manager(self) -> SessionManager:
-        assert self._session_manager is not None
-        return self._session_manager
-
-    @property
-    def scheduler(self) -> Scheduler:
-        assert self._scheduler is not None
-        return self._scheduler
+    def ctx(self) -> AppContext:
+        """Get the application context for service access."""
+        assert self._ctx is not None, "AppContext not initialized"
+        return self._ctx
 
     async def on_mount(self) -> None:
         """Initialize app on mount."""
@@ -154,50 +134,28 @@ class KaganApp(App):
                     self.log.warning("Failed to initialize git repository", path=str(project_root))
                     self.notify("Git initialization failed", severity="error")
 
-        # Only initialize managers if not already set (allows test mocking)
-        if self._state_manager is None:
-            self._state_manager = TicketRepository(
-                self.db_path,
-                on_change=lambda tid: self.ticket_changed_signal.publish(tid),
+        if self._ctx is None:
+            self._ctx = await create_app_context(
+                self.config_path, self.db_path, config=self.config
             )
-            await self._state_manager.initialize()
-            self.log("Database initialized", path=str(self.db_path))
+            # Wire signal bridge to map domain events to Textual signals
+            bridge = create_signal_bridge(self._ctx.event_bus)
+            wire_default_signals(bridge, self)
+            self._ctx.signal_bridge = bridge
+            self.log("AppContext initialized with SignalBridge")
 
-        # Project root is the parent of .kagan directory (where config lives)
-        if self._worktree_manager is None:
-            self._worktree_manager = WorktreeManager(repo_root=project_root)
+            # Reconcile orphaned worktrees/sessions before starting automation
             await self._reconcile_worktrees()
-        if self._session_manager is None:
-            self._session_manager = SessionManager(
-                project_root=project_root, state=self._state_manager, config=self.config
-            )
-            # Reconcile orphaned sessions from previous runs
             await self._reconcile_sessions()
 
-        if self._scheduler is None:
-            self._scheduler = Scheduler(
-                state_manager=self._state_manager,
-                worktree_manager=self._worktree_manager,
-                config=self.config,
-                session_manager=self._session_manager,
-                on_ticket_changed=lambda: self.ticket_changed_signal.publish(""),
-                on_iteration_changed=lambda tid, it: self.iteration_changed_signal.publish(
-                    (tid, it)
-                ),
-                on_error=lambda tid, msg: self.notify(f"#{tid}: {msg}", severity="error"),
-                app=self,
-                agent_factory=self._agent_factory,
-            )
-            # Wire up reactive scheduler: status changes trigger spawns/stops
-            self._state_manager.set_status_change_callback(self._on_ticket_status_change)
-            # Start the scheduler's event processing loop
-            self._scheduler.start()
-            # Spawn agents for any existing IN_PROGRESS AUTO tickets
-            await self._scheduler.initialize_existing_tickets()
-            self.log("Scheduler initialized (reactive mode)")
+            # Start automation service
+            if self._ctx.automation_service:
+                await self._ctx.automation_service.start()
+                await self._ctx.automation_service.initialize_existing_tasks()
+                self.log("Automation service initialized (reactive mode)")
 
         # Chat-first boot: show PlannerScreen if board is empty, else KanbanScreen
-        tickets = await self._state_manager.get_all()
+        tickets = await self._ctx.task_service.list_tasks()
         if len(tickets) == 0:
             from kagan.ui.screens.planner import PlannerScreen
 
@@ -219,24 +177,11 @@ class KaganApp(App):
         """Clean up on unmount."""
         await self.cleanup()
 
-    def _on_ticket_status_change(
-        self, ticket_id: str, old_status: TicketStatus | None, new_status: TicketStatus | None
-    ) -> None:
-        """Handle ticket status change - forward to scheduler.
-
-        This is called synchronously from TicketRepository, so we schedule
-        the async handler to run.
-        """
-        if self._scheduler:
-            self.call_later(
-                lambda: self._scheduler.handle_status_change(ticket_id, old_status, new_status)
-            )
-
     async def _reconcile_worktrees(self) -> None:
         """Remove orphaned worktrees from previous runs."""
-        tickets = await self.state_manager.get_all()
-        valid_ids = {t.id for t in tickets}
-        cleaned = await self.worktree_manager.cleanup_orphans(valid_ids)
+        tasks = await self._ctx.task_service.list_tasks()
+        valid_ids = {t.id for t in tasks}
+        cleaned = await self._ctx.workspace_service.cleanup_orphans(valid_ids)
         if cleaned:
             self.log(f"Cleaned up {len(cleaned)} orphan worktree(s)")
 
@@ -244,23 +189,23 @@ class KaganApp(App):
         """Kill orphaned tmux sessions from previous runs."""
         from kagan.sessions.tmux import TmuxError, run_tmux
 
-        state = self.state_manager  # Uses property, ensures not None
+        state = self._ctx.task_service
         try:
             output = await run_tmux("list-sessions", "-F", "#{session_name}")
             kagan_sessions = [s for s in output.split("\n") if s.startswith("kagan-")]
 
-            tickets = await state.get_all()
-            valid_ticket_ids = {t.id for t in tickets}
+            tasks = await state.list_tasks()
+            valid_task_ids = {t.id for t in tasks}
 
             for session_name in kagan_sessions:
-                ticket_id = session_name.replace("kagan-", "")
-                if ticket_id not in valid_ticket_ids:
+                task_id = session_name.replace("kagan-", "")
+                if task_id not in valid_task_ids:
                     # Orphaned session - ticket no longer exists
                     await run_tmux("kill-session", "-t", session_name)
                     self.log(f"Killed orphaned session: {session_name}")
                 else:
                     # Session exists, ensure session_active flag is correct
-                    await state.mark_session_active(ticket_id, True)
+                    await state.mark_session_active(task_id, True)
         except TmuxError:
             pass  # No tmux server running
 
@@ -272,10 +217,11 @@ class KaganApp(App):
         if self.planner_state and self.planner_state.refiner:
             await self.planner_state.refiner.stop()
 
-        if self._scheduler:
-            await self._scheduler.stop()
-        if self._state_manager:
-            await self._state_manager.close()
+        # Close AppContext (handles automation + services)
+        if self._ctx:
+            await self._ctx.close()
+            self._ctx = None
+
         if self._instance_lock:
             self._instance_lock.release()
 

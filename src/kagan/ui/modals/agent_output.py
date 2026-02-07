@@ -13,7 +13,7 @@ from textual.widgets import Button, Footer, Label, Rule, TabbedContent, TabPane
 from kagan.acp import messages
 from kagan.acp.messages import Answer
 from kagan.constants import MODAL_TITLE_MAX_LENGTH
-from kagan.database.models import TicketStatus
+from kagan.core.models.enums import TaskStatus
 from kagan.keybindings import AGENT_OUTPUT_BINDINGS
 from kagan.ui.utils.clipboard import copy_with_notification
 from kagan.ui.widgets import StreamingOutput
@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 
     from kagan.acp.agent import Agent
     from kagan.app import KaganApp
-    from kagan.database.models import AgentLog, Ticket
+    from kagan.adapters.db.schema import AgentTurn
+    from kagan.core.models.entities import Task
 
 
 class AgentOutputModal(ModalScreen[None]):
@@ -39,12 +40,12 @@ class AgentOutputModal(ModalScreen[None]):
 
     def __init__(
         self,
-        ticket: Ticket,
+        ticket: Task,
         agent: Agent | None,
         iteration: int = 0,
         review_agent: Agent | None = None,
         is_reviewing: bool = False,
-        historical_logs: dict[str, list[AgentLog]] | None = None,
+        historical_logs: dict[str, list[AgentTurn]] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -54,7 +55,7 @@ class AgentOutputModal(ModalScreen[None]):
         self._review_agent = review_agent
         self._is_reviewing = is_reviewing
         self._historical_logs = historical_logs or {}
-        self._show_tabs = ticket.status == TicketStatus.REVIEW
+        self._show_tabs = ticket.status == TaskStatus.REVIEW
         self._current_mode: str = ""
         self._available_modes: dict[str, messages.Mode] = {}
         self._available_commands: list[AvailableCommand] = []
@@ -203,14 +204,14 @@ class AgentOutputModal(ModalScreen[None]):
         return self.query_one("#agent-output", StreamingOutput)
 
     async def _load_historical_log(
-        self, output: StreamingOutput, log_entry: AgentLog, show_iteration_header: bool = True
+        self, output: StreamingOutput, log_entry: AgentTurn, show_iteration_header: bool = True
     ) -> None:
         """Load a historical log entry into a StreamingOutput widget.
 
         Handles both JSON format (new) and plain text (legacy) logs.
         """
         if show_iteration_header:
-            await output.post_note(f"--- Iteration {log_entry.iteration} ---", classes="info")
+            await output.post_note(f"--- Iteration {log_entry.sequence} ---", classes="info")
 
         try:
             data = json.loads(log_entry.content)
@@ -359,15 +360,18 @@ class AgentOutputModal(ModalScreen[None]):
             return
 
         app = cast("KaganApp", self.app)
-        scheduler = app.scheduler
+        automation = app.ctx.automation_service
+        if automation is None:
+            self.notify("Automation service unavailable", severity="error")
+            return
 
-        if scheduler.is_running(self.ticket.id):
+        if automation.is_running(self.ticket.id):
             # Stop both the agent process and the ticket loop task
-            await scheduler.stop_ticket(self.ticket.id)
+            await automation.stop_task(self.ticket.id)
             await self._get_output().post_note("Agent stopped", classes="warning")
 
             # Move ticket to BACKLOG to prevent auto-restart
-            await app.state_manager.move(self.ticket.id, TicketStatus.BACKLOG)
+            await app.ctx.task_service.move(self.ticket.id, TaskStatus.BACKLOG)
             await self._get_output().post_note(
                 "Ticket moved to BACKLOG (agent won't auto-restart)", classes="info"
             )

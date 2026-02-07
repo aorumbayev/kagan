@@ -6,19 +6,19 @@ import asyncio
 from pathlib import Path
 
 from kagan.constants import KAGAN_GENERATED_PATTERNS
-from kagan.database.models import MergeReadiness, TicketStatus
-from kagan.database.repository import TicketRepository  # noqa: TC001
+from kagan.core.models.enums import MergeReadiness, TaskStatus
+from kagan.services.tasks import TaskService  # noqa: TC001
 
 
 class KaganMCPServer:
-    """Handler for MCP tools backed by TicketRepository."""
+    """Handler for MCP tools backed by TaskService."""
 
-    def __init__(self, state_manager: TicketRepository) -> None:
+    def __init__(self, state_manager: TaskService) -> None:
         self._state = state_manager
 
     async def get_context(self, ticket_id: str) -> dict:
         """Get ticket context for AI tools."""
-        ticket = await self._state.get(ticket_id)
+        ticket = await self._state.get_task(ticket_id)
         if ticket is None:
             raise ValueError(f"Ticket not found: {ticket_id}")
         scratchpad = await self._state.get_scratchpad(ticket_id)
@@ -41,9 +41,9 @@ class KaganMCPServer:
         """Mark ticket ready for review.
 
         For PAIR mode tickets, this moves the ticket to REVIEW status.
-        AUTO mode tickets use agent-based review via the scheduler instead.
+        AUTO mode tickets use agent-based review via the automation service instead.
         """
-        ticket = await self._state.get(ticket_id)
+        ticket = await self._state.get_task(ticket_id)
         if ticket is None:
             raise ValueError(f"Ticket not found: {ticket_id}")
 
@@ -60,7 +60,7 @@ class KaganMCPServer:
             ticket_id,
             review_summary=summary,
             checks_passed=None,
-            status=TicketStatus.REVIEW,
+            status=TaskStatus.REVIEW,
             merge_failed=False,
             merge_error=None,
             merge_readiness=MergeReadiness.RISK,
@@ -111,7 +111,7 @@ class KaganMCPServer:
         Returns:
             List of ticket summaries: ticket_id, title, description, scratchpad.
         """
-        tickets = await self._state.get_by_status(TicketStatus.IN_PROGRESS)
+        tickets = await self._state.get_by_status(TaskStatus.IN_PROGRESS)
         result = []
         for t in tickets:
             if exclude_ticket_id and t.id == exclude_ticket_id:
@@ -140,17 +140,17 @@ class KaganMCPServer:
         Returns:
             List of log entries with iteration, content, created_at.
         """
-        ticket = await self._state.get(ticket_id)
+        ticket = await self._state.get_task(ticket_id)
         if ticket is None:
             raise ValueError(f"Ticket not found: {ticket_id}")
 
         logs = await self._state.get_agent_logs(ticket_id, log_type)
         # Get most recent N logs, then reverse for ascending order
-        logs = sorted(logs, key=lambda x: x.iteration, reverse=True)[:limit]
+        logs = sorted(logs, key=lambda x: x.sequence, reverse=True)[:limit]
         logs = list(reversed(logs))  # O(n) instead of O(n log n)
         return [
             {
-                "iteration": log.iteration,
+                "iteration": log.sequence,
                 "content": log.content,
                 "created_at": log.created_at.isoformat(),
             }

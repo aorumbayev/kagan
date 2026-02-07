@@ -9,11 +9,11 @@ from kagan.agents.prompt_loader import ITERATION_PROMPT
 if TYPE_CHECKING:
     from typing import Any
 
-    from kagan.database.models import Ticket
+    from kagan.core.models.entities import Task
 
 
 def build_prompt(
-    ticket: Ticket,
+    ticket: Task,
     iteration: int,
     max_iterations: int,
     scratchpad: str,

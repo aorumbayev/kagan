@@ -12,19 +12,15 @@ from typing import TYPE_CHECKING
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Label, Select, Static
 
-from kagan.database.models import (
-    Ticket,
-    TicketPriority,
-    TicketStatus,
-    TicketType,
-)
+from kagan.core.models.entities import Task
+from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
 from kagan.ui.widgets.base import (
     AcceptanceCriteriaArea,
     AgentBackendSelect,
     DescriptionArea,
     PrioritySelect,
     StatusSelect,
-    TicketTypeSelect,
+    TaskTypeSelect,
     TitleInput,
 )
 
@@ -43,7 +39,7 @@ class FormMode(Enum):
     EDIT = auto()
 
 
-class TicketFormBuilder:
+class TaskFormBuilder:
     """Factory for generating ticket form fields based on mode.
 
     Separates form generation from modal behavior for cleaner code.
@@ -51,7 +47,7 @@ class TicketFormBuilder:
 
     @staticmethod
     def build_field_selects(
-        ticket: Ticket | None,
+        ticket: Task | None,
         mode: FormMode,
         agent_options: Sequence[tuple[str, str]] | None = None,
     ) -> ComposeResult:
@@ -68,9 +64,9 @@ class TicketFormBuilder:
         if mode == FormMode.VIEW:
             return
 
-        current_priority = ticket.priority if ticket else TicketPriority.MEDIUM
+        current_priority = ticket.priority if ticket else TaskPriority.MEDIUM
 
-        current_type = ticket.ticket_type if ticket else TicketType.PAIR
+        current_type = ticket.task_type if ticket else TaskType.PAIR
 
         current_backend = ticket.agent_backend if ticket else ""
 
@@ -83,7 +79,7 @@ class TicketFormBuilder:
                 yield Label("Type:", classes="form-label")
                 # Disable type selector when editing existing ticket
                 is_editing = ticket is not None
-                yield TicketTypeSelect(value=current_type, disabled=is_editing)
+                yield TaskTypeSelect(value=current_type, disabled=is_editing)
 
             with Vertical(classes="form-field field-third"):
                 yield Label("Agent:", classes="form-label")
@@ -92,7 +88,7 @@ class TicketFormBuilder:
 
     @staticmethod
     def build_status_field(
-        ticket: Ticket | None,
+        ticket: Task | None,
         mode: FormMode,
     ) -> ComposeResult:
         """Build the status select field (only shown in create mode).
@@ -109,11 +105,11 @@ class TicketFormBuilder:
 
         with Vertical(classes="form-field edit-fields", id="status-field"):
             yield Label("Status:", classes="form-label")
-            yield StatusSelect(value=TicketStatus.BACKLOG)
+            yield StatusSelect(value=TaskStatus.BACKLOG)
 
     @staticmethod
     def build_title_field(
-        ticket: Ticket | None,
+        ticket: Task | None,
         mode: FormMode,
     ) -> ComposeResult:
         """Build title field (view or edit).
@@ -137,7 +133,7 @@ class TicketFormBuilder:
 
     @staticmethod
     def build_description_field(
-        ticket: Ticket | None,
+        ticket: Task | None,
         mode: FormMode,
         editing: bool = False,
     ) -> ComposeResult:
@@ -174,7 +170,7 @@ class TicketFormBuilder:
 
     @staticmethod
     def build_acceptance_criteria_field(
-        ticket: Ticket | None,
+        ticket: Task | None,
         mode: FormMode,
     ) -> ComposeResult:
         """Build acceptance criteria section.
@@ -230,14 +226,14 @@ class TicketFormBuilder:
             if priority_select.value is not Select.BLANK:
                 from typing import cast
 
-                values["priority"] = TicketPriority(cast("int", priority_select.value))
+                values["priority"] = TaskPriority(cast("int", priority_select.value))
         except Exception:
             pass
 
         try:
             type_select: Select[str] = container.query_one("#type-select", Select)
             if type_select.value is not Select.BLANK:
-                values["ticket_type"] = TicketType(str(type_select.value))
+                values["ticket_type"] = TaskType(str(type_select.value))
         except Exception:
             pass
 
@@ -253,7 +249,7 @@ class TicketFormBuilder:
         try:
             status_select: Select[str] = container.query_one("#status-select", Select)
             if status_select.value is not Select.BLANK:
-                values["status"] = TicketStatus(str(status_select.value))
+                values["status"] = TaskStatus(str(status_select.value))
         except Exception:
             pass
 
@@ -266,7 +262,7 @@ class TicketFormBuilder:
         return values
 
     @staticmethod
-    def reset_form_to_ticket(container: Widget, ticket: Ticket) -> None:
+    def reset_form_to_ticket(container: Widget, ticket: Task) -> None:
         """Reset form fields to match ticket values.
 
         Args:
@@ -287,7 +283,7 @@ class TicketFormBuilder:
             priority_select.value = ticket.priority.value
 
         if type_select := safe_query_one(container, "#type-select", Select):
-            type_select.value = ticket.ticket_type.value
+            type_select.value = ticket.task_type.value
 
         if agent_select := safe_query_one(container, "#agent-backend-select", Select):
             agent_select.value = ticket.agent_backend or ""

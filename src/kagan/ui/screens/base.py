@@ -8,6 +8,7 @@ from textual.screen import Screen
 
 if TYPE_CHECKING:
     from kagan.app import KaganApp
+    from kagan.bootstrap import AppContext
 
 
 class KaganScreen(Screen):
@@ -17,3 +18,16 @@ class KaganScreen(Screen):
     def kagan_app(self) -> KaganApp:
         """Get the typed KaganApp instance."""
         return cast("KaganApp", self.app)
+
+    @property
+    def ctx(self) -> AppContext:
+        """Get the application context for service access.
+
+        Raises:
+            RuntimeError: If AppContext is not initialized on the app.
+        """
+        app = self.kagan_app
+        if not hasattr(app, "_ctx") or app._ctx is None:
+            msg = "AppContext not initialized. Ensure bootstrap has completed."
+            raise RuntimeError(msg)
+        return app._ctx

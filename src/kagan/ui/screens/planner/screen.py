@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from acp.schema import AvailableCommand
     from textual.app import ComposeResult
 
-    from kagan.database.models import Ticket
+    from kagan.core.models.entities import Task
 
 MIN_INPUT_HEIGHT = 1
 MAX_INPUT_HEIGHT = 6
@@ -396,15 +396,29 @@ class PlannerScreen(KaganScreen):
 
         for ticket_data in event.tickets:
             try:
-                ticket = await self.kagan_app.state_manager.create(ticket_data)
+                task = await self.ctx.task_service.create_task(
+                    ticket_data.title,
+                    ticket_data.description,
+                    project_id=ticket_data.project_id,
+                    repo_id=ticket_data.repo_id,
+                    created_by=None,
+                )
+                await self.ctx.task_service.update_fields(
+                    task.id,
+                    priority=ticket_data.priority,
+                    task_type=ticket_data.task_type,
+                    assigned_hat=ticket_data.assigned_hat,
+                    agent_backend=ticket_data.agent_backend,
+                    acceptance_criteria=ticket_data.acceptance_criteria,
+                )
                 self.notify(
-                    f"Created: {ticket.title[:PLANNER_TITLE_MAX_LENGTH]}", severity="information"
+                    f"Created: {task.title[:PLANNER_TITLE_MAX_LENGTH]}", severity="information"
                 )
                 created_tickets.append(
                     (
-                        ticket.title,
-                        ticket.ticket_type.value if ticket.ticket_type else "PAIR",
-                        ticket.priority.label if ticket.priority else "Medium",
+                        task.title,
+                        task.task_type.value if task.task_type else "PAIR",
+                        task.priority.label if task.priority else "Medium",
                     )
                 )
             except Exception as e:
@@ -468,7 +482,7 @@ class PlannerScreen(KaganScreen):
             self._on_ticket_editor_result,
         )
 
-    async def _on_ticket_editor_result(self, result: list[Ticket] | None) -> None:
+    async def _on_ticket_editor_result(self, result: list[Task] | None) -> None:
         """Handle result from ticket editor."""
         if result is None:
             if self._state.pending_plan:

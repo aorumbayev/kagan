@@ -23,11 +23,8 @@ def _now() -> datetime:
 class DomainEvent(Protocol):
     """Base protocol for all domain events."""
 
-    @property
-    def event_id(self) -> str: ...
-
-    @property
-    def occurred_at(self) -> datetime: ...
+    event_id: str
+    occurred_at: datetime
 
 
 EventHandler = Callable[[DomainEvent], None]
@@ -38,11 +35,9 @@ class EventBus(Protocol):
 
     async def publish(self, event: DomainEvent) -> None:
         """Publish a single event to subscribers."""
-        ...
 
     def subscribe(self, event_type: type[DomainEvent] | None = None) -> AsyncIterator[DomainEvent]:
         """Subscribe to events (optionally filtered by type)."""
-        ...
 
     def add_handler(
         self,
@@ -50,11 +45,6 @@ class EventBus(Protocol):
         event_type: type[DomainEvent] | None = None,
     ) -> None:
         """Register a sync handler for events (UI bridges use this)."""
-        ...
-
-    def remove_handler(self, handler: EventHandler) -> None:
-        """Remove a previously registered handler."""
-        ...
 
 
 @dataclass(frozen=True)
@@ -93,7 +83,6 @@ class WorkspaceProvisioned:
     task_id: str | None
     branch: str
     path: str
-    repo_count: int
     event_id: str = field(default_factory=_new_event_id)
     occurred_at: datetime = field(default_factory=_now)
 
@@ -190,80 +179,17 @@ class MergeRequested:
 
 @dataclass(frozen=True)
 class MergeCompleted:
-    """Emitted when a repo merge completes."""
-
-    workspace_id: str
-    repo_id: str
-    target_branch: str
-    commit_sha: str
+    merge_id: str
+    task_id: str
+    result: str
     event_id: str = field(default_factory=_new_event_id)
     occurred_at: datetime = field(default_factory=_now)
 
 
 @dataclass(frozen=True)
 class MergeFailed:
-    """Emitted when a repo merge fails."""
-
-    workspace_id: str
-    repo_id: str
+    merge_id: str
+    task_id: str
     error: str
-    conflict_op: str | None = None
-    conflict_files: list[str] | None = None
-    event_id: str = field(default_factory=_new_event_id)
-    occurred_at: datetime = field(default_factory=_now)
-
-
-@dataclass(frozen=True)
-class WorkspaceRepoStatus:
-    """Emitted when a workspace repo's status changes."""
-
-    workspace_id: str
-    repo_id: str
-    has_changes: bool
-    diff_stats: dict | None = None
-    event_id: str = field(default_factory=_new_event_id)
-    occurred_at: datetime = field(default_factory=_now)
-
-
-@dataclass(frozen=True)
-class ProjectOpened:
-    """Emitted when a project is opened."""
-
-    project_id: str
-    event_id: str = field(default_factory=_new_event_id)
-    occurred_at: datetime = field(default_factory=_now)
-
-
-@dataclass(frozen=True)
-class ProjectCreated:
-    """Emitted when a new project is created."""
-
-    project_id: str
-    name: str
-    repo_count: int
-    event_id: str = field(default_factory=_new_event_id)
-    occurred_at: datetime = field(default_factory=_now)
-
-
-@dataclass(frozen=True)
-class PRCreated:
-    """Emitted when a PR is created for a repo."""
-
-    workspace_id: str
-    repo_id: str
-    pr_url: str
-    event_id: str = field(default_factory=_new_event_id)
-    occurred_at: datetime = field(default_factory=_now)
-
-
-@dataclass(frozen=True)
-class ScriptCompleted:
-    """Emitted when a repo script completes."""
-
-    workspace_id: str
-    repo_id: str
-    script_type: str
-    success: bool
-    exit_code: int
     event_id: str = field(default_factory=_new_event_id)
     occurred_at: datetime = field(default_factory=_now)

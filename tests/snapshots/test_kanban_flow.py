@@ -18,9 +18,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from kagan.adapters.db.repositories import TaskRepository
+from kagan.adapters.db.schema import Task
 from kagan.app import KaganApp
-from kagan.database import TicketRepository
-from kagan.database.models import Ticket, TicketPriority, TicketStatus, TicketType
+from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
 
 if TYPE_CHECKING:
     from types import SimpleNamespace
@@ -68,50 +69,64 @@ async def _setup_kanban_tickets(db_path: str) -> None:
 
     Uses fixed IDs for snapshot reproducibility.
     """
-    manager = TicketRepository(db_path)
+    manager = TaskRepository(db_path)
     await manager.initialize()
+    project_id = manager.default_project_id
+    if project_id is None:
+        raise RuntimeError("TaskRepository defaults not initialized")
+    repo_id = manager.default_repo_id
 
     # Create tickets with fixed IDs for reproducible snapshots
     tickets = [
-        Ticket(
+        Task(
             id="backlog1",
+            project_id=project_id,
+            repo_id=repo_id,
             title="Backlog task 1",
             description="First task in backlog",
-            priority=TicketPriority.LOW,
-            status=TicketStatus.BACKLOG,
-            ticket_type=TicketType.PAIR,
+            priority=TaskPriority.LOW,
+            status=TaskStatus.BACKLOG,
+            task_type=TaskType.PAIR,
         ),
-        Ticket(
+        Task(
             id="backlog2",
+            project_id=project_id,
+            repo_id=repo_id,
             title="Backlog task 2",
             description="Second task in backlog",
-            priority=TicketPriority.HIGH,
-            status=TicketStatus.BACKLOG,
-            ticket_type=TicketType.AUTO,
+            priority=TaskPriority.HIGH,
+            status=TaskStatus.BACKLOG,
+            task_type=TaskType.AUTO,
         ),
-        Ticket(
+        Task(
             id="inprog01",
+            project_id=project_id,
+            repo_id=repo_id,
             title="In progress task",
             description="Currently working on this",
-            priority=TicketPriority.HIGH,
-            status=TicketStatus.IN_PROGRESS,
-            ticket_type=TicketType.PAIR,
+            priority=TaskPriority.HIGH,
+            status=TaskStatus.IN_PROGRESS,
+            task_type=TaskType.PAIR,
         ),
-        Ticket(
+        Task(
             id="review01",
+            project_id=project_id,
+            repo_id=repo_id,
             title="Review task",
             description="Ready for code review",
-            priority=TicketPriority.MEDIUM,
-            status=TicketStatus.REVIEW,
-            ticket_type=TicketType.AUTO,
+            priority=TaskPriority.MEDIUM,
+            status=TaskStatus.REVIEW,
+            task_type=TaskType.AUTO,
         ),
-        Ticket(
+        Task(
             id="done0001",
+            project_id=project_id,
+            repo_id=repo_id,
             title="Done task",
             description="Completed work",
-            priority=TicketPriority.LOW,
-            status=TicketStatus.DONE,
-            ticket_type=TicketType.PAIR,
+            priority=TaskPriority.LOW,
+            status=TaskStatus.DONE,
+            task_type=TaskType.PAIR,
         ),
     ]
 
@@ -135,7 +150,7 @@ class TestKanbanFlow:
         sessions: dict[str, Any] = {}
         fake_tmux = _create_fake_tmux(sessions)
         monkeypatch.setattr("kagan.sessions.tmux.run_tmux", fake_tmux)
-        monkeypatch.setattr("kagan.sessions.manager.run_tmux", fake_tmux)
+        monkeypatch.setattr("kagan.services.sessions.run_tmux", fake_tmux)
 
         # Set up tickets synchronously
         loop = asyncio.new_event_loop()

@@ -24,9 +24,9 @@ if TYPE_CHECKING:
     from textual.timer import Timer
 
     from kagan.acp.agent import Agent
-    from kagan.agents.worktree import WorktreeManager
+    from kagan.adapters.git.worktrees import WorktreeManager
     from kagan.config import AgentConfig
-    from kagan.database.models import Ticket
+    from kagan.core.models.entities import Task
 
 ReviewPhase = Literal["idle", "thinking", "streaming", "complete"]
 
@@ -45,7 +45,7 @@ class ReviewModal(ModalScreen[str | None]):
 
     def __init__(
         self,
-        ticket: Ticket,
+        ticket: Task,
         worktree_manager: WorktreeManager,
         agent_config: AgentConfig,
         base_branch: str = "main",

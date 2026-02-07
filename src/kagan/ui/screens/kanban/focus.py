@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kagan.constants import COLUMN_ORDER
-from kagan.database.models import TicketStatus
+from kagan.core.models.enums import TaskStatus
 from kagan.ui.widgets.card import TicketCard
 from kagan.ui.widgets.column import KanbanColumn
 
@@ -28,7 +28,7 @@ def focus_first_card(screen: KanbanScreen) -> None:
             return
 
 
-def focus_column(screen: KanbanScreen, status: TicketStatus) -> None:
+def focus_column(screen: KanbanScreen, status: TaskStatus) -> None:
     col = screen.query_one(f"#column-{status.value.lower()}", KanbanColumn)
     col.focus_first_card()
 
@@ -64,7 +64,7 @@ def focus_vertical(screen: KanbanScreen, direction: int) -> None:
         return
 
     status = card.ticket.status
-    status_str = status.value if isinstance(status, TicketStatus) else status
+    status_str = status.value if isinstance(status, TaskStatus) else status
     col = screen.query_one(f"#column-{status_str.lower()}", KanbanColumn)
     idx = col.get_focused_card_index()
     cards = col.get_cards()

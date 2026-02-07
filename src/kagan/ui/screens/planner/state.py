@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     from kagan.acp.agent import Agent
     from kagan.agents.refiner import PromptRefiner
-    from kagan.database.models import Ticket
+    from kagan.core.models.entities import Task
 
 
 class PlannerPhase(Enum):
@@ -41,7 +41,7 @@ class ChatMessage:
     role: Literal["user", "assistant"]
     content: str
     timestamp: datetime
-    plan_tickets: list[Ticket] | None = None
+    plan_tickets: list[Task] | None = None
     # Parsed todo entries for PlanDisplay restoration
     todos: list[dict] | None = None
     # Notes to display after this message (e.g., "Created N tickets", errors)
@@ -78,7 +78,7 @@ class PlannerState:
     conversation_history: list[ChatMessage] = field(default_factory=list)
 
     # Pending plan tickets awaiting approval
-    pending_plan: list[Ticket] | None = None
+    pending_plan: list[Task] | None = None
 
     # Input text to preserve across screen switches
     input_text: str = ""
@@ -166,7 +166,7 @@ class PlannerState:
             refiner=self.refiner,
         )
 
-    def with_pending_plan(self, plan: list[Ticket] | None) -> PlannerState:
+    def with_pending_plan(self, plan: list[Task] | None) -> PlannerState:
         """Return new state with pending_plan updated."""
         return PlannerState(
             phase=self.phase,
@@ -193,7 +193,7 @@ class PersistentPlannerState:
     """
 
     conversation_history: list[ChatMessage]
-    pending_plan: list[Ticket] | None
+    pending_plan: list[Task] | None
     input_text: str
     agent: Agent | None = None
     refiner: PromptRefiner | None = None

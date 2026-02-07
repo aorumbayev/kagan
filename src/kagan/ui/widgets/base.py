@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from textual.widgets import Input, Select, Static, TextArea
 
 from kagan.constants import PRIORITY_LABELS
-from kagan.database.models import TicketPriority, TicketStatus, TicketType
+from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -90,7 +90,7 @@ class PrioritySelect(Select[int]):
 
     def __init__(
         self,
-        value: TicketPriority = TicketPriority.MEDIUM,
+        value: TaskPriority = TaskPriority.MEDIUM,
         *,
         widget_id: str = "priority-select",
         **kwargs,
@@ -99,7 +99,7 @@ class PrioritySelect(Select[int]):
             (label, p.value) for p, label in PRIORITY_LABELS.items()
         ]
         # Ensure value is int for Select
-        initial_value = value.value if isinstance(value, TicketPriority) else value
+        initial_value = value.value if isinstance(value, TaskPriority) else value
         super().__init__(
             options=options,
             value=initial_value,
@@ -112,20 +112,20 @@ class TicketTypeSelect(Select[str]):
     """Ticket type dropdown (Pair/Auto)."""
 
     OPTIONS: Sequence[tuple[str, str]] = [
-        ("Pair (tmux)", TicketType.PAIR.value),
-        ("Auto (ACP)", TicketType.AUTO.value),
+        ("Pair (tmux)", TaskType.PAIR.value),
+        ("Auto (ACP)", TaskType.AUTO.value),
     ]
 
     def __init__(
         self,
-        value: TicketType = TicketType.PAIR,
+        value: TaskType = TaskType.PAIR,
         *,
         disabled: bool = False,
         widget_id: str = "type-select",
         **kwargs,
     ) -> None:
         # Ensure value is str for Select
-        initial_value = value.value if isinstance(value, TicketType) else value
+        initial_value = value.value if isinstance(value, TaskType) else value
         super().__init__(
             options=self.OPTIONS,
             value=initial_value,
@@ -139,21 +139,21 @@ class StatusSelect(Select[str]):
     """Ticket status dropdown."""
 
     OPTIONS: Sequence[tuple[str, str]] = [
-        ("Backlog", TicketStatus.BACKLOG.value),
-        ("In Progress", TicketStatus.IN_PROGRESS.value),
-        ("Review", TicketStatus.REVIEW.value),
-        ("Done", TicketStatus.DONE.value),
+        ("Backlog", TaskStatus.BACKLOG.value),
+        ("In Progress", TaskStatus.IN_PROGRESS.value),
+        ("Review", TaskStatus.REVIEW.value),
+        ("Done", TaskStatus.DONE.value),
     ]
 
     def __init__(
         self,
-        value: TicketStatus = TicketStatus.BACKLOG,
+        value: TaskStatus = TaskStatus.BACKLOG,
         *,
         widget_id: str = "status-select",
         **kwargs,
     ) -> None:
         # Ensure value is str for Select
-        initial_value = value.value if isinstance(value, TicketStatus) else value
+        initial_value = value.value if isinstance(value, TaskStatus) else value
         super().__init__(
             options=self.OPTIONS,
             value=initial_value,
