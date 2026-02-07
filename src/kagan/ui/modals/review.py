@@ -244,6 +244,8 @@ class ReviewModal(
 
     async def _hydrate_content(self) -> None:
         """Load commits, diffs and history without blocking initial paint."""
+        if not self.is_mounted:
+            return
         from kagan.debug_log import log
 
         log.info(f"[ReviewModal] Hydrating content for task {self._task_model.id[:8]}")
