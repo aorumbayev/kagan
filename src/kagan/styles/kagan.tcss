@@ -70,7 +70,7 @@ $card-margin: 0 0 1 0;
 /* Common border styles */
 $border-standard: solid $border;
 $border-focused: solid $primary;
-$border-modal: thick $primary;
+$border-modal: round $primary;
 
 /* =============================================================================
    GLOBAL STYLES
@@ -93,7 +93,8 @@ KaganHeader {
     background: $panel;
     color: $text;
     layout: horizontal;
-    padding: 1;
+    padding: 0 1;
+    align: left middle;
 }
 
 KaganHeader .header-logo {
@@ -139,6 +140,13 @@ KaganHeader .header-sessions {
     color: $text-muted;
 }
 
+KaganHeader .header-agent {
+    width: auto;
+    color: $secondary;
+    text-style: bold;
+    padding-right: 2;
+}
+
 KaganHeader .header-stats {
     width: auto;
     color: $text;
@@ -172,7 +180,7 @@ ModalScreen Footer {
 .board-container {
     width: 100%;
     height: 1fr;
-    padding: 1;
+    padding: 0;
     background: $background;
 }
 
@@ -181,27 +189,33 @@ ModalScreen Footer {
     height: 100%;
 }
 
-/* Column styles */
+/* Column styles - flush layout with border separators */
 KanbanColumn {
     width: 1fr;
     height: 100%;
-    border: solid $border;
+    border-right: solid $border;
     padding: 0;
-    margin: 0 1;
+    margin: 0;
     background: $surface;
+}
+
+/* No right border on last column */
+KanbanColumn:last-child {
+    border-right: none;
 }
 
 KanbanColumn .column-header {
     width: 100%;
     height: 3;
-    padding: 1;
-    background: $panel;
-    text-align: center;
+    padding: 0 1;
+    align: center middle;
 }
 
 KanbanColumn .column-header-text {
     text-style: bold;
     color: $text;
+    width: auto;
+    text-align: center;
 }
 
 KanbanColumn .column-count {
@@ -211,7 +225,8 @@ KanbanColumn .column-count {
 KanbanColumn .column-content {
     width: 100%;
     height: 1fr;
-    padding: 1;
+    padding: 0;
+    border-top: solid $border;
 }
 
 KanbanColumn .column-empty {
@@ -231,20 +246,19 @@ KanbanColumn .empty-message {
    TASK CARDS
    ============================================================================= */
 
-/* Card styles */
+/* Card styles - bottom-border only, flush within column */
 TaskCard {
     width: 100%;
-    height: auto;
-    max-height: 10;
-    margin: 0 0 1 0;
-    padding: 0 1;
-    border: solid $border;
-    background: $background;
+    height: 4;
+    margin: 0;
+    padding: 0;
+    border-bottom: solid $border;
+    background: $surface;
     color: $text;
 }
 
 TaskCard:focus {
-    border: solid $primary;
+    border-bottom: solid $primary;
     background: $panel;
 }
 
@@ -253,131 +267,122 @@ TaskCard:hover {
 }
 
 /* ============================================
-   SESSION & AGENT STATE INDICATORS
-   ============================================ */
-
-/* tmux session active - steady GREEN border (entire border) */
-TaskCard.session-active {
-    border: solid $success;
-}
-
-TaskCard.session-active:focus {
-    border: solid $success;
-}
-
-TaskCard.session-active:hover {
-    border: solid $success;
-    background: $panel;
-}
-
-/* Agent actively working - entire card pulses */
-TaskCard.agent-active {
-    border: solid $secondary;
-}
-
-TaskCard.agent-active:focus {
-    border: solid $secondary;
-}
-
-/* Combined: session + agent active - agent style takes precedence */
-TaskCard.session-active.agent-active {
-    border: solid $secondary;
-}
-
-/* ============================================
-   REVIEW STATE INDICATORS
-   ============================================ */
-
-/* Review passed - green border */
-TaskCard.-review-passed {
-    border: solid $success;
-}
-
-TaskCard.-review-passed:focus {
-    border: solid $success;
-}
-
-/* Review failed - red border */
-TaskCard.-review-failed {
-    border: solid $error;
-}
-
-TaskCard.-review-failed:focus {
-    border: solid $error;
-}
-
-/* Review pending - yellow/warning border */
-TaskCard.-review-pending {
-    border: solid $warning;
-}
-
-TaskCard.-review-pending:focus {
-    border: solid $warning;
-}
-
-/* Merge failed - orange border (review passed but merge failed) */
-TaskCard.-review-merge-failed {
-    border: solid $warning;
-}
-
-TaskCard.-review-merge-failed:focus {
-    border: solid $warning;
-}
-
-/* ============================================
    CARD CONTENT STYLES
    ============================================ */
 
-TaskCard .card-title {
+TaskCard .card-row {
     width: 100%;
     height: 1;
-    text-style: bold;
-    color: $text;
-    padding: 0;
+    padding: 0 1;
 }
 
-/* Second line of title (for long titles) */
-TaskCard .card-title-continued {
-    width: 100%;
+TaskCard .card-rail {
+    width: 1;
+    text-style: bold;
+    color: $border;
+}
+
+TaskCard .card-rail.rail-normal {
+    color: $border;
+}
+
+TaskCard .card-rail.rail-running {
+    color: $secondary;
+}
+
+TaskCard .card-rail.rail-warning {
+    color: $warning;
+}
+
+TaskCard .card-rail.rail-error {
+    color: $error;
+}
+
+TaskCard .card-rail.rail-success {
+    color: $success;
+}
+
+TaskCard:focus .card-rail.rail-normal {
+    color: $primary;
+}
+
+TaskCard .card-title {
+    width: 1fr;
     height: 1;
     text-style: bold;
     color: $text;
 }
 
 TaskCard .card-desc {
-    width: 100%;
+    width: 1fr;
     height: 1;
     color: $text-muted;
 }
 
-TaskCard .card-desc.high {
-    color: $priority-high;
-}
-
-TaskCard .card-desc.medium {
-    color: $priority-medium;
-}
-
-TaskCard .card-desc.low {
-    color: $priority-low-text;
-}
-
-TaskCard .card-error {
-    width: 100%;
-    height: 1;
-    color: $error;
-}
-
-TaskCard .card-blocked {
-    width: 100%;
-    height: 1;
-    color: $warning;
-}
-
-TaskCard .card-meta {
-    width: 100%;
-    height: 1;
+TaskCard .card-desc-empty {
     color: $text-disabled;
+    text-style: italic;
+}
+
+TaskCard .card-badge-row {
+    width: 100%;
+    height: 1;
+}
+
+/* Right-aligned card ID (muted) */
+TaskCard .card-id {
+    width: auto;
+    height: 1;
+    color: $text-muted;
+}
+
+/* Branch badge - shows git branch name */
+TaskCard .card-branch {
+    width: auto;
+    height: 1;
+    color: $text-muted;
+    text-style: italic;
+    margin-left: 1;
+}
+
+/* Spacer pushes priority badge right */
+TaskCard .card-spacer {
+    width: 1fr;
+    height: 1;
+}
+
+TaskCard .card-badge {
+    height: 1;
+    padding: 0 1;
+    margin-right: 1;
+    text-style: bold;
+    background: $surface;
+    color: $text;
+}
+
+TaskCard .card-badge-type {
+    background: $secondary;
+    color: $background;
+}
+
+TaskCard .card-badge-backend {
+    background: $panel;
+    color: $text;
+}
+
+TaskCard .card-badge-priority.priority-high {
+    background: $priority-high;
+    color: $priority-high-text;
+}
+
+TaskCard .card-badge-priority.priority-medium {
+    background: $priority-medium;
+    color: $priority-medium-text;
+}
+
+TaskCard .card-badge-priority.priority-low {
+    background: $priority-low;
+    color: $priority-low-text;
 }
 
 TaskCard .card-review {
@@ -423,11 +428,18 @@ TaskCard .card-readiness.readiness-blocked {
     color: $error;
 }
 
-TaskCard .card-iteration {
-    width: 100%;
+/* Card status indicators */
+TaskCard .card-indicator {
+    width: 2;
     height: 1;
-    color: $secondary;
+    text-style: bold;
 }
+
+TaskCard .indicator-running { color: $status-running; }
+TaskCard .indicator-idle    { color: $status-idle; }
+TaskCard .indicator-reviewing { color: $accent; }
+TaskCard .indicator-passed  { color: $status-success; }
+TaskCard .indicator-failed  { color: $status-error; }
 
 /* =============================================================================
    MODALS
@@ -442,7 +454,7 @@ TaskDetailsModal > Vertical,
 TaskDetailsModal #task-details-container {
     width: 80;
     max-height: 80%;
-    border: thick $primary;
+    border: round $primary;
     background: $surface;
     padding: 1 2;
     overflow-y: auto;
@@ -715,7 +727,8 @@ TaskDetailsModal .form-label {
     width: auto;
     height: 1;
     padding-bottom: 0;
-    color: $text-muted;
+    color: $text;
+    text-style: bold;
 }
 
 TaskDetailsModal Input {
@@ -771,6 +784,33 @@ TaskDetailsModal .field-third:last-child {
     margin-right: 0;
 }
 
+/* Base branch section for view and edit modes */
+TaskDetailsModal .base-branch-section {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+
+TaskDetailsModal .base-branch-section.view-only {
+    height: auto;
+}
+
+TaskDetailsModal .base-branch-section .form-label {
+    color: $text-muted;
+}
+
+/* BaseBranchInput styling */
+BaseBranchInput {
+    width: 100%;
+    background: $background;
+    color: $text;
+    border: solid $border;
+}
+
+BaseBranchInput:focus {
+    border: solid $primary;
+}
+
 /* Full-screen description editor modal */
 DescriptionEditorModal {
     align: center middle;
@@ -779,7 +819,7 @@ DescriptionEditorModal {
 DescriptionEditorModal #description-editor-container {
     width: 90%;
     height: 90%;
-    border: thick $primary;
+    border: round $primary;
     background: $surface;
     padding: 0;
 }
@@ -894,9 +934,9 @@ ConfirmModal {
 ConfirmModal > Container {
     width: 50;
     height: auto;
-    border: thick $error;
+    border: round $error;
     background: $surface;
-    padding: 2;
+    padding: 2 3;
 }
 
 ConfirmModal .confirm-title {
@@ -918,6 +958,67 @@ ConfirmModal .confirm-hint {
 }
 
 /* =============================================================================
+   BASE BRANCH MODAL
+   ============================================================================= */
+
+BaseBranchModal {
+    align: center middle;
+}
+
+#branch-modal-container {
+    width: 60;
+    height: auto;
+    border: round $primary;
+    background: $surface;
+    padding: 2 3;
+}
+
+#branch-modal-title {
+    text-style: bold;
+    text-align: center;
+    width: 100%;
+    padding-bottom: 1;
+    color: $secondary;
+}
+
+#branch-modal-description {
+    text-align: center;
+    color: $text-muted;
+    padding-bottom: 1;
+}
+
+BaseBranchModal #branch-select {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+BaseBranchModal #branch-custom-input {
+    width: 100%;
+    margin-bottom: 1;
+    background: $background;
+    border: solid $border;
+}
+
+BaseBranchModal #branch-custom-input:focus {
+    border: solid $primary;
+}
+
+BaseBranchModal #branch-custom-input.hidden {
+    display: none;
+}
+
+#branch-modal-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    padding-top: 1;
+}
+
+#branch-modal-buttons Button {
+    margin: 0 1;
+}
+
+/* =============================================================================
    TMUX GATEWAY MODAL
    ============================================================================= */
 
@@ -928,9 +1029,9 @@ TmuxGatewayModal {
 #tmux-gateway-container {
     width: 70;
     height: auto;
-    border: thick $primary;
+    border: round $primary;
     background: $surface;
-    padding: 1 2;
+    padding: 2 3;
 }
 
 TmuxGatewayModal .modal-title {
@@ -1007,7 +1108,7 @@ DiffModal {
     width: 90%;
     height: 80%;
     background: $surface;
-    border: thick $primary;
+    border: round $primary;
     padding: 1 2;
 }
 
@@ -1028,7 +1129,7 @@ AgentOutputModal {
     width: 95%;
     height: 90%;
     background: $surface;
-    border: thick $secondary;
+    border: round $secondary;
     padding: 1 2;
     overflow: hidden;
 }
@@ -1102,6 +1203,15 @@ AgentOutputModal TabPane StreamingOutput {
     max-height: 100%;
     background: $background;
     border: round $border;
+}
+
+AgentOutputModal ChatPanel .chat-input-area {
+    min-height: 2;
+    max-height: 5;
+}
+
+AgentOutputModal ChatPanel .chat-input-area:focus {
+    border: round $secondary;
 }
 
 AgentOutputModal > Vertical > Rule:last-of-type {
@@ -1252,14 +1362,6 @@ PlannerScreen {
     width: 100%;
 }
 
-#planner-empty-commands {
-    width: 100%;
-    padding: 0 1;
-    color: $text-muted;
-    text-style: italic;
-    margin-top: 1;
-    text-align: left;
-}
 
 /* EmptyState widget */
 .empty-state {
@@ -1347,187 +1449,6 @@ WelcomeScreen {
     background: $background;
 }
 
-/* Troubleshooting Screen */
-#troubleshoot-container {
-    width: 100%;
-    height: 1fr;
-    align: center middle;
-}
-
-#troubleshoot-card {
-    width: 80;
-    height: auto;
-    border: thick $error;
-    background: $surface;
-    padding: 2 4;
-}
-
-#troubleshoot-logo {
-    text-align: center;
-    color: $error;
-    width: 100%;
-    padding-bottom: 1;
-}
-
-#troubleshoot-title {
-    text-align: center;
-    text-style: bold;
-    color: $error;
-    width: 100%;
-    padding-bottom: 1;
-}
-
-#troubleshoot-count {
-    text-align: center;
-    color: $text-muted;
-    width: 100%;
-    padding-bottom: 1;
-}
-
-#troubleshoot-issues {
-    max-height: 50%;
-    width: 100%;
-}
-
-.issue-card {
-    border: solid $border;
-    background: $background;
-    margin-bottom: 1;
-    padding: 1;
-    height: auto;
-}
-
-.issue-card-title {
-    text-style: bold;
-    color: $warning;
-    width: 100%;
-    height: auto;
-}
-
-.issue-card-message {
-    color: $foreground;
-    width: 100%;
-    height: auto;
-    padding-top: 1;
-}
-
-.issue-card-hint {
-    color: $foreground 70%;
-    text-style: italic;
-    width: 100%;
-    height: auto;
-    padding-top: 1;
-}
-
-.issue-card-url {
-    color: $primary;
-    width: 100%;
-    height: auto;
-}
-
-#troubleshoot-resolve-hint {
-    text-align: center;
-    color: $text;
-    width: 100%;
-    padding-top: 1;
-}
-
-#troubleshoot-exit-hint {
-    text-align: center;
-    color: $text-muted;
-    width: 100%;
-    padding-top: 1;
-}
-
-/* =============================================================================
-   AGENT SELECT MODAL
-   ============================================================================= */
-
-AgentSelectModal {
-    align: center middle;
-}
-
-#agent-select-modal {
-    width: 60;
-    height: auto;
-    border: thick $primary;
-    background: $surface;
-    padding: 2;
-}
-
-#agent-select-modal Select {
-    width: 100%;
-    margin: 1 0;
-}
-
-/* =============================================================================
-   INSTALL MODAL
-   ============================================================================= */
-
-InstallModal {
-    align: center middle;
-}
-
-#install-modal-container {
-    width: 70;
-    height: auto;
-    border: thick $primary;
-    background: $surface;
-    padding: 2;
-}
-
-.install-modal-title {
-    text-style: bold;
-    text-align: center;
-    width: 100%;
-    color: $secondary;
-    padding-bottom: 1;
-}
-
-.install-modal-subtitle {
-    text-align: center;
-    width: 100%;
-    color: $text;
-    padding-bottom: 1;
-}
-
-.install-modal-command {
-    text-align: center;
-    width: 100%;
-    color: $primary;
-    background: $background;
-    padding: 1;
-    margin-bottom: 1;
-}
-
-#install-spinner {
-    width: 100%;
-    height: 3;
-    padding: 1 0;
-}
-
-.install-modal-status {
-    text-align: center;
-    width: 100%;
-    color: $text;
-    padding: 1 0;
-}
-
-.install-modal-status.success {
-    color: $success;
-}
-
-.install-modal-status.error {
-    color: $error;
-}
-
-.install-modal-hint {
-    text-align: center;
-    width: 100%;
-    color: $text-muted;
-    padding-top: 1;
-}
-
 #welcome-container {
     width: 95%;
     max-width: 70;
@@ -1573,9 +1494,11 @@ InstallModal {
 
 .toggle-row {
     width: 100%;
+    min-height: 3;
     height: auto;
     padding: 0 1;
     margin-bottom: 1;
+    align: left middle;
 }
 
 .toggle-text {
@@ -1687,17 +1610,29 @@ ReviewModal {
     width: 95%;
     height: 90%;
     background: $surface;
-    border: thick $success;
+    border: round $primary;
     padding: 1 2;
     overflow: hidden;
 }
 
 ReviewModal .modal-title {
-    text-align: center;
     text-style: bold;
-    width: 100%;
-    padding-bottom: 1;
     color: $secondary;
+}
+
+ReviewModal #review-title {
+    width: 100%;
+    text-align: left;
+    padding-bottom: 0;
+}
+
+ReviewModal .branch-info {
+    width: 100%;
+    text-align: left;
+    color: $text-muted;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-bottom: 1;
 }
 
 ReviewModal .section-title {
@@ -1707,37 +1642,97 @@ ReviewModal .section-title {
     padding-bottom: 0;
 }
 
-/* Commits section - compact */
-#commits-section {
-    height: auto;
-    max-height: 6;
+#review-meta-row {
+    display: none;
 }
 
-#commits-log {
+#review-tabs {
+    height: 1fr;
+}
+
+ReviewModal TabbedContent {
+    height: 1fr;
+}
+
+ReviewModal TabbedContent > ContentSwitcher {
+    height: 1fr;
+}
+
+ReviewModal TabPane {
+    height: 1fr;
+}
+
+#review-summary-scroll {
+    height: 1fr;
+    padding-right: 1;
+}
+
+#review-stats {
     height: auto;
-    max-height: 4;
+    margin: 0 0 1 0;
+    align: left middle;
+}
+
+#review-stats .stat-card {
+    height: 3;
+    min-width: 18;
+    padding: 0 1;
+    text-align: center;
     background: $background;
     border: round $border;
-    padding: 0 1;
+    margin-right: 1;
 }
 
-/* Diff section - compact */
-#diff-section {
+#commits-table {
     height: auto;
+    max-height: 8;
+    background: $surface;
+    border: none;
 }
 
 #diff-stats {
-    padding: 1;
+    padding: 0 1;
     background: $background;
     border: round $border;
     height: auto;
-    min-height: 4;
+    min-height: 2;
+    max-height: 6;
+}
+
+#review-description {
+    padding: 0 1;
+    background: $background;
+    border: round $border;
+    height: auto;
+}
+
+#diff-pane {
+    height: 1fr;
+    width: 100%;
+}
+
+#diff-files {
+    width: 32;
+    height: 1fr;
+    background: $surface;
+    border: round $border;
+    margin-right: 1;
+}
+
+#diff-files.hidden {
+    display: none;
+}
+
+#diff-log {
+    height: 1fr;
+    background: $background;
+    border: none;
 }
 
 /* AI Review section - expandable, takes remaining space */
 #ai-review-section {
     height: 1fr;
-    max-height: 100%;
+    min-height: 10;
 }
 
 #ai-review-header {
@@ -1750,11 +1745,15 @@ ReviewModal .section-title {
     width: 1fr;
 }
 
+#ai-review-header Button {
+    margin-left: 1;
+}
+
 #ai-review-controls {
     width: 100%;
     height: auto;
     align: left middle;
-    padding: 1 0;
+    padding: 0 0 1 0;
 }
 
 #ai-review-controls Button {
@@ -1783,16 +1782,27 @@ ReviewModal .section-title {
     color: $success;
 }
 
+/* ChatPanel inside ReviewModal - must fill available space */
+#ai-review-chat {
+    height: 1fr;
+    min-height: 8;
+}
+
+#ai-review-chat.hidden {
+    display: none;
+}
+
+/* StreamingOutput inside review chat - explicit height */
 #ai-review-output {
     height: 1fr;
+    min-height: 6;
     background: $background;
     border: round $border;
 }
 
-#ai-review-output.hidden {
+/* Hide input area in review modal - follow-up not primary use case */
+#ai-review-chat .chat-input {
     display: none;
-    height: 0;
-    min-height: 0;
 }
 
 ReviewModal .hint-label {
@@ -1804,7 +1814,8 @@ ReviewModal .hint-label {
 ReviewModal .button-row {
     dock: bottom;
     align: center middle;
-    padding-top: 1;
+    border-top: solid $border;
+    padding: 1 0 0 0;
     height: auto;
     width: 100%;
 }
@@ -1825,8 +1836,8 @@ RejectionInputModal {
     width: 70;
     height: auto;
     background: $surface;
-    border: thick $error;
-    padding: 1 2;
+    border: round $error;
+    padding: 2 3;
 }
 
 RejectionInputModal .modal-title {
@@ -1863,6 +1874,7 @@ RejectionInputModal .hint-label {
 }
 
 RejectionInputModal .button-row {
+    height: auto;
     align: center middle;
     padding-top: 1;
 }
@@ -1943,6 +1955,47 @@ SearchBar Input:focus {
 }
 
 /* =============================================================================
+   GLOBAL AGENT PICKER MODAL
+   ============================================================================= */
+
+GlobalAgentPickerModal {
+    align: center middle;
+}
+
+#agent-picker-container {
+    width: 60;
+    height: auto;
+    max-height: 80%;
+    background: $surface;
+    border: round $primary;
+    padding: 1 2;
+}
+
+#agent-picker-description {
+    width: 100%;
+    color: $text-muted;
+    padding-bottom: 1;
+}
+
+#agent-picker-body {
+    width: 100%;
+    height: auto;
+}
+
+#agent-picker-options {
+    width: 100%;
+    height: auto;
+    max-height: 10;
+    border: solid $border;
+    background: $background;
+}
+
+#agent-picker-options > .option-list--option-highlighted {
+    background: $primary 30%;
+    color: $text;
+}
+
+/* =============================================================================
    SETTINGS MODAL
    ============================================================================= */
 
@@ -1955,8 +2008,8 @@ SettingsModal {
     height: auto;
     max-height: 90%;
     background: $surface;
-    border: thick $primary;
-    padding: 1 2;
+    border: round $primary;
+    padding: 2 3;
     overflow-y: auto;
 }
 
@@ -2063,6 +2116,7 @@ TaskEditorScreen {
     width: 100%;
     height: 1fr;
     padding: 1;
+    overflow-y: auto;
 }
 
 .task-input {
@@ -2078,8 +2132,9 @@ TaskEditorScreen {
 
 .task-textarea {
     width: 100%;
-    height: 1fr;
-    min-height: 8;
+    height: auto;
+    min-height: 4;
+    max-height: 10;
     margin-bottom: 1;
     background: $background;
     border: solid $border;
@@ -2094,6 +2149,13 @@ TaskEditorScreen {
     margin-bottom: 1;
 }
 
+.task-label {
+    width: 100%;
+    height: 1;
+    color: $text;
+    text-style: bold;
+}
+
 #finish-btn {
     dock: bottom;
     width: 100%;
@@ -2104,12 +2166,88 @@ TaskEditorScreen {
    STREAMING OUTPUT & AGENT CONTENT WIDGETS
    ============================================================================= */
 
-/* StreamingOutput container (now a VerticalScroll) */
-StreamingOutput {
+/* ChatPanel widget */
+ChatPanel {
+    width: 100%;
+    height: 1fr;
+}
+
+ChatPanel .chat-output {
+    height: 1fr;
+}
+
+ChatPanel .chat-input {
+    height: auto;
+    padding-top: 1;
+    border-top: solid $border;
+}
+
+ChatPanel .chat-input-area {
+    height: auto;
+    min-height: 3;
+    max-height: 8;
+    border: round $border;
+    background: $background;
+}
+
+ChatPanel .chat-input-area:focus {
+    border: round $primary;
+}
+
+/* Queued messages container */
+ChatPanel .queued-messages-container {
     width: 100%;
     height: auto;
+    max-height: 8;
+    margin-bottom: 1;
+    border: round $border;
+    background: $surface;
+    padding: 0 1;
+}
+
+ChatPanel .queued-messages-header {
+    width: 100%;
+    height: 1;
+    color: $text-muted;
+    text-style: italic;
+    padding: 0;
+}
+
+ChatPanel .queued-message-row {
+    width: 100%;
+    height: auto;
+    align: left middle;
+    padding: 0;
+}
+
+ChatPanel .queued-message-text {
+    width: 1fr;
+    height: auto;
+    color: $text;
+    padding: 0;
+}
+
+ChatPanel .queued-message-remove {
+    width: 3;
+    min-width: 3;
+    height: 1;
+    background: transparent;
+    color: $error;
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+ChatPanel .queued-message-remove:hover {
+    background: $error;
+    color: $background;
+}
+
+/* StreamingOutput container (VerticalScroll) */
+StreamingOutput {
+    width: 100%;
+    height: 1fr;
     min-height: 5;
-    max-height: 1fr;
     padding: 1;
     scrollbar-gutter: stable;
 }
@@ -2181,11 +2319,6 @@ ToolCall:hover {
 }
 
 .plan-entry:hover {
-    tint: $primary 10%;
-}
-
-.issue-card-hint:hover,
-.issue-card-url:hover {
     tint: $primary 10%;
 }
 
@@ -2342,7 +2475,7 @@ HelpModal {
     max-width: 100;
     height: 85%;
     background: $surface;
-    border: thick $primary;
+    border: round $primary;
     padding: 1 2;
 }
 
@@ -2430,9 +2563,9 @@ DuplicateTaskModal {
     width: 60;
     height: auto;
     max-height: 80%;
-    border: thick $primary;
+    border: round $primary;
     background: $surface;
-    padding: 1 2;
+    padding: 2 3;
 }
 
 DuplicateTaskModal .modal-title {
@@ -2465,7 +2598,8 @@ DuplicateTaskModal .form-field {
 DuplicateTaskModal .form-label {
     width: auto;
     height: 1;
-    color: $text-muted;
+    color: $text;
+    text-style: bold;
 }
 
 DuplicateTaskModal Input {
@@ -2538,6 +2672,49 @@ DuplicateTaskModal Button {
 }
 
 .slash-complete #slash-options > .option-list--option-hover {
+    background: $panel;
+}
+
+/* =============================================================================
+   TASK MENTION AUTOCOMPLETE DROPDOWN
+   ============================================================================= */
+
+/* Task mention autocomplete dropdown overlay - full width, above status bar */
+.task-mention-complete {
+    dock: bottom;
+    width: 100%;
+    height: auto;
+    max-height: 8;
+    display: none;
+    background: $surface;
+    border-top: solid $primary;
+    padding: 0;
+    margin: 0;
+}
+
+.task-mention-complete.visible {
+    display: block;
+}
+
+.task-mention-complete #mention-options {
+    width: 100%;
+    height: auto;
+    max-height: 7;
+    background: $surface;
+    scrollbar-gutter: stable;
+}
+
+.task-mention-complete #mention-options > .option-list--option {
+    padding: 0 1;
+    color: $text;
+}
+
+.task-mention-complete #mention-options > .option-list--option-highlighted {
+    background: $primary;
+    color: $background;
+}
+
+.task-mention-complete #mention-options > .option-list--option-hover {
     background: $panel;
 }
 
@@ -2651,7 +2828,7 @@ DebugLogModal {
     width: 90%;
     height: 90%;
     background: $surface;
-    border: thick $primary;
+    border: round $primary;
     padding: 1;
 }
 
@@ -2663,7 +2840,7 @@ DebugLogModal {
 }
 
 /* =============================================================================
-   KEYBINDING HINT WIDGET
+   KEYBINDING HINT WIDGET (single-line — Welcome, RepoPicker, etc.)
    ============================================================================= */
 
 KeybindingHint {
@@ -2680,6 +2857,59 @@ KeybindingHint:empty {
 }
 
 /* =============================================================================
+   KANBAN HINT BAR (two-row — Kanban board)
+   ============================================================================= */
+
+KanbanHintBar {
+    background: $surface;
+    color: $text-muted;
+}
+
+/* Row 1: Navigation — movement arrows */
+KanbanHintBar .hint-bar-nav {
+    background: $surface;
+}
+
+KanbanHintBar .hint-nav-left {
+    text-align: left;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+KanbanHintBar .hint-nav-center {
+    text-align: center;
+    padding: 0 2;
+    color: $text-disabled;
+}
+
+KanbanHintBar .hint-nav-right {
+    text-align: right;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* Row 2: Actions — context-sensitive + global */
+KanbanHintBar .hint-bar-actions {
+    background: $surface;
+}
+
+KanbanHintBar .hint-actions-left {
+    text-align: left;
+}
+
+KanbanHintBar .hint-actions {
+    text-align: center;
+    padding: 0 2;
+    color: $text-muted;
+}
+
+KanbanHintBar .hint-global {
+    text-align: right;
+    padding: 0 1;
+    color: $text-disabled;
+}
+
+/* =============================================================================
    NEW PROJECT MODAL
    ============================================================================= */
 
@@ -2690,9 +2920,9 @@ NewProjectModal {
 NewProjectModal #dialog {
     width: 60;
     height: auto;
-    border: thick $primary;
+    border: round $primary;
     background: $surface;
-    padding: 1 2;
+    padding: 2 3;
 }
 
 NewProjectModal .dialog-title {
@@ -2703,12 +2933,14 @@ NewProjectModal .dialog-title {
 }
 
 NewProjectModal .field {
-    margin: 1 0;
+    height: auto;
+    margin: 1 0 0 0;
 }
 
 NewProjectModal .field-label {
     margin-bottom: 0;
-    color: $text-muted;
+    color: $text;
+    text-style: bold;
 }
 
 NewProjectModal .hint {
@@ -2717,12 +2949,14 @@ NewProjectModal .hint {
 }
 
 NewProjectModal #dialog-actions {
+    height: auto;
     margin-top: 2;
-    align: right middle;
+    align: center middle;
 }
 
 NewProjectModal #dialog-actions Button {
-    margin-left: 1;
+    margin: 0 1;
+    min-width: 16;
 }
 
 /* =============================================================================
@@ -2736,9 +2970,9 @@ FolderPickerModal {
 FolderPickerModal #dialog {
     width: 60;
     height: auto;
-    border: thick $primary;
+    border: round $primary;
     background: $surface;
-    padding: 1 2;
+    padding: 2 3;
 }
 
 FolderPickerModal .dialog-title {
@@ -2749,12 +2983,14 @@ FolderPickerModal .dialog-title {
 }
 
 FolderPickerModal .field {
-    margin: 0 0 1 0;
+    height: auto;
+    margin: 1 0 0 0;
 }
 
 FolderPickerModal .field-label {
     margin-bottom: 0;
-    color: $text-muted;
+    color: $text;
+    text-style: bold;
 }
 
 FolderPickerModal .hint {
@@ -2763,20 +2999,22 @@ FolderPickerModal .hint {
 }
 
 FolderPickerModal #dialog-actions {
-    margin-top: 1;
-    align: right middle;
+    height: auto;
+    margin-top: 2;
+    align: center middle;
 }
 
 FolderPickerModal #folder-tree {
     height: 12;
     max-height: 14;
-    border: solid $surface-lighten-2;
+    border: round $border;
     background: $background;
     padding: 0 1;
 }
 
 FolderPickerModal #dialog-actions Button {
-    margin-left: 1;
+    margin: 0 1;
+    min-width: 16;
 }
 
 /* === Start Workspace Modal === */
@@ -2788,8 +3026,8 @@ StartWorkspaceModal #dialog {
     width: 70;
     height: auto;
     max-height: 80%;
-    border: thick $primary;
-    padding: 1 2;
+    border: round $primary;
+    padding: 2 3;
 }
 
 StartWorkspaceModal .dialog-title {
@@ -2838,12 +3076,14 @@ StartWorkspaceModal #executor-section {
 }
 
 StartWorkspaceModal #actions {
+    height: auto;
     margin-top: 2;
-    align: right middle;
+    align: center middle;
 }
 
 StartWorkspaceModal #actions Button {
-    margin-left: 1;
+    margin: 0 1;
+    min-width: 16;
 }
 
 StartWorkspaceModal .error {
@@ -2898,8 +3138,8 @@ MergeDialog {
     height: auto;
     max-height: 80%;
     background: $surface;
-    border: solid $primary;
-    padding: 1 2;
+    border: round $primary;
+    padding: 2 3;
 }
 
 MergeDialog .merge-row {
@@ -2921,8 +3161,9 @@ MergeDialog .diff-stats {
 }
 
 #button-row {
+    height: auto;
     margin-top: 1;
-    align: right middle;
+    align: center middle;
 }
 
 /* === Diff Modal === */
@@ -2934,7 +3175,7 @@ DiffModal {
     width: 90%;
     height: 90%;
     background: $surface;
-    border: solid $primary;
+    border: round $primary;
 }
 
 DiffModal .diff-content {
@@ -2961,35 +3202,44 @@ OnboardingScreen {
     height: auto;
     max-height: 90%;
     background: $surface;
-    border: solid $primary;
-    padding: 1 2;
+    border: round $primary;
+    padding: 2 3;
     overflow-y: auto;
 }
 
+/* --- Logo zone --- */
 #onboarding-logo {
     width: 100%;
     text-align: center;
     color: $secondary;
-    padding: 0 0 1 0;
+    padding: 0;
 }
 
 #onboarding-subtitle {
     text-align: center;
     color: $text-muted;
-    margin-bottom: 1;
+    text-style: italic;
     width: 100%;
+    margin-bottom: 1;
 }
 
+#onboarding-divider {
+    color: $border;
+    margin: 0 2 1 2;
+}
+
+/* --- Form zone --- */
 #onboarding-form {
     width: 100%;
     height: auto;
-    padding: 0;
+    padding: 0 1;
 }
 
 #onboarding-form .form-label {
     color: $text;
     text-style: bold;
-    margin-top: 0;
+    margin-top: 1;
+    margin-bottom: 0;
 }
 
 #onboarding-form .form-hint {
@@ -2998,37 +3248,41 @@ OnboardingScreen {
 
 #onboarding-form Select {
     width: 100%;
-    margin-bottom: 0;
+    margin-bottom: 1;
 }
 
-#auto-mode-row {
+/* --- Toggle row --- */
+#auto-review-row {
     width: 100%;
     height: auto;
-    margin-top: 0;
-    padding: 0 1;
+    margin-top: 1;
+    padding: 1 1;
     background: $surface;
-    border: solid $surface-lighten-2;
+    border: round $border;
     align: left middle;
 }
 
-#auto-mode-info {
+#auto-review-info {
     width: 1fr;
+    height: auto;
 }
 
-#auto-mode-row .form-label {
+#auto-review-row .form-label {
     margin-top: 0;
+    margin-bottom: 0;
 }
 
+/* --- CTA zone --- */
 #onboarding-actions {
     width: 100%;
     height: auto;
     align: center middle;
-    padding-top: 0;
-    margin-top: 0;
+    margin-top: 2;
 }
 
 #onboarding-actions Button {
     margin: 0 1;
+    min-width: 24;
 }
 
 /* =============================================================================
@@ -3250,4 +3504,292 @@ RepoPickerScreen {
     width: auto;
     color: $text-muted;
     text-align: right;
+}
+
+/* =============================================================================
+   MCP INSTALL MODAL
+   ============================================================================= */
+
+McpInstallModal {
+    align: center middle;
+}
+
+#mcp-install-container {
+    width: 65;
+    height: auto;
+    border: round $primary;
+    background: $surface;
+    padding: 2 3;
+}
+
+#mcp-install-title {
+    text-style: bold;
+    text-align: center;
+    width: 100%;
+    color: $secondary;
+    padding-bottom: 1;
+}
+
+#mcp-install-description {
+    text-align: center;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+#mcp-install-detail {
+    text-align: center;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+#mcp-install-path {
+    text-align: center;
+    width: 100%;
+    color: $text-muted;
+    padding-bottom: 1;
+}
+
+#mcp-install-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    padding-top: 1;
+    padding-bottom: 1;
+}
+
+#mcp-install-buttons Button {
+    margin: 0 1;
+}
+
+#mcp-install-spinner {
+    width: 100%;
+    height: 1;
+}
+
+#mcp-install-status {
+    text-align: center;
+    width: 100%;
+    padding-top: 1;
+}
+
+/* ===========================================================================
+   AGENT INSTALL MODAL
+   =========================================================================== */
+
+AgentInstallModal {
+    align: center middle;
+}
+
+#agent-install-container {
+    width: 60;
+    height: auto;
+    border: round $primary;
+    background: $surface;
+    padding: 2 3;
+}
+
+#agent-install-title {
+    text-style: bold;
+    text-align: center;
+    width: 100%;
+    color: $secondary;
+    padding-bottom: 1;
+}
+
+#agent-install-description {
+    text-align: center;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+#agent-install-command {
+    text-align: center;
+    width: 100%;
+    color: $text-muted;
+    padding-bottom: 1;
+}
+
+#agent-install-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    padding-top: 1;
+}
+
+#agent-install-buttons Button {
+    margin: 0 1;
+}
+
+#agent-install-spinner {
+    width: 100%;
+    height: 1;
+}
+
+#agent-install-status {
+    text-align: center;
+    width: 100%;
+    padding-top: 1;
+}
+
+/* ===========================================================================
+   AGENT CHOICE MODAL
+   =========================================================================== */
+
+AgentChoiceModal {
+    align: center middle;
+}
+
+#agent-choice-container {
+    width: 65;
+    height: auto;
+    max-height: 80%;
+    border: round $primary;
+    background: $surface;
+    padding: 2 3;
+}
+
+#agent-choice-title {
+    text-style: bold;
+    text-align: center;
+    width: 100%;
+    color: $warning;
+    padding-bottom: 1;
+}
+
+#agent-choice-description {
+    text-align: center;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+#agent-choice-options {
+    width: 100%;
+    height: auto;
+    align: center middle;
+}
+
+#fallback-label {
+    text-align: center;
+    width: 100%;
+    padding: 1 0;
+    color: $text-muted;
+}
+
+#agent-list {
+    width: 100%;
+    height: auto;
+    max-height: 10;
+    margin-bottom: 1;
+}
+
+#agent-choice-options Button {
+    margin: 0 1;
+}
+
+/* =============================================================================
+   INSTANCE LOCKED MODAL
+   ============================================================================= */
+
+/* Instance Locked Modal */
+InstanceLockedModal {
+    align: center middle;
+}
+
+#instance-locked-container {
+    width: 60;
+    height: auto;
+    max-height: 16;
+    background: $surface;
+    border: thick $error;
+    padding: 1 2;
+}
+
+#instance-locked-title {
+    text-align: center;
+    text-style: bold;
+    color: $error;
+    margin-bottom: 1;
+}
+
+#instance-locked-message,
+#instance-locked-note {
+    text-align: center;
+    margin-bottom: 1;
+}
+
+#instance-locked-info {
+    text-align: center;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#instance-locked-quit {
+    width: 100%;
+    margin-top: 1;
+}
+
+/* =============================================================================
+   KANBAN HINT BAR (moved from keybinding_hint.py)
+   ============================================================================= */
+
+KanbanHintBar {
+    dock: bottom;
+    height: 2;
+}
+KanbanHintBar .hint-bar-row {
+    height: 1;
+    width: 100%;
+}
+KanbanHintBar .hint-nav-left {
+    width: 1fr;
+}
+KanbanHintBar .hint-nav-center {
+    width: auto;
+}
+KanbanHintBar .hint-nav-right {
+    width: 1fr;
+}
+KanbanHintBar .hint-actions-left {
+    width: 1fr;
+}
+KanbanHintBar .hint-actions {
+    width: auto;
+}
+KanbanHintBar .hint-global {
+    width: 1fr;
+}
+
+/* =============================================================================
+   PEEK OVERLAY (moved from peek_overlay.py)
+   ============================================================================= */
+
+PeekOverlay {
+    layer: overlay;
+    width: 50;
+    height: auto;
+    max-height: 12;
+    background: $surface;
+    border: round $primary;
+    padding: 1;
+    display: none;
+    position: absolute;
+    overflow-y: auto;
+}
+
+PeekOverlay.visible {
+    display: block;
+}
+
+PeekOverlay .peek-title {
+    text-style: bold;
+    color: $primary;
+    margin-bottom: 1;
+}
+
+PeekOverlay .peek-status {
+    color: $text;
+}
+
+PeekOverlay .peek-content {
+    color: $text-muted;
 }

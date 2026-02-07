@@ -48,17 +48,15 @@ if TYPE_CHECKING:
     from kagan.services.automation import AutomationService
     from kagan.services.diffs import DiffService
     from kagan.services.executions import ExecutionService
+    from kagan.services.follow_ups import FollowUpService
     from kagan.services.merges import MergeService
     from kagan.services.projects import ProjectService
+    from kagan.services.queued_messages import QueuedMessageService
     from kagan.services.repo_scripts import RepoScriptService
+    from kagan.services.reviews import ReviewService
     from kagan.services.sessions import SessionService
     from kagan.services.tasks import TaskService
     from kagan.services.workspaces import WorkspaceService
-
-
-# =============================================================================
-# In-Memory Event Bus Implementation
-# =============================================================================
 
 
 class InMemoryEventBus:
@@ -75,13 +73,11 @@ class InMemoryEventBus:
 
     async def publish(self, event: DomainEvent) -> None:
         """Publish event to all matching handlers and subscribers."""
-        # Call sync handlers (used by SignalBridge for UI updates)
         for filter_type, handler in self._handlers:
             if filter_type is None or isinstance(event, filter_type):
                 with contextlib.suppress(Exception):
                     handler(event)
 
-        # Enqueue for async subscribers
         async with self._lock:
             for filter_type, queue in self._queues:
                 if filter_type is None or isinstance(event, filter_type):
@@ -116,18 +112,13 @@ class InMemoryEventBus:
                 self._queues = [(t, q) for t, q in self._queues if q is not queue]
 
 
-# =============================================================================
-# Signal Bridge for Textual UI
-# =============================================================================
-
-
 @dataclass
 class SignalBinding:
     """Maps a domain event type to a Textual Signal."""
 
     event_type: type[DomainEvent]
     signal: Signal
-    extractor: Callable[[DomainEvent], object] | None = None  # Optional payload extractor
+    extractor: Callable[[DomainEvent], object] | None = None
 
 
 TDomainEvent = TypeVar("TDomainEvent", bound=DomainEvent)
@@ -190,11 +181,6 @@ class SignalBridge:
         self._bindings.clear()
 
 
-# =============================================================================
-# Application Context
-# =============================================================================
-
-
 @dataclass
 class AppContext:
     """Central container for application dependencies.
@@ -217,6 +203,9 @@ class AppContext:
         workspace_service: Workspace (worktree) operations.
         session_service: Tmux session operations.
         execution_service: Agent/script execution operations.
+        queued_message_service: In-memory follow-up queue per session.
+        follow_up_service: Follow-up execution orchestration.
+        review_service: Review status and log updates.
         merge_service: Git merge operations.
         automation_service: Reactive automation service for automated workflows.
     """
@@ -225,15 +214,16 @@ class AppContext:
     config_path: Path
     db_path: Path
 
-    # Core infrastructure
     event_bus: EventBus = field(default_factory=InMemoryEventBus)
     signal_bridge: SignalBridge | None = None
 
-    # Services (will be populated during bootstrap)
     task_service: TaskService = field(init=False)
     workspace_service: WorkspaceService = field(init=False)
     session_service: SessionService = field(init=False)
     execution_service: ExecutionService = field(init=False)
+    queued_message_service: QueuedMessageService = field(init=False)
+    follow_up_service: FollowUpService = field(init=False)
+    review_service: ReviewService = field(init=False)
     merge_service: MergeService = field(init=False)
     diff_service: DiffService = field(init=False)
     repo_script_service: RepoScriptService = field(init=False)
@@ -241,7 +231,6 @@ class AppContext:
     project_service: ProjectService = field(init=False)
     agent_health: AgentHealthService = field(init=False)
 
-    # Active project tracking
     active_project_id: str | None = None
     active_repo_id: str | None = None
 
@@ -252,11 +241,6 @@ class AppContext:
 
         if hasattr(self, "automation_service"):
             await self.automation_service.stop()
-
-
-# =============================================================================
-# Bootstrap Functions
-# =============================================================================
 
 
 def create_signal_bridge(event_bus: EventBus) -> SignalBridge:
@@ -274,7 +258,7 @@ def wire_default_signals(bridge: SignalBridge, app: object) -> None:
         bridge: The SignalBridge to configure.
         app: The KaganApp instance with signal attributes.
     """
-    # Task events -> task_changed_signal (backward compat naming)
+
     if hasattr(app, "task_changed_signal"):
         bridge.bind(
             TaskCreated,
@@ -291,10 +275,6 @@ def wire_default_signals(bridge: SignalBridge, app: object) -> None:
             app.task_changed_signal,
             extractor=lambda e: e.task_id,
         )
-
-    # Workspace events (future: bind to workspace_changed_signal)
-    # Execution events (future: bind to execution_changed_signal)
-    # Merge events (future: bind to merge_changed_signal)
 
 
 @asynccontextmanager
@@ -358,15 +338,18 @@ async def create_app_context(
     from kagan.adapters.git.worktrees import GitWorktreeAdapter
     from kagan.agents.agent_factory import create_agent
     from kagan.services import (
-        AutomationServiceImpl,
+        AutomationService,
         DiffServiceImpl,
         ExecutionServiceImpl,
-        MergeServiceImpl,
+        FollowUpServiceImpl,
+        MergeService,
         ProjectServiceImpl,
+        QueuedMessageServiceImpl,
         RepoScriptServiceImpl,
-        SessionServiceImpl,
-        TaskServiceImpl,
-        WorkspaceServiceImpl,
+        ReviewServiceImpl,
+        SessionService,
+        TaskService,
+        WorkspaceService,
     )
 
     project_root = project_root or Path.cwd()
@@ -384,15 +367,12 @@ async def create_app_context(
 
     event_bus.add_handler(_set_default_project, ProjectOpened)
 
-    # Get session factory from task_repo for project service
-    # After initialize(), session_factory is guaranteed to be set
     session_factory = task_repo._session_factory
     assert session_factory is not None, "TaskRepository not initialized"
 
-    # Create repo repository for project service
     repo_repository = RepoRepository(session_factory)
 
-    ctx.task_service = TaskServiceImpl(task_repo, event_bus)
+    ctx.task_service = TaskService(task_repo, event_bus)
     ctx.project_service = ProjectServiceImpl(
         session_factory,
         event_bus,
@@ -400,28 +380,41 @@ async def create_app_context(
     )
     git_adapter = GitWorktreeAdapter()
     git_ops_adapter = GitOperationsAdapter()
-    ctx.workspace_service = WorkspaceServiceImpl(
+    ctx.workspace_service = WorkspaceService(
         session_factory,
         event_bus,
         git_adapter,
         ctx.task_service,
         ctx.project_service,
     )
-    ctx.session_service = SessionServiceImpl(project_root, ctx.task_service, config)
-    ctx.execution_service = ExecutionServiceImpl()
+    ctx.session_service = SessionService(
+        project_root,
+        ctx.task_service,
+        ctx.workspace_service,
+        config,
+    )
+    ctx.execution_service = ExecutionServiceImpl(task_repo)
+    ctx.queued_message_service = QueuedMessageServiceImpl()
+    ctx.follow_up_service = FollowUpServiceImpl(
+        ctx.execution_service,
+        ctx.queued_message_service,
+    )
+    ctx.review_service = ReviewServiceImpl(ctx.task_service, ctx.execution_service)
 
-    # Use provided agent factory or default
     factory = agent_factory if agent_factory is not None else create_agent
 
-    ctx.automation_service = AutomationServiceImpl(
+    ctx.automation_service = AutomationService(
         ctx.task_service,
         ctx.workspace_service,
         config,
         session_service=ctx.session_service,
+        execution_service=ctx.execution_service,
         event_bus=event_bus,
         agent_factory=factory,
+        queued_message_service=ctx.queued_message_service,
+        git_adapter=git_ops_adapter,
     )
-    ctx.merge_service = MergeServiceImpl(
+    ctx.merge_service = MergeService(
         ctx.task_service,
         ctx.workspace_service,
         ctx.session_service,
@@ -439,7 +432,6 @@ async def create_app_context(
         event_bus,
     )
 
-    # Initialize agent health service
     from kagan.services.agent_health import AgentHealthServiceImpl
 
     ctx.agent_health = AgentHealthServiceImpl(config)
@@ -447,16 +439,9 @@ async def create_app_context(
     return ctx
 
 
-# =============================================================================
-# Event Catalog (re-export for convenience)
-# =============================================================================
-
 __all__ = [
-    # Context
     "AppContext",
-    # Domain Events (re-exports)
     "DomainEvent",
-    # Event Bus
     "EventBus",
     "ExecutionCompleted",
     "ExecutionFailed",
@@ -465,7 +450,6 @@ __all__ = [
     "MergeFailed",
     "PRCreated",
     "ScriptCompleted",
-    # Signal Bridge
     "SignalBridge",
     "TaskCreated",
     "TaskStatusChanged",

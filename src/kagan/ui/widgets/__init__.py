@@ -9,12 +9,12 @@ from kagan.ui.widgets.base import (
     AgentBackendSelect,
     DescriptionArea,
     PrioritySelect,
-    ReadOnlyField,
     StatusSelect,
     TaskTypeSelect,
     TitleInput,
 )
 from kagan.ui.widgets.card import TaskCard
+from kagan.ui.widgets.chat_panel import ChatPanel
 from kagan.ui.widgets.column import KanbanColumn
 from kagan.ui.widgets.empty_state import EmptyState
 from kagan.ui.widgets.header import KaganHeader
@@ -32,6 +32,7 @@ from kagan.ui.widgets.workspace_repos import WorkspaceReposWidget
 __all__ = [
     "AcceptanceCriteriaArea",
     "AgentBackendSelect",
+    "ChatPanel",
     "DescriptionArea",
     "EmptyState",
     "KaganHeader",
@@ -41,7 +42,6 @@ __all__ = [
     "PlanApprovalWidget",
     "PlanDisplay",
     "PrioritySelect",
-    "ReadOnlyField",
     "SearchBar",
     "SlashComplete",
     "StatusBar",

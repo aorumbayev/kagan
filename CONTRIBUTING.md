@@ -73,6 +73,27 @@ uv run mkdocs serve
 
 Open `http://127.0.0.1:8000/` in your browser.
 
+## GitHub Actions Workflow Validation
+
+Before pushing changes to GitHub Actions workflows, validate them locally using [act](https://github.com/nektos/act):
+
+```bash
+# Install act (macOS)
+brew install act
+
+# Validate all workflows
+uv run poe workflows-check
+```
+
+This command:
+
+1. Lists all workflows and their triggers
+1. Dry-runs CI workflow (`ci.yml`)
+1. Dry-runs CD workflow (`cd.yaml`)
+1. Dry-runs Post-Release Update Test (`post-release-update-test.yaml`)
+
+The `--dryrun` flag validates workflow syntax and structure without actually running containers.
+
 ## Project Structure
 
 ```

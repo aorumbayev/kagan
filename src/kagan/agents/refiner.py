@@ -74,8 +74,8 @@ class PromptRefiner:
             self._agent = self._agent_factory(
                 self._project_root, self._agent_config, read_only=True
             )
-            self._agent.set_auto_approve(True)  # No permission dialogs
-            self._agent.start(message_target=None)  # No UI messages
+            self._agent.set_auto_approve(True)
+            self._agent.start(message_target=None)
             await self._agent.wait_ready(timeout=AGENT_TIMEOUT)
             log.info("[PromptRefiner] Refiner agent ready")
 
@@ -87,7 +87,6 @@ class PromptRefiner:
         response = _extract_refined_prompt(self._agent.get_response_text())
         log.debug(f"[PromptRefiner] Received response (len={len(response)})")
 
-        # Return original if response is empty or very short
         if not response or len(response) < len(user_input) // 2:
             log.warning("[PromptRefiner] Empty or too-short response, returning original")
             return user_input

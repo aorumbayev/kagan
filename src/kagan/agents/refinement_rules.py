@@ -17,16 +17,9 @@ established prompt engineering best practices:
 
 from __future__ import annotations
 
-# =============================================================================
-# REFINEMENT PROMPT
-# Tailored for Kagan's planner context - creates development tasks from
-# natural language requests. Follows prompt engineering best practices.
-#
 # CRITICAL: This prompt must clearly establish that the agent's job is to
 # REWRITE text, not EXECUTE the task described in the text. The user input
-# may describe tasks like "review tests" or "analyze code" - the agent must
-# transform these descriptions, not perform them.
-# =============================================================================
+
 
 REFINEMENT_PROMPT = """\
 <role>

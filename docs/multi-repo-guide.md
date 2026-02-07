@@ -6,23 +6,25 @@ for all or a subset of repos, with per-repo diffs and merges.
 ## Create A Project
 
 1. Launch Kagan.
-1. From the welcome screen, choose **New Project**.
+1. From the Welcome screen, choose **New Project** with ++n++.
 1. Enter a project name and add repository paths.
-1. Mark a primary repo (first repo is primary by default).
+1. The first repo is the primary repo by default.
 
-## Start A Workspace
+## Pick An Active Repo
 
-1. Open a task card.
-1. Choose **Start Workspace**.
-1. Select the repos to include for this task.
-1. Kagan creates worktrees for the selected repos under the workspace directory.
+Use ++ctrl+r++ to open the repo picker anytime.
+
+In the picker, use ++up++/++down++ or ++j++/++k++ to navigate, ++enter++ to select, ++n++ to add a repo, and ++esc++ to cancel.
+
+## Base Branches
+
+Use ++b++ to set a task base branch and ++shift+b++ to set a global default branch. These branches are used for diffs and merges.
 
 ## View Diffs And Merge
 
-The workspace view shows per-repo status:
+Open Task Details with ++v++ and look for the **Workspace Repos** section.
 
-- **Diff** opens a tabbed view with per-repo diffs.
-- **Merge** merges a single repo or all repos, depending on selection.
+Use the **Diff** button to open a per-repo diff and the **Merge** button to open the merge dialog. The merge dialog uses buttons and checkboxes for selection.
 
 ## Data Storage
 

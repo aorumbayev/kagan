@@ -2,98 +2,169 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Protocol
-from uuid import uuid4
-
-from kagan.core.models.enums import ExecutionStatus
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from kagan.core.models.entities import ExecutionProcess
-    from kagan.services.types import ExecutionId, TaskId, WorkspaceId
+    from collections.abc import Sequence
+
+    from kagan.adapters.db.repositories import TaskRepository
+    from kagan.adapters.db.schema import CodingAgentTurn, ExecutionProcess, ExecutionProcessLog
+    from kagan.core.models.enums import ExecutionRunReason
+    from kagan.services.types import ExecutionId, SessionId
 
 
 class ExecutionService(Protocol):
     """Service interface for execution operations."""
 
-    async def request(
+    async def create_execution(
         self,
-        task_id: TaskId,
         *,
-        workspace_id: WorkspaceId | None = None,
-        executor: str,
-        command: list[str] | None = None,
+        session_id: str,
+        run_reason: ExecutionRunReason,
+        executor_action: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ExecutionProcess:
-        """Request a new execution."""
+        """Create a new execution process."""
+        ...
 
-    async def cancel(self, execution_id: ExecutionId, *, reason: str | None = None) -> None:
-        """Cancel an execution."""
+    async def update_execution(
+        self, execution_id: ExecutionId, **kwargs: object
+    ) -> ExecutionProcess | None:
+        """Update an execution process."""
+        ...
+
+    async def append_log(self, execution_id: ExecutionId, log_line: str) -> ExecutionProcessLog:
+        """Append a JSONL log line."""
+        ...
+
+    async def get_logs(self, execution_id: ExecutionId) -> ExecutionProcessLog | None:
+        """Get execution logs."""
+        ...
+
+    async def get_log_entries(self, execution_id: ExecutionId) -> list[ExecutionProcessLog]: ...
 
     async def get_execution(self, execution_id: ExecutionId) -> ExecutionProcess | None:
-        """Return an execution by ID."""
+        """Get execution by ID."""
+        ...
 
-    async def list_executions(
+    async def append_agent_turn(
         self,
+        execution_id: ExecutionId,
         *,
-        task_id: TaskId | None = None,
-        workspace_id: WorkspaceId | None = None,
-    ) -> list[ExecutionProcess]:
-        """List executions filtered by task or workspace."""
+        agent_session_id: str | None = None,
+        prompt: str | None = None,
+        summary: str | None = None,
+        agent_message_id: str | None = None,
+    ) -> CodingAgentTurn:
+        """Append a coding agent turn."""
+        ...
+
+    async def list_agent_turns(self, execution_id: ExecutionId) -> Sequence[CodingAgentTurn]:
+        """List agent turns for an execution."""
+        ...
+
+    async def get_latest_agent_turn_for_execution(
+        self, execution_id: ExecutionId
+    ) -> CodingAgentTurn | None:
+        """Get latest agent turn for an execution."""
+        ...
+
+    async def get_latest_execution_for_task(self, task_id: str) -> ExecutionProcess | None:
+        """Return most recent execution for a task."""
+        ...
+
+    async def count_executions_for_task(self, task_id: str) -> int:
+        """Return total executions for a task."""
+        ...
+
+    async def get_latest_execution_for_session(
+        self, session_id: SessionId
+    ) -> ExecutionProcess | None:
+        """Return most recent execution for a session."""
+        ...
+
+    async def get_running_execution_for_session(
+        self, session_id: SessionId
+    ) -> ExecutionProcess | None:
+        """Return running execution for a session."""
+        ...
 
 
 class ExecutionServiceImpl:
-    """In-memory execution service (placeholder implementation)."""
+    """Execution service backed by TaskRepository."""
 
-    def __init__(self) -> None:
-        self._executions: dict[str, ExecutionProcess] = {}
+    def __init__(self, repo: TaskRepository) -> None:
+        self._repo = repo
 
-    async def request(
+    async def create_execution(
         self,
-        task_id: TaskId,
         *,
-        workspace_id: WorkspaceId | None = None,
-        executor: str,
-        command: list[str] | None = None,
+        session_id: str,
+        run_reason: ExecutionRunReason,
+        executor_action: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ExecutionProcess:
-        from kagan.core.models.entities import ExecutionProcess
-
-        del command
-        execution_id = uuid4().hex[:8]
-        execution = ExecutionProcess(
-            id=execution_id,
-            task_id=task_id,
-            workspace_id=workspace_id,
-            session_id=None,
-            status=ExecutionStatus.PENDING,
-            executor=executor,
-            started_at=datetime.now(),
-            finished_at=None,
-            exit_code=None,
-            error=None,
-            metadata={},
+        return await self._repo.create_execution(
+            session_id=session_id,
+            run_reason=run_reason,
+            executor_action=executor_action,
+            metadata=metadata,
         )
-        self._executions[execution_id] = execution
-        return execution
 
-    async def cancel(self, execution_id: ExecutionId, *, reason: str | None = None) -> None:
-        del reason
-        execution = self._executions.get(execution_id)
-        if execution:
-            execution.status = ExecutionStatus.CANCELED
-            execution.finished_at = datetime.now()
+    async def update_execution(
+        self, execution_id: ExecutionId, **kwargs: object
+    ) -> ExecutionProcess | None:
+        return await self._repo.update_execution(execution_id, **kwargs)
+
+    async def append_log(self, execution_id: ExecutionId, log_line: str) -> ExecutionProcessLog:
+        return await self._repo.append_execution_log(execution_id, log_line)
+
+    async def get_logs(self, execution_id: ExecutionId) -> ExecutionProcessLog | None:
+        return await self._repo.get_execution_logs(execution_id)
+
+    async def get_log_entries(self, execution_id: ExecutionId) -> list[ExecutionProcessLog]:
+        return await self._repo.get_execution_log_entries(execution_id)
 
     async def get_execution(self, execution_id: ExecutionId) -> ExecutionProcess | None:
-        return self._executions.get(execution_id)
+        return await self._repo.get_execution(execution_id)
 
-    async def list_executions(
+    async def append_agent_turn(
         self,
+        execution_id: ExecutionId,
         *,
-        task_id: TaskId | None = None,
-        workspace_id: WorkspaceId | None = None,
-    ) -> list[ExecutionProcess]:
-        executions = list(self._executions.values())
-        if task_id:
-            executions = [e for e in executions if e.task_id == task_id]
-        if workspace_id:
-            executions = [e for e in executions if e.workspace_id == workspace_id]
-        return executions
+        agent_session_id: str | None = None,
+        prompt: str | None = None,
+        summary: str | None = None,
+        agent_message_id: str | None = None,
+    ) -> CodingAgentTurn:
+        return await self._repo.append_agent_turn(
+            execution_id,
+            agent_session_id=agent_session_id,
+            prompt=prompt,
+            summary=summary,
+            agent_message_id=agent_message_id,
+        )
+
+    async def list_agent_turns(self, execution_id: ExecutionId) -> Sequence[CodingAgentTurn]:
+        return await self._repo.list_agent_turns(execution_id)
+
+    async def get_latest_agent_turn_for_execution(
+        self, execution_id: ExecutionId
+    ) -> CodingAgentTurn | None:
+        return await self._repo.get_latest_agent_turn_for_execution(execution_id)
+
+    async def get_latest_execution_for_task(self, task_id: str) -> ExecutionProcess | None:
+        return await self._repo.get_latest_execution_for_task(task_id)
+
+    async def count_executions_for_task(self, task_id: str) -> int:
+        return await self._repo.count_executions_for_task(task_id)
+
+    async def get_latest_execution_for_session(
+        self, session_id: SessionId
+    ) -> ExecutionProcess | None:
+        return await self._repo.get_latest_execution_for_session(session_id)
+
+    async def get_running_execution_for_session(
+        self, session_id: SessionId
+    ) -> ExecutionProcess | None:
+        return await self._repo.get_running_execution_for_session(session_id)

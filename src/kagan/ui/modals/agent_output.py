@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import inspect
 from typing import TYPE_CHECKING, cast
 
 from textual import on
@@ -16,16 +16,17 @@ from kagan.constants import MODAL_TITLE_MAX_LENGTH
 from kagan.core.models.enums import TaskStatus
 from kagan.keybindings import AGENT_OUTPUT_BINDINGS
 from kagan.ui.utils.clipboard import copy_with_notification
-from kagan.ui.widgets import StreamingOutput
+from kagan.ui.widgets import ChatPanel
 
 if TYPE_CHECKING:
     from acp.schema import AvailableCommand
     from textual.app import ComposeResult
 
     from kagan.acp.agent import Agent
-    from kagan.adapters.db.schema import AgentTurn
     from kagan.app import KaganApp
     from kagan.core.models.entities import Task
+    from kagan.services.queued_messages import QueuedMessageService
+    from kagan.ui.widgets.streaming_output import StreamingOutput
 
 
 class AgentOutputModal(ModalScreen[None]):
@@ -42,24 +43,26 @@ class AgentOutputModal(ModalScreen[None]):
         self,
         task: Task,
         agent: Agent | None,
-        iteration: int = 0,
+        execution_id: str | None = None,
+        run_count: int = 0,
         review_agent: Agent | None = None,
         is_reviewing: bool = False,
-        historical_logs: dict[str, list[AgentTurn]] | None = None,
+        is_running: bool = True,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._task_model = task
         self._agent = agent
-        self._iteration = iteration
+        self._run_count = run_count
+        self._execution_id = execution_id
         self._review_agent = review_agent
         self._is_reviewing = is_reviewing
-        self._historical_logs = historical_logs or {}
-        self._show_tabs = task.status == TaskStatus.REVIEW
+        self._is_running = is_running
+        self._tabbed = task.status == TaskStatus.REVIEW or is_reviewing
         self._current_mode: str = ""
         self._available_modes: dict[str, messages.Mode] = {}
         self._available_commands: list[AvailableCommand] = []
-        self._review_loaded: bool = False
+        self._session_id: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="agent-output-container"):
@@ -67,127 +70,183 @@ class AgentOutputModal(ModalScreen[None]):
                 f"AUTO: {self._task_model.title[:MODAL_TITLE_MAX_LENGTH]}",
                 classes="modal-title",
             )
+            run_label = f"Run {self._run_count}" if self._run_count > 0 else "Run"
+            yield Label(
+                f"Task #{self._task_model.short_id} | {run_label}",
+                classes="modal-subtitle",
+            )
+            yield Rule()
 
-            if self._show_tabs:
-                # REVIEW status: Tabbed interface
-                status_text = "Reviewing..." if self._is_reviewing else "Review Complete"
-                yield Label(
-                    f"Task #{self._task_model.short_id} | {status_text}",
-                    classes="modal-subtitle",
-                )
-                yield Rule()
-                initial_tab = (
-                    "review-tab"
-                    if (self._review_agent or self._is_reviewing)
-                    else "implementation-tab"
-                )
-                with TabbedContent(id="output-tabs", initial=initial_tab):
-                    with TabPane("Implementation", id="implementation-tab"):
-                        yield StreamingOutput(id="implementation-output")
-                    with TabPane("Review", id="review-tab"):
-                        yield StreamingOutput(id="review-output")
+            if self._tabbed:
+                with TabbedContent():
+                    with TabPane("Implementation", id="tab-impl"):
+                        yield ChatPanel(
+                            self._execution_id,
+                            allow_input=False,
+                            output_id="implementation-output",
+                            id="impl-chat",
+                        )
+                    with TabPane("Review", id="tab-review"):
+                        yield ChatPanel(
+                            None,
+                            allow_input=False,
+                            output_id="review-output",
+                            id="review-chat",
+                        )
             else:
-                # IN_PROGRESS status: Single output
-                yield Label(
-                    f"Task #{self._task_model.short_id} | Iteration {self._iteration}",
-                    classes="modal-subtitle",
+                yield ChatPanel(
+                    self._execution_id,
+                    allow_input=True,
+                    output_id="agent-output",
+                    id="agent-chat",
                 )
-                yield Rule()
-                yield StreamingOutput(id="agent-output")
 
             yield Rule()
 
-            # Different hint based on mode - use abbreviated forms to prevent truncation
-            if self._is_reviewing:
+            if self._tabbed:
                 yield Label(
-                    "Esc close (review continues)",
+                    "Esc close │ y copy",
                     classes="modal-hint",
                 )
                 with Horizontal(classes="button-row"):
                     yield Button("Close", id="close-btn")
             else:
-                yield Label(
-                    "c cancel │ Esc close (agent continues) │ y copy",
-                    classes="modal-hint",
-                )
-                with Horizontal(classes="button-row"):
-                    yield Button("Cancel Agent", variant="error", id="cancel-btn")
-                    yield Button("Close", id="close-btn")
+                # Show different buttons based on whether agent is running
+                if self._is_running:
+                    yield Label(
+                        "c cancel │ Esc close (agent continues) │ y copy",
+                        classes="modal-hint",
+                    )
+                    with Horizontal(classes="button-row"):
+                        yield Button("Cancel Agent", variant="error", id="cancel-btn")
+                        yield Button("Close", id="close-btn")
+                else:
+                    # Agent stopped but task still in progress - show start button
+                    yield Label(
+                        "Esc close │ y copy",
+                        classes="modal-hint",
+                    )
+                    with Horizontal(classes="button-row"):
+                        yield Button("Start Agent", variant="success", id="start-btn")
+                        yield Button("Close", id="close-btn")
         yield Footer(show_command_palette=False)
 
     async def on_mount(self) -> None:
         """Set up agent connections and load historical logs."""
-        if self._show_tabs:
-            await self._setup_tabbed_mode()
+        if self._tabbed:
+            await self._mount_tabbed()
         else:
-            await self._setup_single_mode()
+            await self._mount_single()
 
-    async def _setup_tabbed_mode(self) -> None:
-        """Set up tabbed mode for REVIEW status."""
-        # Load historical implementation logs
-        impl_output = self.query_one("#implementation-output", StreamingOutput)
-        impl_logs = self._historical_logs.get("implementation", [])
-
-        if impl_logs:
-            for log_entry in impl_logs:
-                await self._load_historical_log(impl_output, log_entry)
+    async def _mount_single(self) -> None:
+        panel = self.query_one("#agent-chat", ChatPanel)
+        output = panel.output
+        if self._agent:
+            # Live agent: buffer holds the full session history — replay rebuilds the view.
+            # Skip load_logs(); in-flight executions have no DB logs yet.
+            self._agent.set_message_target(self)
         else:
-            await impl_output.post_note("No implementation logs available", classes="warning")
+            # No live agent: load persisted logs from a completed execution.
+            await panel.load_logs()
+            await output.post_note("No agent currently running", classes="warning")
 
-        # Set up review tab
-        review_output = self.query_one("#review-output", StreamingOutput)
+        panel.set_send_handler(self._send_message)
+        panel.set_remove_handler(self._remove_queued_message)
+        panel.set_get_queued_handler(self._get_queued_messages)
+        # Load existing queued messages
+        await panel.refresh_queued_messages()
 
-        if self._review_agent:
-            self._review_loaded = True
-            # Live review agent - connect for streaming
+    def _get_queue_service(self) -> QueuedMessageService | None:
+        app = cast("KaganApp", self.app)
+        service = getattr(app.ctx, "queued_message_service", None)
+        if service is None:
+            return None
+        return cast("QueuedMessageService", service)
+
+    async def _resolve_session_id(self) -> str | None:
+        if self._session_id is not None:
+            return self._session_id
+        app = cast("KaganApp", self.app)
+        latest = await app.ctx.execution_service.get_latest_execution_for_task(self._task_model.id)
+        if latest is None:
+            return None
+        self._session_id = latest.session_id
+        return self._session_id
+
+    async def _send_message(self, content: str) -> None:
+        service = self._get_queue_service()
+        session_id = await self._resolve_session_id()
+        if service is None or session_id is None:
+            raise RuntimeError("Message queue unavailable")
+        result = service.queue_message(session_id, content)
+        if inspect.isawaitable(result):
+            await result
+
+    async def _get_queued_messages(self) -> list:
+        """Get all queued messages for display."""
+        service = self._get_queue_service()
+        session_id = await self._resolve_session_id()
+        if service is None or session_id is None:
+            return []
+        return await service.get_queued(session_id)
+
+    async def _remove_queued_message(self, index: int) -> bool:
+        """Remove a queued message by index."""
+        service = self._get_queue_service()
+        session_id = await self._resolve_session_id()
+        if service is None or session_id is None:
+            return False
+        return await service.remove_message(session_id, index)
+
+    async def _mount_tabbed(self) -> None:
+        impl_panel = self.query_one("#impl-chat", ChatPanel)
+        review_panel = self.query_one("#review-chat", ChatPanel)
+
+        if not self._execution_id:
+            await impl_panel.output.post_note("No execution logs available", classes="warning")
+            await review_panel.output.post_note("No review logs available", classes="warning")
+            return
+
+        app = cast("KaganApp", self.app)
+
+        execution = await app.ctx.execution_service.get_execution(self._execution_id)
+        has_review_result = False
+        if execution and execution.metadata_:
+            has_review_result = "review_result" in execution.metadata_
+
+        entries = await app.ctx.execution_service.get_log_entries(self._execution_id)
+
+        if not entries:
+            await impl_panel.output.post_note("No execution logs available", classes="warning")
+            await review_panel.output.post_note("No review logs available", classes="warning")
+            return
+
+        if has_review_result and len(entries) > 1:
+            impl_entries = entries[:-1]
+            review_entries = entries[-1:]
+        else:
+            impl_entries = entries
+            review_entries = []
+
+        for entry in impl_entries:
+            if entry.logs:
+                impl_panel.set_execution_id(None)
+                for line in entry.logs.splitlines():
+                    await impl_panel._render_log_line(line)
+
+        if review_entries:
+            for entry in review_entries:
+                if entry.logs:
+                    for line in entry.logs.splitlines():
+                        await review_panel._render_log_line(line)
+        elif self._is_reviewing and self._review_agent:
             self._review_agent.set_message_target(self)
-            await review_output.post_note("Connected to review agent stream", classes="info")
-            return
-
-        if self._is_reviewing:
-            self._review_loaded = True
-            await review_output.post_note("Review in progress...", classes="info")
-            return
-
-        self._review_loaded = False
-        await review_output.post_note(
-            "Review output is available on demand. Switch to this tab to load.",
-            classes="info",
-        )
-
-    @on(TabbedContent.TabActivated, "#output-tabs")
-    async def _on_output_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        if event.tab.id == "review-tab":
-            await self._ensure_review_loaded()
-
-    async def _ensure_review_loaded(self) -> None:
-        if self._review_loaded:
-            return
-        review_output = self.query_one("#review-output", StreamingOutput)
-        review_logs = self._historical_logs.get("review", [])
-        if review_logs:
-            for log_entry in review_logs:
-                await self._load_historical_log(
-                    review_output, log_entry, show_iteration_header=False
-                )
+            await review_panel.output.post_note("Connected to review agent stream", classes="info")
         else:
-            if self._task_model.checks_passed is not None:
-                status = "✓ Passed" if self._task_model.checks_passed else "✗ Failed"
-                summary = self._task_model.review_summary or "No details"
-                await review_output.post_note(f"Review {status}", classes="info")
-                await review_output.post_response(summary)
-            else:
-                await review_output.post_note("Review not yet completed", classes="warning")
-        self._review_loaded = True
+            await review_panel.output.post_note("No review logs available", classes="warning")
 
-    async def _setup_single_mode(self) -> None:
-        """Set up single output mode for IN_PROGRESS status."""
-        output = self._get_output()
         if self._agent:
             self._agent.set_message_target(self)
-            await output.post_note("Connected to agent stream", classes="info")
-        else:
-            await output.post_note("No agent currently running", classes="warning")
 
     def on_unmount(self) -> None:
         """Remove message target when modal closes."""
@@ -196,80 +255,22 @@ class AgentOutputModal(ModalScreen[None]):
         if self._review_agent:
             self._review_agent.set_message_target(None)
 
-    def _get_output(self) -> StreamingOutput:
-        """Get the appropriate streaming output widget."""
-        if self._show_tabs:
-            # In tabbed mode, stream to review output (for live review)
-            return self.query_one("#review-output", StreamingOutput)
-        return self.query_one("#agent-output", StreamingOutput)
-
-    async def _load_historical_log(
-        self, output: StreamingOutput, log_entry: AgentTurn, show_iteration_header: bool = True
-    ) -> None:
-        """Load a historical log entry into a StreamingOutput widget."""
-        if show_iteration_header:
-            await output.post_note(f"--- Iteration {log_entry.sequence} ---", classes="info")
-
-        try:
-            data = json.loads(log_entry.content)
-            messages = data.get("messages", [])
-
-            for msg in messages:
-                msg_type = msg.get("type", "")
-                if msg_type == "response":
-                    content = msg.get("content", "")
-                    if content:
-                        await output.post_response(content)
-                elif msg_type == "thinking":
-                    content = msg.get("content", "")
-                    if content:
-                        await output.post_thought(content)
-                elif msg_type == "tool_call":
-                    tool_id = msg.get("id", "unknown")
-                    title = msg.get("title", "Tool call")
-                    kind = msg.get("kind", "")
-                    await output.post_tool_call(tool_id, title, kind)
-                elif msg_type == "tool_call_update":
-                    tool_id = msg.get("id", "unknown")
-                    status = msg.get("status", "")
-                    if status:
-                        output.update_tool_status(tool_id, status)
-                elif msg_type == "plan":
-                    entries = msg.get("entries", [])
-                    if entries:
-                        await output.post_plan(entries)
-                elif msg_type == "agent_ready":
-                    await output.post_note("Agent ready", classes="success")
-                elif msg_type == "agent_fail":
-                    error_msg = msg.get("message", "Unknown error")
-                    await output.post_note(f"Error: {error_msg}", classes="error")
-                    details = msg.get("details")
-                    if details:
-                        await output.post_note(details)
-
-            # If no messages were serialized, fall back to response_text
-            if not messages:
-                response_text = data.get("response_text", "")
-                if response_text:
-                    await output.post_response(response_text)
-
-        except json.JSONDecodeError:
-            await output.post_note(
-                "Unsupported log format (expected JSON).",
-                classes="warning",
-            )
-
-    # ACP Message handlers
+    def _get_active_output(self) -> StreamingOutput:
+        if self._tabbed:
+            if self._is_reviewing and self._review_agent:
+                return self.query_one("#review-chat", ChatPanel).output
+            return self.query_one("#impl-chat", ChatPanel).output
+        return self.query_one("#agent-chat", ChatPanel).output
 
     @on(messages.AgentUpdate)
     async def on_agent_update(self, message: messages.AgentUpdate) -> None:
         """Handle agent text output."""
-        await self._get_output().post_response(message.text)
+        await self._get_active_output().post_response(message.text)
 
     @on(messages.Thinking)
     async def on_agent_thinking(self, message: messages.Thinking) -> None:
         """Handle agent thinking/reasoning."""
-        await self._get_output().post_thought(message.text)
+        await self._get_active_output().post_thought(message.text)
 
     @on(messages.ToolCall)
     async def on_tool_call(self, message: messages.ToolCall) -> None:
@@ -277,7 +278,7 @@ class AgentOutputModal(ModalScreen[None]):
         tool_id = message.tool_call.tool_call_id
         title = message.tool_call.title
         kind = message.tool_call.kind or ""
-        await self._get_output().post_tool_call(tool_id, title, kind)
+        await self._get_active_output().post_tool_call(tool_id, title, kind)
 
     @on(messages.ToolCallUpdate)
     async def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
@@ -285,17 +286,17 @@ class AgentOutputModal(ModalScreen[None]):
         tool_id = message.update.tool_call_id
         status = message.update.status or ""
         if status:
-            self._get_output().update_tool_status(tool_id, status)
+            self._get_active_output().update_tool_status(tool_id, status)
 
     @on(messages.AgentReady)
     async def on_agent_ready(self, message: messages.AgentReady) -> None:
         """Handle agent ready."""
-        await self._get_output().post_note("Agent ready", classes="success")
+        await self._get_active_output().post_note("Agent ready", classes="success")
 
     @on(messages.AgentFail)
     async def on_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""
-        output = self._get_output()
+        output = self._get_active_output()
         await output.post_note(f"Error: {message.message}", classes="error")
         if message.details:
             await output.post_note(message.details)
@@ -303,7 +304,7 @@ class AgentOutputModal(ModalScreen[None]):
     @on(messages.Plan)
     async def on_plan(self, message: messages.Plan) -> None:
         """Display plan entries from agent."""
-        await self._get_output().post_plan(message.entries)
+        await self._get_active_output().post_plan(message.entries)
 
     @on(messages.SetModes)
     def on_set_modes(self, message: messages.SetModes) -> None:
@@ -324,7 +325,6 @@ class AgentOutputModal(ModalScreen[None]):
     @on(messages.RequestPermission)
     def on_request_permission(self, message: messages.RequestPermission) -> None:
         """Auto-approve permissions in watch mode (passive observation)."""
-        # Find allow_once option (prefer) or allow_always
         for opt in message.options:
             if opt.kind == "allow_once":
                 message.result_future.set_result(Answer(opt.option_id))
@@ -333,11 +333,9 @@ class AgentOutputModal(ModalScreen[None]):
             if "allow" in opt.kind:
                 message.result_future.set_result(Answer(opt.option_id))
                 return
-        # Fallback to first option if no allow options exist
+
         if message.options:
             message.result_future.set_result(Answer(message.options[0].option_id))
-
-    # Button handlers
 
     @on(Button.Pressed, "#cancel-btn")
     async def on_cancel_btn(self) -> None:
@@ -349,15 +347,13 @@ class AgentOutputModal(ModalScreen[None]):
         """Close the modal."""
         self.action_close()
 
-    # Actions
+    @on(Button.Pressed, "#start-btn")
+    async def on_start_btn(self) -> None:
+        """Start the agent for this task."""
+        await self.action_start_agent()
 
     async def action_cancel_agent(self) -> None:
         """Stop agent completely and move task to BACKLOG."""
-        # Prevent cancel during review
-        if self._is_reviewing:
-            self.notify("Cannot cancel during review", severity="warning")
-            return
-
         app = cast("KaganApp", self.app)
         automation = app.ctx.automation_service
         if automation is None:
@@ -365,18 +361,71 @@ class AgentOutputModal(ModalScreen[None]):
             return
 
         if automation.is_running(self._task_model.id):
-            # Stop both the agent process and the task loop task
             await automation.stop_task(self._task_model.id)
-            await self._get_output().post_note("Agent stopped", classes="warning")
+            output = self._get_active_output()
+            await output.post_note("Agent stopped", classes="warning")
 
-            # Move task to BACKLOG to prevent auto-restart
             await app.ctx.task_service.move(self._task_model.id, TaskStatus.BACKLOG)
-            await self._get_output().post_note(
-                "Task moved to BACKLOG (agent won't auto-restart)", classes="info"
+            await output.post_note(
+                "Task moved to BACKLOG (select task and press 'a' to restart)", classes="info"
             )
             self.notify("Agent stopped, task moved to BACKLOG")
         else:
             self.notify("No agent running for this task", severity="warning")
+
+    async def action_start_agent(self) -> None:
+        """Start the agent for the stopped task."""
+        app = cast("KaganApp", self.app)
+        automation = app.ctx.automation_service
+        if automation is None:
+            self.notify("Automation service unavailable", severity="error")
+            return
+
+        if automation.is_running(self._task_model.id):
+            self.notify("Agent already running", severity="warning")
+            return
+
+        # Ensure workspace exists
+        wt_path = await app.ctx.workspace_service.get_path(self._task_model.id)
+        if wt_path is None:
+            self.notify("No workspace configured for this task", severity="error")
+            return
+
+        self.notify("Starting agent...", severity="information")
+
+        success = await automation.spawn_for_task(self._task_model)
+
+        if success:
+            # Update internal state and UI
+            self._is_running = True
+            self._agent = automation.get_running_agent(self._task_model.id)
+            if self._agent:
+                self._agent.set_message_target(self)
+
+            output = self._get_active_output()
+            await output.post_note("Agent started", classes="success")
+
+            # Update buttons - remove start button, add cancel button
+            await self._refresh_buttons()
+        else:
+            self.notify("Failed to start agent", severity="error")
+
+    async def _refresh_buttons(self) -> None:
+        """Refresh button row based on current running state."""
+        button_row = self.query_one(".button-row", Horizontal)
+        hint = self.query_one(".modal-hint", Label)
+
+        # Clear existing buttons - must await removal to avoid duplicate IDs
+        await button_row.remove_children()
+
+        if self._is_running:
+            hint.update("c cancel │ Esc close (agent continues) │ y copy")
+            await button_row.mount(Button("Cancel Agent", variant="error", id="cancel-btn"))
+            await button_row.mount(Button("Close", id="close-btn"))
+        else:
+            hint.update("Esc close │ y copy")
+            await button_row.mount(Button("Start Agent", variant="success", id="start-btn"))
+            await button_row.mount(Button("Close", id="close-btn"))
 
     def action_close(self) -> None:
         """Close the modal (agent continues running in background)."""
@@ -384,6 +433,6 @@ class AgentOutputModal(ModalScreen[None]):
 
     def action_copy(self) -> None:
         """Copy agent output content to clipboard."""
-        output = self._get_output()
+        output = self._get_active_output()
         content = output.get_text_content()
         copy_with_notification(self.app, content, "Agent output")

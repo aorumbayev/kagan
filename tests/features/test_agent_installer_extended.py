@@ -35,6 +35,16 @@ class TestCheckAgentInstalled:
         with pytest.raises(ValueError, match="Unsupported agent"):
             check_agent_installed("invalid_agent")
 
+    def test_uses_correct_executable(self) -> None:
+        """Should check for correct executable from builtin_agents."""
+        with patch("shutil.which") as mock_which:
+            mock_which.return_value = None
+            check_agent_installed(AgentType.CLAUDE)
+            mock_which.assert_called_with("claude")
+
+            check_agent_installed(AgentType.OPENCODE)
+            mock_which.assert_called_with("opencode")
+
 
 class TestCheckPrerequisites:
     """Tests for _check_prerequisites function."""

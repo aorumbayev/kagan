@@ -7,7 +7,6 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, cast
 
-from acp.schema import ToolCall as AcpToolCall
 from textual import events, on
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -253,19 +252,16 @@ class ChatPanel(Vertical):
                 content = msg.get("content", "")
                 if content:
                     await self.output.post_thought(content)
-            elif msg_type == MessageType.TOOL_CALL or msg_type == MessageType.TOOL_CALL_UPDATE:
-                tool_call = AcpToolCall.model_validate(
-                    {
-                        "toolCallId": msg.get("id", "unknown"),
-                        "title": msg.get("title", "Tool call"),
-                        "kind": msg.get("kind") or None,
-                        "status": msg.get("status") or None,
-                        "content": msg.get("content"),
-                        "rawInput": msg.get("raw_input"),
-                        "rawOutput": msg.get("raw_output"),
-                    }
-                )
-                await self.output.upsert_tool_call(tool_call)
+            elif msg_type == MessageType.TOOL_CALL:
+                tool_id = msg.get("id", "unknown")
+                title = msg.get("title", "Tool call")
+                kind = msg.get("kind", "")
+                await self.output.post_tool_call(tool_id, title, kind)
+            elif msg_type == MessageType.TOOL_CALL_UPDATE:
+                tool_id = msg.get("id", "unknown")
+                status = msg.get("status", "")
+                if status:
+                    self.output.update_tool_status(tool_id, status)
             elif msg_type == MessageType.PLAN:
                 plan_entries = msg.get("entries", [])
                 if plan_entries:

@@ -1,9 +1,8 @@
 """Modal for entering rejection feedback.
 
 Returns a tuple of (feedback_text, action) where action is one of:
-- "retry": Move task to IN_PROGRESS and auto-restart agent
-- "stage": Move task to IN_PROGRESS and keep paused
-- None: Shelve/cancel - move task to BACKLOG
+- "return": Move task to IN_PROGRESS (manual restart)
+- "backlog": Move task to BACKLOG
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ class RejectionInputModal(ModalScreen[tuple[str, str] | None]):
 
     Returns:
         tuple[str, str] | None: A tuple of (feedback_text, action) where action
-            is "retry" or "stage", or None if shelved/cancelled.
+            is "return" or "backlog", or None if dismissed.
     """
 
     BINDINGS = REJECTION_INPUT_BINDINGS
@@ -45,9 +44,8 @@ class RejectionInputModal(ModalScreen[tuple[str, str] | None]):
             yield TextArea(id="feedback-input")
             yield Rule()
             with Horizontal(classes="button-row"):
-                yield Button("Retry", variant="primary", id="retry-btn")
-                yield Button("Stage", variant="default", id="stage-btn")
-                yield Button("Shelve", variant="error", id="shelve-btn")
+                yield Button("Back to In Progress", variant="primary", id="return-btn")
+                yield Button("Backlog", variant="error", id="backlog-btn")
 
         yield Footer(show_command_palette=False)
 
@@ -55,33 +53,25 @@ class RejectionInputModal(ModalScreen[tuple[str, str] | None]):
         """Focus the text area on mount."""
         self.query_one("#feedback-input", TextArea).focus()
 
-    @on(Button.Pressed, "#retry-btn")
-    def on_retry_btn(self) -> None:
-        self.action_retry()
+    @on(Button.Pressed, "#return-btn")
+    def on_return_btn(self) -> None:
+        self.action_send_back()
 
-    @on(Button.Pressed, "#stage-btn")
-    def on_stage_btn(self) -> None:
-        self.action_stage()
-
-    @on(Button.Pressed, "#shelve-btn")
-    def on_shelve_btn(self) -> None:
-        self.action_shelve()
+    @on(Button.Pressed, "#backlog-btn")
+    def on_backlog_btn(self) -> None:
+        self.action_backlog()
 
     def _get_feedback(self) -> str:
         """Get the feedback text from the input area."""
         text_area = self.query_one("#feedback-input", TextArea)
         return text_area.text.strip()
 
-    def action_retry(self) -> None:
-        """Submit feedback and retry - move to IN_PROGRESS and auto-restart agent."""
+    def action_send_back(self) -> None:
+        """Submit feedback and send back to IN_PROGRESS (manual restart)."""
         feedback = self._get_feedback()
-        self.dismiss((feedback, "retry"))
+        self.dismiss((feedback, "return"))
 
-    def action_stage(self) -> None:
-        """Submit feedback and stage - move to IN_PROGRESS but keep paused."""
+    def action_backlog(self) -> None:
+        """Send the task to BACKLOG."""
         feedback = self._get_feedback()
-        self.dismiss((feedback, "stage"))
-
-    def action_shelve(self) -> None:
-        """Shelve the task - move to BACKLOG."""
-        self.dismiss(None)
+        self.dismiss((feedback, "backlog"))

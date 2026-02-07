@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from textual.containers import Container, Horizontal
-from textual.widgets import Button, Footer, Label, ListItem, ListView, Static
+from textual.widgets import Button, Footer, Label, ListItem, ListView, Static, Switch
 
 from kagan.constants import KAGAN_LOGO
 from kagan.keybindings import WELCOME_BINDINGS, get_key_for_action
@@ -39,11 +39,10 @@ class ProjectListItem(ListItem):
         self.repo_paths = repo_paths
         self.last_opened = last_opened
         self.task_summary = task_summary
-        self.index = index  # 0-based index for number key shortcuts
+        self.index = index
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="project-item"):
-            # Number shortcut indicator (1-9)
             if self.index < 9:
                 yield Label(f"[{self.index + 1}]", classes="project-shortcut")
             else:
@@ -60,15 +59,12 @@ class ProjectListItem(ListItem):
         if len(self.repo_paths) == 1:
             truncated = truncate_path(self.repo_paths[0], max_width=45)
             return f"📁 {truncated}"
-        # Multiple repos: show abbreviated names
         return f"📁 {', '.join(Path(p).name for p in self.repo_paths)}"
 
     def _format_time(self) -> str:
         """Format last opened time as relative time with arrow indicator (e.g., '2h ↵')."""
         if not self.last_opened:
             return "Never ↵"
-
-        # Handle timezone-naive datetimes
         now = datetime.now(UTC)
         last_opened = self.last_opened
         if last_opened.tzinfo is None:
@@ -87,11 +83,7 @@ class ProjectListItem(ListItem):
 
 
 class WelcomeScreen(KaganScreen):
-    """Welcome screen shown on startup for project selection.
-
-    Displays a list of recent projects and allows creating new projects
-    or opening folders as projects.
-    """
+    """Welcome screen shown on startup for project selection."""
 
     BINDINGS = WELCOME_BINDINGS
 
@@ -105,7 +97,7 @@ class WelcomeScreen(KaganScreen):
         self._suggest_cwd = suggest_cwd
         self._cwd_path = cwd_path
         self._highlight_recent = highlight_recent
-        self._project_items: list[ProjectListItem] = []  # Track items for number keys
+        self._project_items: list[ProjectListItem] = []
 
     @property
     def kagan_app(self) -> KaganApp:
@@ -114,11 +106,8 @@ class WelcomeScreen(KaganScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="welcome-container"):
-            # Large ASCII art logo
             yield Static(KAGAN_LOGO, id="logo")
             yield Label("Your Development Cockpit", id="subtitle")
-
-            # CWD suggestion banner (shown when suggest_cwd=True) - inside welcome container
             if self._suggest_cwd and self._cwd_path:
                 with Container(id="cwd-suggestion-banner"):
                     yield Label("💡 Current directory is a git repository", id="cwd-title")
@@ -127,26 +116,28 @@ class WelcomeScreen(KaganScreen):
                         yield Button("Create Project", id="btn-cwd-create", variant="primary")
                         yield Button("Dismiss", id="btn-cwd-dismiss")
 
-            # "Continue where you left off?" highlight box (shown when highlight_recent=True)
             with Container(id="continue-highlight"):
                 yield Label("💡 Continue where you left off?", id="continue-title")
                 yield Label("", id="continue-project-name")
                 yield Label("", id="continue-project-info")
                 yield Label("Press Enter or 1 to continue", id="continue-hint")
 
-            # Recent projects header
             yield Label("RECENT PROJECTS", id="recent-header")
 
-            # Project list
             yield ListView(id="project-list")
 
-            # Empty state message
             yield Label(
                 "No recent projects. Create a new project or open a folder.",
                 id="empty-state",
             )
 
-            # Action buttons
+            with Horizontal(classes="toggle-row"):
+                yield Switch(
+                    id="auto-review-switch",
+                    value=self.ctx.config.general.auto_review,
+                )
+                yield Label("Enable auto review", classes="toggle-text")
+
             with Horizontal(id="actions"):
                 yield Button("New Project", id="btn-new", variant="primary")
                 yield Button("Open Folder", id="btn-open")
@@ -157,7 +148,6 @@ class WelcomeScreen(KaganScreen):
 
     async def on_mount(self) -> None:
         """Load recent projects on mount."""
-        # Context is always available after onboarding
         self.run_worker(self._load_recent_projects(), exclusive=True)
         self._update_keybinding_hints()
 
@@ -178,7 +168,6 @@ class WelcomeScreen(KaganScreen):
             project_service = self.ctx.project_service
             projects = await project_service.list_recent_projects(limit=10)
         except (AttributeError, RuntimeError):
-            # project_service not available - show empty state
             self._show_empty_state("No recent projects found.")
             self._hide_continue_highlight()
             return
@@ -204,7 +193,6 @@ class WelcomeScreen(KaganScreen):
             except (AttributeError, RuntimeError):
                 repo_paths = []
 
-            # Get task summary
             task_summary = await self._get_task_summary(project.id)
 
             item = ProjectListItem(
@@ -218,7 +206,6 @@ class WelcomeScreen(KaganScreen):
             self._project_items.append(item)
             await list_view.append(item)
 
-        # Highlight the most recent project if enabled
         if self._highlight_recent and projects:
             self._show_continue_highlight(projects[0].name, self._project_items[0].task_summary)
         else:
@@ -243,13 +230,7 @@ class WelcomeScreen(KaganScreen):
             pass
 
     async def _get_task_summary(self, project_id: str) -> str:
-        """Get a task summary with status indicators.
-
-        Status indicators:
-        - ● = Active work (has in_progress tasks)
-        - ◐ = Needs attention (has review tasks)
-        - ○ = Idle (only backlog/done)
-        """
+        """Get a task summary with status indicators."""
         try:
             task_service = self.ctx.task_service
             tasks = await task_service.list_tasks(project_id=project_id)
@@ -284,7 +265,7 @@ class WelcomeScreen(KaganScreen):
             empty_state.update(message)
             empty_state.display = True
         except Exception:
-            pass  # Widget not yet mounted
+            pass
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:
         """Enable actions only when valid."""
@@ -320,13 +301,11 @@ class WelcomeScreen(KaganScreen):
 
         project_service = self.ctx.project_service
 
-        # Check if this folder is already in a project
         existing = await project_service.find_project_by_repo_path(folder_path)
         if existing:
             await self._open_project(existing.id)
             return
 
-        # Create a new project with this folder
         project_name = Path(folder_path).name
         project_id = await project_service.create_project(
             name=project_name,
@@ -363,51 +342,22 @@ class WelcomeScreen(KaganScreen):
         """Quit the application."""
         self.app.exit()
 
-    # Number key shortcuts for quick project selection
     def _open_project_by_index(self, index: int) -> None:
         """Open project by 0-based index."""
         if index < len(self._project_items):
             project_id = self._project_items[index].project_id
             self.app.run_worker(self._open_project(project_id))
 
-    def action_open_project_1(self) -> None:
-        self._open_project_by_index(0)
-
-    def action_open_project_2(self) -> None:
-        self._open_project_by_index(1)
-
-    def action_open_project_3(self) -> None:
-        self._open_project_by_index(2)
-
-    def action_open_project_4(self) -> None:
-        self._open_project_by_index(3)
-
-    def action_open_project_5(self) -> None:
-        self._open_project_by_index(4)
-
-    def action_open_project_6(self) -> None:
-        self._open_project_by_index(5)
-
-    def action_open_project_7(self) -> None:
-        self._open_project_by_index(6)
-
-    def action_open_project_8(self) -> None:
-        self._open_project_by_index(7)
-
-    def action_open_project_9(self) -> None:
-        self._open_project_by_index(8)
+    def action_open_project(self, index: str) -> None:
+        """Open project by parameterized 0-based index."""
+        self._open_project_by_index(int(index))
 
     async def _open_project(self, project_id: str) -> None:
-        """Open a project and switch to appropriate screen.
-
-        If the project has no tasks, opens PlannerScreen.
-        Otherwise, opens KanbanScreen.
-        """
+        """Open a project and switch to appropriate screen."""
         try:
             project_service = self.ctx.project_service
             project = await project_service.open_project(project_id)
 
-            # Store active project in app context
             # Note: This requires active_project_id to be added to AppContext
             if hasattr(self.ctx, "active_project_id"):
                 self.ctx.active_project_id = project_id
@@ -433,14 +383,17 @@ class WelcomeScreen(KaganScreen):
                 if selected_repo is None:
                     self.notify("No repository selected", severity="warning")
                     return
-                self.kagan_app._apply_active_repo(selected_repo)
+                if not await self.kagan_app._apply_active_repo(selected_repo):
+                    # Repo is locked by another instance - modal was shown
+                    return
 
-            # Check if board is empty - if so, open Planner instead of Kanban
             tasks = await self.ctx.task_service.list_tasks(project_id=project_id)
             if len(tasks) == 0:
                 from kagan.ui.screens.planner import PlannerScreen
 
-                await self.app.switch_screen(PlannerScreen())
+                await self.app.switch_screen(
+                    PlannerScreen(agent_factory=self.kagan_app._agent_factory)
+                )
             else:
                 from kagan.ui.screens.kanban import KanbanScreen
 
@@ -461,6 +414,17 @@ class WelcomeScreen(KaganScreen):
         elif event.button.id == "btn-cwd-dismiss":
             self._dismiss_cwd_banner()
 
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Persist auto review preference from the welcome screen."""
+        if event.switch.id != "auto-review-switch":
+            return
+        self.ctx.config.general.auto_review = event.value
+        self.app.run_worker(
+            self.ctx.config.save(self.ctx.config_path),
+            exclusive=True,
+            exit_on_error=False,
+        )
+
     async def _create_project_from_cwd(self) -> None:
         """Create a new project from the current working directory."""
         if not self._cwd_path:
@@ -480,10 +444,9 @@ class WelcomeScreen(KaganScreen):
             banner = self.query_one("#cwd-suggestion-banner", Container)
             banner.display = False
         except Exception:
-            pass  # Banner not found
+            pass
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle project selection from list."""
         if isinstance(event.item, ProjectListItem):
-            # Use app-scoped worker to survive screen replacement
             self.app.run_worker(self._open_project(event.item.project_id))

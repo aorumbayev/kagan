@@ -1,15 +1,8 @@
-"""Keybindings for Kagan TUI application.
-
-Simplified keybinding system using Textual's native Binding class directly.
-"""
+"""Keybindings for Kagan TUI application."""
 
 from __future__ import annotations
 
 from textual.binding import Binding, BindingType
-
-# =============================================================================
-# App Bindings
-# =============================================================================
 
 APP_BINDINGS: list[BindingType] = [
     Binding(".", "command_palette", "Actions", key_display="."),
@@ -36,16 +29,11 @@ APP_BINDINGS: list[BindingType] = [
     Binding("f12", "toggle_debug_log", "Debug", show=False),
 ]
 
-# =============================================================================
-# Kanban Bindings
-# =============================================================================
 
 KANBAN_BINDINGS: list[BindingType] = [
-    # Primary actions
     Binding("n", "new_task", "New"),
     Binding("enter", "open_session", "Open", key_display="Enter"),
     Binding("slash", "toggle_search", "Search", key_display="/"),
-    # Task actions (hidden by default, surfaced via context hints / palette)
     Binding("N", "new_auto_task", "New AUTO", key_display="Shift+N", show=False),
     Binding("v", "view_details", "View", show=False),
     Binding("e", "edit_task", "Edit", show=False),
@@ -55,39 +43,33 @@ KANBAN_BINDINGS: list[BindingType] = [
     Binding("space", "toggle_peek", "Peek", show=False),
     Binding("f", "expand_description", "Expand", show=False),
     Binding("f5", "expand_description", "Full Editor", key_display="F5", show=False),
-    # Move between columns (power)
     Binding("H", "move_backward", "Move Left", key_display="Shift+H", show=False),
     Binding("L", "move_forward", "Move Right", key_display="Shift+L", show=False),
-    # Context-specific actions
     Binding("a", "start_agent", "Start agent", show=False),
     Binding("s", "stop_agent", "Stop agent", show=False),
-    Binding("w", "watch_agent", "Watch agent", show=False),
     Binding("D", "view_diff", "Diff", key_display="Shift+D", show=False),
     Binding("r", "open_review", "Review", show=False),
     Binding("m", "merge_direct", "Merge", show=False),
+    Binding("R", "rebase", "Rebase", key_display="Shift+R", show=False),
     Binding("p", "open_planner", "Plan Mode", show=False),
+    Binding("b", "set_task_branch", "Set Task Branch", show=False),
+    Binding("B", "set_default_branch", "Set Default Branch", key_display="Shift+B", show=False),
+    Binding("A", "switch_global_agent", "Switch Agent", key_display="Shift+A", show=False),
     Binding("comma", "open_settings", "Settings", key_display=",", show=False),
-    # Navigation - vim style
     Binding("h", "focus_left", "Left", show=False),
     Binding("j", "focus_down", "Down", show=False),
     Binding("k", "focus_up", "Up", show=False),
     Binding("l", "focus_right", "Right", show=False),
-    # Navigation - arrow keys
     Binding("left", "focus_left", "Left", show=False),
     Binding("right", "focus_right", "Right", show=False),
     Binding("down", "focus_down", "Down", show=False),
     Binding("up", "focus_up", "Up", show=False),
-    # Navigation - tab
     Binding("tab", "focus_right", "Next Column", show=False),
     Binding("shift+tab", "focus_left", "Prev Column", show=False),
-    # Utility
     Binding("escape", "deselect", "", show=False),
     Binding("ctrl+c", "interrupt", "", show=False),
 ]
 
-# =============================================================================
-# Modal Bindings
-# =============================================================================
 
 AGENT_OUTPUT_BINDINGS: list[BindingType] = [
     Binding("y", "copy", "Copy"),
@@ -125,22 +107,22 @@ HELP_BINDINGS: list[BindingType] = [
     Binding("q", "close", "Close", show=False),
 ]
 
-INSTALL_MODAL_BINDINGS: list[BindingType] = [
-    Binding("enter", "confirm", "Install"),
-    Binding("escape", "cancel", "Cancel"),
-]
-
 REJECTION_INPUT_BINDINGS: list[BindingType] = [
-    Binding("enter", "retry", "Retry", key_display="Enter", priority=True),
-    Binding("f2", "stage", "Stage", key_display="F2"),
-    Binding("escape", "shelve", "Shelve"),
+    Binding("enter", "send_back", "Back to In Progress", key_display="Enter", priority=True),
+    Binding("escape", "backlog", "Backlog"),
 ]
 
 REVIEW_BINDINGS: list[BindingType] = [
+    Binding("1", "show_summary", "Summary", key_display="1"),
+    Binding("2", "show_diff", "Diff Tab", key_display="2"),
+    Binding("3", "show_ai_review", "AI Tab", key_display="3"),
+    Binding("4", "show_agent_output", "Output Tab", key_display="4"),
     Binding("enter", "approve", "Approve", key_display="Enter"),
+    Binding("R", "rebase", "Rebase", key_display="Shift+R"),
     Binding("r", "reject", "Reject"),
-    Binding("g", "generate_review", "AI Review", show=False),
-    Binding("y", "copy", "Copy", show=False),
+    Binding("d", "view_diff", "Diff"),
+    Binding("g", "generate_review", "AI Review"),
+    Binding("y", "copy", "Copy"),
     Binding("escape", "close_or_cancel", "Close/Cancel"),
 ]
 
@@ -173,9 +155,6 @@ TMUX_GATEWAY_BINDINGS: list[BindingType] = [
     Binding("s", "skip_future", "Don't show again", priority=True),
 ]
 
-# =============================================================================
-# Screen Bindings
-# =============================================================================
 
 APPROVAL_BINDINGS: list[BindingType] = [
     Binding("escape", "cancel", "Cancel"),
@@ -184,9 +163,11 @@ APPROVAL_BINDINGS: list[BindingType] = [
 ]
 
 PLANNER_BINDINGS: list[BindingType] = [
-    Binding("escape", "to_board", "Go to Board"),
+    Binding("escape", "to_board", "Board"),
     Binding("ctrl+c", "cancel", "Stop", priority=True),
     Binding("f2", "refine", "Enhance", key_display="F2", priority=True),
+    Binding("b", "set_task_branch", "Set Task Branch", show=False),
+    Binding("B", "set_default_branch", "Set Default Branch", key_display="Shift+B", show=False),
 ]
 
 TASK_EDITOR_BINDINGS: list[BindingType] = [
@@ -195,39 +176,27 @@ TASK_EDITOR_BINDINGS: list[BindingType] = [
     Binding("alt+s", "finish", "Finish Editing", show=False),
 ]
 
-TROUBLESHOOTING_BINDINGS: list[BindingType] = [
-    Binding("q", "quit", "Quit"),
-    Binding("escape", "quit", "Quit"),
-    Binding("enter", "continue_app", "Continue", show=False),
-    Binding("c", "continue_app", "Continue", show=False),
-    Binding("i", "install_agent", "Install Agent", show=False),
-]
-
 WELCOME_BINDINGS: list[BindingType] = [
     Binding("n", "new_project", "New Project", show=False),
     Binding("o", "open_folder", "Open Folder", show=False),
     Binding("s", "settings", "Settings", show=False),
     Binding("enter", "open_selected", "Open", key_display="Enter", show=False),
     Binding("escape", "quit", "Quit", show=False),
-    # Number shortcuts for quick project selection (1-9)
-    Binding("1", "open_project_1", "Open #1", show=False),
-    Binding("2", "open_project_2", "Open #2", show=False),
-    Binding("3", "open_project_3", "Open #3", show=False),
-    Binding("4", "open_project_4", "Open #4", show=False),
-    Binding("5", "open_project_5", "Open #5", show=False),
-    Binding("6", "open_project_6", "Open #6", show=False),
-    Binding("7", "open_project_7", "Open #7", show=False),
-    Binding("8", "open_project_8", "Open #8", show=False),
-    Binding("9", "open_project_9", "Open #9", show=False),
+    Binding("1", "open_project('0')", "Open #1", show=False),
+    Binding("2", "open_project('1')", "Open #2", show=False),
+    Binding("3", "open_project('2')", "Open #3", show=False),
+    Binding("4", "open_project('3')", "Open #4", show=False),
+    Binding("5", "open_project('4')", "Open #5", show=False),
+    Binding("6", "open_project('5')", "Open #6", show=False),
+    Binding("7", "open_project('6')", "Open #7", show=False),
+    Binding("8", "open_project('7')", "Open #8", show=False),
+    Binding("9", "open_project('8')", "Open #9", show=False),
 ]
 
 ONBOARDING_BINDINGS: list[BindingType] = [
     Binding("escape", "quit", "Quit"),
 ]
 
-# =============================================================================
-# Widget Bindings
-# =============================================================================
 
 PERMISSION_PROMPT_BINDINGS: list[BindingType] = [
     Binding("enter", "allow_once", "Allow once", key_display="Enter"),
@@ -235,10 +204,6 @@ PERMISSION_PROMPT_BINDINGS: list[BindingType] = [
     Binding("escape", "deny", "Deny"),
     Binding("n", "deny", "Deny", show=False),
 ]
-
-# =============================================================================
-# Utility Functions
-# =============================================================================
 
 
 def get_key_for_action(bindings: list[BindingType], action: str, default: str = "?") -> str:

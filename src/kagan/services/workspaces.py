@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from sqlmodel import col, select
 
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
     from kagan.core.models.entities import Workspace
     from kagan.services.projects import ProjectService
     from kagan.services.tasks import TaskService
-    from kagan.services.types import RepoId, TaskId, WorkspaceId
 
 
 @dataclass
@@ -38,97 +36,7 @@ class RepoWorkspaceInput:
     target_branch: str
 
 
-class WorkspaceService(Protocol):
-    """Service interface for workspace operations."""
-
-    async def provision(
-        self,
-        task_id: TaskId,
-        repos: list[RepoWorkspaceInput],
-        *,
-        branch_name: str | None = None,
-    ) -> str:
-        """Provision a new workspace with worktrees for all repos."""
-
-    async def provision_for_project(
-        self,
-        task_id: TaskId,
-        project_id: str,
-        *,
-        branch_name: str | None = None,
-    ) -> str:
-        """Provision a workspace using all repos from the project."""
-
-    async def release(
-        self,
-        workspace_id: WorkspaceId,
-        *,
-        reason: str | None = None,
-        cleanup: bool = True,
-    ) -> None:
-        """Release a workspace and optionally clean up worktrees."""
-
-    async def get_workspace_repos(self, workspace_id: WorkspaceId) -> list[dict]:
-        """Get all repos for a workspace with their worktree paths."""
-
-    async def get_agent_working_dir(self, workspace_id: WorkspaceId) -> Path:
-        """Get the working directory for agents (typically primary repo)."""
-
-    async def get_workspace(self, workspace_id: WorkspaceId) -> Workspace | None:
-        """Return a workspace by ID."""
-
-    async def list_workspaces(
-        self,
-        *,
-        task_id: TaskId | None = None,
-        repo_id: RepoId | None = None,
-    ) -> list[Workspace]:
-        """List workspaces filtered by task or repo."""
-
-    async def create(self, task_id: TaskId, base_branch: str = "main") -> Path:
-        """Create a worktree for the task and return its path."""
-
-    async def delete(self, task_id: TaskId, *, delete_branch: bool = False) -> None:
-        """Delete a worktree and optionally its branch."""
-
-    async def get_path(self, task_id: TaskId) -> Path | None:
-        """Return the worktree path, if it exists."""
-
-    async def get_commit_log(self, task_id: TaskId, base_branch: str = "main") -> list[str]:
-        """Return commit messages for the task worktree."""
-
-    async def get_diff(self, task_id: TaskId, base_branch: str = "main") -> str:
-        """Return the diff between task branch and base."""
-
-    async def get_diff_stats(self, task_id: TaskId, base_branch: str = "main") -> str:
-        """Return diff stats for the task branch."""
-
-    async def get_files_changed(self, task_id: TaskId, base_branch: str = "main") -> list[str]:
-        """Return files changed by the task branch."""
-
-    async def get_merge_worktree_path(self, task_id: TaskId, base_branch: str = "main") -> Path:
-        """Return the merge worktree path, creating it if needed."""
-
-    async def prepare_merge_conflicts(
-        self, task_id: TaskId, base_branch: str = "main"
-    ) -> tuple[bool, str]:
-        """Prepare merge worktree for manual conflict resolution."""
-
-    async def cleanup_orphans(self, valid_task_ids: set[TaskId]) -> list[str]:
-        """Remove worktrees not associated with any known task."""
-
-    async def rebase_onto_base(
-        self, task_id: TaskId, base_branch: str = "main"
-    ) -> tuple[bool, str, list[str]]:
-        """Rebase the worktree branch onto the latest base branch."""
-
-    async def get_files_changed_on_base(
-        self, task_id: TaskId, base_branch: str = "main"
-    ) -> list[str]:
-        """Return files changed on the base branch since divergence."""
-
-
-class WorkspaceServiceImpl:
+class WorkspaceService:
     """Implementation of multi-repo WorkspaceService."""
 
     def __init__(
@@ -540,18 +448,18 @@ class WorkspaceServiceImpl:
 
         try:
             await self._reset_merge_worktree(merge_path, base_branch)
-            await self._run_git(
+            await self._git.run_git(
                 "merge",
                 "--squash",
                 branch_name,
                 cwd=merge_path,
                 check=False,
             )
-            status_out, _ = await self._run_git("status", "--porcelain", cwd=merge_path)
+            status_out, _ = await self._git.run_git("status", "--porcelain", cwd=merge_path)
             if any(marker in status_out for marker in ("UU ", "AA ", "DD ")):
                 return True, "Merge conflicts prepared"
 
-            await self._run_git("merge", "--abort", cwd=merge_path, check=False)
+            await self._git.run_git("merge", "--abort", cwd=merge_path, check=False)
             return False, "No conflicts detected"
         except Exception as exc:
             return False, f"Prepare failed: {exc}"
@@ -588,40 +496,55 @@ class WorkspaceServiceImpl:
                     continue
                 target_branch = workspace_repo.target_branch or base_branch
                 wt_path = Path(workspace_repo.worktree_path)
-                await self._run_git("fetch", "origin", target_branch, cwd=wt_path, check=False)
+                has_remote = await self._has_remote(wt_path)
+                if has_remote:
+                    await self._git.run_git(
+                        "fetch", "origin", target_branch, cwd=wt_path, check=False
+                    )
+                rebase_ref = f"origin/{target_branch}" if has_remote else target_branch
 
-                status_out, _ = await self._run_git("status", "--porcelain", cwd=wt_path)
-                if status_out.strip():
+                if await self._rebase_in_progress(wt_path):
+                    conflict_files = await self._collect_rebase_conflicts(wt_path, repo.name)
                     return (
                         False,
-                        f"Cannot rebase: {repo.name} has uncommitted changes",
-                        [],
+                        (
+                            f"Rebase already in progress for {repo.name}; resolve conflicts or "
+                            "abort the rebase"
+                        ),
+                        conflict_files,
                     )
 
-                stdout, stderr = await self._run_git(
+                status_out, _ = await self._git.run_git("status", "--porcelain", cwd=wt_path)
+                if status_out.strip():
+                    await self._git.run_git("add", "-A", cwd=wt_path)
+                    await self._git.run_git(
+                        "commit",
+                        "-m",
+                        f"chore: adding uncommitted agent changes ({repo.name})",
+                        cwd=wt_path,
+                    )
+
+                stdout, stderr = await self._git.run_git(
                     "rebase",
-                    f"origin/{target_branch}",
+                    rebase_ref,
                     cwd=wt_path,
                     check=False,
                 )
-                combined_output = f"{stdout}\n{stderr}".lower()
-                if "conflict" in combined_output or "could not apply" in combined_output:
-                    status_out, _ = await self._run_git("status", "--porcelain", cwd=wt_path)
-                    conflicting_files: list[str] = []
-                    for line in status_out.split("\n"):
-                        if (
-                            line.startswith("UU ")
-                            or line.startswith("AA ")
-                            or line.startswith("DD ")
-                        ):
-                            conflicting_files.append(f"{repo.name}:{line[3:].strip()}")
-
-                    await self._run_git("rebase", "--abort", cwd=wt_path, check=False)
+                if await self._rebase_in_progress(wt_path):
+                    conflict_files = await self._collect_rebase_conflicts(wt_path, repo.name)
                     return (
                         False,
-                        f"Rebase conflict in {repo.name} ({len(conflicting_files)} file(s))",
-                        conflicting_files,
+                        (
+                            f"Rebase conflict in {repo.name} ({len(conflict_files)} file(s)); "
+                            "resolve or abort"
+                        ),
+                        conflict_files,
                     )
+
+                combined_output = f"{stdout}\n{stderr}".strip().lower()
+                if "fatal:" in combined_output or "error:" in combined_output:
+                    failure = combined_output.strip() or "rebase failed"
+                    return False, f"Rebase failed in {repo.name}: {failure}", []
 
             return True, f"Successfully rebased onto {base_branch}", []
         except Exception as exc:
@@ -629,13 +552,38 @@ class WorkspaceServiceImpl:
                 for workspace_repo, _repo in repo_rows:
                     if not workspace_repo.worktree_path:
                         continue
-                    await self._run_git(
+                    await self._git.run_git(
                         "rebase",
                         "--abort",
                         cwd=Path(workspace_repo.worktree_path),
                         check=False,
                     )
             return False, f"Rebase failed: {exc}", []
+
+    async def abort_rebase(self, task_id: str) -> tuple[bool, str]:
+        workspace = await self._get_latest_workspace_for_task(task_id)
+        if workspace is None:
+            return False, f"Workspace not found for task {task_id}"
+
+        repo_rows = await self._get_workspace_repo_rows(workspace.id)
+        if not repo_rows:
+            return False, f"Workspace {workspace.id} has no repos"
+
+        aborted: list[str] = []
+        for workspace_repo, repo in repo_rows:
+            if not workspace_repo.worktree_path:
+                continue
+            wt_path = Path(workspace_repo.worktree_path)
+            if not await self._rebase_in_progress(wt_path):
+                continue
+            await self._git.run_git("rebase", "--abort", cwd=wt_path, check=False)
+            aborted.append(repo.name)
+
+        if not aborted:
+            return False, "No rebase in progress"
+
+        aborted_list = ", ".join(aborted)
+        return True, f"Aborted rebase in {len(aborted)} repo(s): {aborted_list}"
 
     async def get_files_changed_on_base(self, task_id: str, base_branch: str = "main") -> list[str]:
         workspace = await self._get_latest_workspace_for_task(task_id)
@@ -650,7 +598,7 @@ class WorkspaceServiceImpl:
                     continue
                 target_branch = workspace_repo.target_branch or base_branch
                 wt_path = Path(workspace_repo.worktree_path)
-                merge_base_out, _ = await self._run_git(
+                merge_base_out, _ = await self._git.run_git(
                     "merge-base",
                     "HEAD",
                     f"origin/{target_branch}",
@@ -661,7 +609,7 @@ class WorkspaceServiceImpl:
                     continue
 
                 merge_base = merge_base_out.strip()
-                diff_out, _ = await self._run_git(
+                diff_out, _ = await self._git.run_git(
                     "diff",
                     "--name-only",
                     merge_base,
@@ -749,7 +697,7 @@ class WorkspaceServiceImpl:
 
         worktree_path = await self.get_agent_working_dir(workspace.id)
         repo_root = self._resolve_repo_root(worktree_path)
-        await self._run_git(
+        await self._git.run_git(
             "worktree",
             "add",
             "-B",
@@ -761,18 +709,20 @@ class WorkspaceServiceImpl:
         return merge_path
 
     async def _reset_merge_worktree(self, merge_path: Path, base_branch: str) -> Path:
-        await self._run_git("fetch", "origin", base_branch, cwd=merge_path, check=False)
+        await self._git.run_git("fetch", "origin", base_branch, cwd=merge_path, check=False)
 
         base_ref = base_branch
         if await self._ref_exists(f"refs/remotes/origin/{base_branch}", cwd=merge_path):
             base_ref = f"origin/{base_branch}"
 
-        await self._run_git("checkout", self._merge_branch_name(merge_path.name), cwd=merge_path)
-        await self._run_git("reset", "--hard", base_ref, cwd=merge_path)
+        await self._git.run_git(
+            "checkout", self._merge_branch_name(merge_path.name), cwd=merge_path
+        )
+        await self._git.run_git("reset", "--hard", base_ref, cwd=merge_path)
         return merge_path
 
     async def _ref_exists(self, ref: str, cwd: Path) -> bool:
-        stdout, _ = await self._run_git(
+        stdout, _ = await self._git.run_git(
             "rev-parse",
             "--verify",
             "--quiet",
@@ -783,7 +733,7 @@ class WorkspaceServiceImpl:
         return bool(stdout.strip())
 
     async def _merge_in_progress(self, cwd: Path) -> bool:
-        stdout, _ = await self._run_git(
+        stdout, _ = await self._git.run_git(
             "rev-parse",
             "-q",
             "--verify",
@@ -792,6 +742,49 @@ class WorkspaceServiceImpl:
             check=False,
         )
         return bool(stdout.strip())
+
+    async def _rebase_in_progress(self, cwd: Path) -> bool:
+        stdout, _ = await self._git.run_git(
+            "rev-parse",
+            "-q",
+            "--verify",
+            "REBASE_HEAD",
+            cwd=cwd,
+            check=False,
+        )
+        if stdout.strip():
+            return True
+
+        for path_name in ("rebase-apply", "rebase-merge"):
+            path_out, _ = await self._git.run_git(
+                "rev-parse",
+                "--git-path",
+                path_name,
+                cwd=cwd,
+                check=False,
+            )
+            if path_out.strip() and Path(path_out.strip()).exists():
+                return True
+
+        return False
+
+    async def _collect_rebase_conflicts(self, cwd: Path, repo_name: str) -> list[str]:
+        stdout, _ = await self._git.run_git(
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+            cwd=cwd,
+            check=False,
+        )
+        files = [line.strip() for line in stdout.splitlines() if line.strip()]
+        if not files:
+            status_out, _ = await self._git.run_git("status", "--porcelain", cwd=cwd, check=False)
+            files = []
+            for line in status_out.splitlines():
+                if line.startswith(("UU ", "AA ", "DD ", "AU ", "UA ", "DU ", "UD ")):
+                    files.append(line[3:].strip())
+
+        return [f"{repo_name}:{path}" for path in files]
 
     def _resolve_repo_root(self, worktree_path: Path) -> Path:
         git_file = worktree_path / ".git"
@@ -803,24 +796,10 @@ class WorkspaceServiceImpl:
         git_dir = content.split(":", 1)[1].strip()
         return Path(git_dir).parent.parent.parent
 
-    async def _run_git(
-        self, *args: str, check: bool = True, cwd: Path | None = None
-    ) -> tuple[str, str]:
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-        )
-        stdout, stderr = await proc.communicate()
-        stdout_str = stdout.decode().strip()
-        stderr_str = stderr.decode().strip()
-
-        if check and proc.returncode != 0:
-            raise RuntimeError(stderr_str or f"git {args[0]} failed with code {proc.returncode}")
-
-        return stdout_str, stderr_str
+    async def _has_remote(self, cwd: Path) -> bool:
+        """Check if repo has an origin remote."""
+        stdout, _ = await self._git.run_git("remote", cwd=cwd, check=False)
+        return "origin" in {r.strip() for r in stdout.splitlines() if r.strip()}
 
     def _merge_branch_name(self, repo_id: str) -> str:
         return f"kagan/merge-worktree-{repo_id[:8]}"

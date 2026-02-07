@@ -5,10 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Protocol
-
-QueueLane = Literal["implementation", "review", "planner"]
-DEFAULT_QUEUE_LANE: QueueLane = "implementation"
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -39,42 +36,31 @@ class QueuedMessageService(Protocol):
         session_id: str,
         content: str,
         *,
-        lane: QueueLane = DEFAULT_QUEUE_LANE,
         author: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> QueuedMessage:
         """Queue a follow-up message for a session."""
         ...
 
-    async def cancel_queued(self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE) -> None:
+    async def cancel_queued(self, session_id: str) -> None:
         """Cancel any queued message for a session."""
         ...
 
-    async def get_status(
-        self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> QueueStatus:
+    async def get_status(self, session_id: str) -> QueueStatus:
         """Get queued message status for a session."""
         ...
 
-    async def take_queued(
-        self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> QueuedMessage | None:
+    async def take_queued(self, session_id: str) -> QueuedMessage | None:
         """Return and clear the queued message for a session."""
         ...
 
-    async def take_all_queued(
-        self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> list[QueuedMessage]: ...
+    async def take_all_queued(self, session_id: str) -> list[QueuedMessage]: ...
 
-    async def get_queued(
-        self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> list[QueuedMessage]:
+    async def get_queued(self, session_id: str) -> list[QueuedMessage]:
         """Get all queued messages without removing them."""
         ...
 
-    async def remove_message(
-        self, session_id: str, index: int, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> bool:
+    async def remove_message(self, session_id: str, index: int) -> bool:
         """Remove a specific message by index. Returns True if removed."""
         ...
 
@@ -85,14 +71,13 @@ class QueuedMessageServiceImpl:
     def __init__(self, *, preview_chars: int = 120) -> None:
         self._lock = asyncio.Lock()
         self._preview_chars = max(preview_chars, 8)
-        self._queue: dict[tuple[str, QueueLane], list[QueuedMessage]] = {}
+        self._queue: dict[str, list[QueuedMessage]] = {}
 
     async def queue_message(
         self,
         session_id: str,
         content: str,
         *,
-        lane: QueueLane = DEFAULT_QUEUE_LANE,
         author: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> QueuedMessage:
@@ -103,18 +88,16 @@ class QueuedMessageServiceImpl:
             queued_at=datetime.now(),
         )
         async with self._lock:
-            self._queue.setdefault(self._key(session_id, lane), []).append(message)
+            self._queue.setdefault(session_id, []).append(message)
         return message
 
-    async def cancel_queued(self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE) -> None:
+    async def cancel_queued(self, session_id: str) -> None:
         async with self._lock:
-            self._queue.pop(self._key(session_id, lane), None)
+            self._queue.pop(session_id, None)
 
-    async def get_status(
-        self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> QueueStatus:
+    async def get_status(self, session_id: str) -> QueueStatus:
         async with self._lock:
-            messages = self._queue.get(self._key(session_id, lane))
+            messages = self._queue.get(session_id)
         if not messages:
             return QueueStatus(
                 has_queued=False,
@@ -134,11 +117,9 @@ class QueuedMessageServiceImpl:
             author=last.author,
         )
 
-    async def take_queued(
-        self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> QueuedMessage | None:
+    async def take_queued(self, session_id: str) -> QueuedMessage | None:
         async with self._lock:
-            messages = self._queue.pop(self._key(session_id, lane), None)
+            messages = self._queue.pop(session_id, None)
         if not messages:
             return None
         if len(messages) == 1:
@@ -151,29 +132,22 @@ class QueuedMessageServiceImpl:
             queued_at=messages[-1].queued_at,
         )
 
-    async def take_all_queued(
-        self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> list[QueuedMessage]:
+    async def take_all_queued(self, session_id: str) -> list[QueuedMessage]:
         async with self._lock:
-            return self._queue.pop(self._key(session_id, lane), [])
+            return self._queue.pop(session_id, [])
 
-    async def get_queued(
-        self, session_id: str, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> list[QueuedMessage]:
+    async def get_queued(self, session_id: str) -> list[QueuedMessage]:
         async with self._lock:
-            return list(self._queue.get(self._key(session_id, lane), []))
+            return list(self._queue.get(session_id, []))
 
-    async def remove_message(
-        self, session_id: str, index: int, *, lane: QueueLane = DEFAULT_QUEUE_LANE
-    ) -> bool:
+    async def remove_message(self, session_id: str, index: int) -> bool:
         async with self._lock:
-            key = self._key(session_id, lane)
-            messages = self._queue.get(key)
+            messages = self._queue.get(session_id)
             if not messages or index < 0 or index >= len(messages):
                 return False
             messages.pop(index)
             if not messages:
-                self._queue.pop(key, None)
+                self._queue.pop(session_id, None)
             return True
 
     def _preview(self, content: str) -> str:
@@ -181,6 +155,3 @@ class QueuedMessageServiceImpl:
             return content
         cutoff = max(self._preview_chars - 3, 0)
         return f"{content[:cutoff]}..."
-
-    def _key(self, session_id: str, lane: QueueLane) -> tuple[str, QueueLane]:
-        return (session_id, lane)

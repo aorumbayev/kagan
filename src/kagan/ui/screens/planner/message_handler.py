@@ -13,18 +13,13 @@ if TYPE_CHECKING:
 
 
 class MessageHandler:
-    """Handles ACP messages for the planner screen.
-
-    This class encapsulates all message handling logic, keeping
-    the main screen class focused on UI concerns.
-    """
+    """Handles ACP messages for the planner screen."""
 
     def __init__(self, screen: PlannerScreen) -> None:
         self._screen = screen
 
     @property
     def state(self) -> PlannerState:
-        """Get current state from screen."""
         return self._screen._state
 
     @state.setter
@@ -73,7 +68,7 @@ class MessageHandler:
         """Handle agent ready notification."""
         self.state = self.state.with_agent_ready(True)
         self._screen._enable_input()
-        self._screen._update_status("ready", "Press F1 for help")
+        self._screen._update_status("ready", "Press ? for help")
 
     async def handle_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""

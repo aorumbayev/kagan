@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from kagan.config import KaganConfig
-    from kagan.core.models.enums import MergeReadiness, TaskStatus, TaskType
+    from kagan.core.models.enums import TaskStatus, TaskType
 
 type ProjectId = str
 type RepoId = str
@@ -27,14 +27,7 @@ class TaskLike(Protocol):
     task_type: TaskType
     assigned_hat: str | None
     agent_backend: str | None
+    base_branch: str | None
     acceptance_criteria: list[str]
-    review_summary: str | None
-    checks_passed: bool | None
-    merge_failed: bool
-    merge_error: str | None
-    merge_readiness: MergeReadiness
-    last_error: str | None
-    block_reason: str | None
-    total_iterations: int
 
     def get_agent_config(self, config: KaganConfig) -> Any: ...

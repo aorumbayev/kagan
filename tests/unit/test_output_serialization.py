@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from acp.schema import ToolCall as AcpToolCall
-from acp.schema import ToolCallUpdate as AcpToolCallUpdate
 
 from kagan.acp import messages
 from kagan.agents.output import serialize_agent_output
@@ -59,23 +58,7 @@ def test_serialize_agent_output_can_include_thinking() -> None:
 
 
 def test_serialize_agent_output_keeps_tool_call_and_fail_events() -> None:
-    tool_call = AcpToolCall(
-        toolCallId="tc-1",
-        title="Write file",
-        kind="edit",
-        status="completed",
-        content=[
-            {
-                "type": "content",
-                "content": {
-                    "type": "text",
-                    "text": "updated file",
-                },
-            }
-        ],
-        rawInput='{"path":"app.py"}',
-        rawOutput='{"ok":true}',
-    )
+    tool_call = AcpToolCall(toolCallId="tc-1", title="Write file", kind="edit")
     agent = _FakeAgent(
         buffered_messages=[
             messages.ToolCall(tool_call),
@@ -88,72 +71,7 @@ def test_serialize_agent_output_keeps_tool_call_and_fail_events() -> None:
 
     assert payload == {
         "messages": [
-            {
-                "type": "tool_call",
-                "id": "tc-1",
-                "title": "Write file",
-                "kind": "edit",
-                "status": "completed",
-                "content": [
-                    {
-                        "type": "content",
-                        "content": {
-                            "type": "text",
-                            "text": "updated file",
-                        },
-                    }
-                ],
-                "raw_input": '{"path":"app.py"}',
-                "raw_output": '{"ok":true}',
-            },
+            {"type": "tool_call", "id": "tc-1", "title": "Write file", "kind": "edit"},
             {"type": "agent_fail", "message": "Failed", "details": "Tool error"},
-        ]
-    }
-
-
-def test_serialize_agent_output_includes_tool_call_update_payload() -> None:
-    tool_call = AcpToolCall(
-        toolCallId="tc-2",
-        title="Read file",
-        kind="read",
-        status="completed",
-        content=[
-            {
-                "type": "content",
-                "content": {
-                    "type": "text",
-                    "text": "hello",
-                },
-            }
-        ],
-    )
-    update = AcpToolCallUpdate(toolCallId="tc-2", status="completed")
-
-    agent = _FakeAgent(
-        buffered_messages=[messages.ToolCallUpdate(tool_call, update)],
-        response_text="",
-    )
-
-    payload = json.loads(serialize_agent_output(cast("Any", agent)))
-    assert payload == {
-        "messages": [
-            {
-                "type": "tool_call_update",
-                "id": "tc-2",
-                "status": "completed",
-                "title": "Read file",
-                "kind": "read",
-                "content": [
-                    {
-                        "type": "content",
-                        "content": {
-                            "type": "text",
-                            "text": "hello",
-                        },
-                    }
-                ],
-                "raw_input": None,
-                "raw_output": None,
-            }
         ]
     }

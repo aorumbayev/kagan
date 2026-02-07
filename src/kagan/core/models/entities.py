@@ -1,8 +1,4 @@
-"""Core domain entities.
-
-These models are intentionally light on persistence concerns. Services and
-repositories should map to/from these entities.
-"""
+"""Core domain entities."""
 
 from __future__ import annotations
 
@@ -12,10 +8,11 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from kagan.core.models.enums import (
-    AgentTurnKind,
+    ExecutionRunReason,
     ExecutionStatus,
-    MergeReadiness,
     MergeStatus,
+    MergeType,
+    ScratchType,
     SessionStatus,
     SessionType,
     TaskPriority,
@@ -35,10 +32,7 @@ class DomainModel(BaseModel):
 
 
 class Project(DomainModel):
-    """Project container.
-
-    Relationships: repos, tasks, workspaces.
-    """
+    """Project container."""
 
     id: str
     name: str
@@ -49,10 +43,7 @@ class Project(DomainModel):
 
 
 class Repo(DomainModel):
-    """Repository configuration.
-
-    Relationships: projects, workspaces.
-    """
+    """Repository configuration."""
 
     id: str
     name: str
@@ -66,10 +57,7 @@ class Repo(DomainModel):
 
 
 class Task(DomainModel):
-    """Unit of work (Kanban card).
-
-    Relationships: project, parent task, workspaces, executions, merge.
-    """
+    """Unit of work (Kanban card)."""
 
     id: str
     project_id: str
@@ -80,17 +68,9 @@ class Task(DomainModel):
     task_type: TaskType = TaskType.PAIR
     assigned_hat: str | None = None
     agent_backend: str | None = None
+    base_branch: str | None = None
     parent_id: str | None = None
     acceptance_criteria: list[str] = Field(default_factory=list)
-    review_summary: str | None = None
-    checks_passed: bool | None = None
-    session_active: bool = False
-    total_iterations: int = 0
-    merge_failed: bool = False
-    merge_error: str | None = None
-    merge_readiness: MergeReadiness = MergeReadiness.RISK
-    last_error: str | None = None
-    block_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -150,52 +130,74 @@ class Session(DomainModel):
 
 
 class ExecutionProcess(DomainModel):
-    """Single execution run for a task."""
+    """Single execution run for a workspace session."""
 
     id: str
-    task_id: str
-    workspace_id: str | None = None
-    session_id: str | None = None
-    status: ExecutionStatus = ExecutionStatus.PENDING
-    executor: str
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    session_id: str
+    run_reason: ExecutionRunReason
+    executor_action: dict[str, Any] = Field(default_factory=dict)
+    status: ExecutionStatus = ExecutionStatus.RUNNING
     exit_code: int | None = None
+    dropped: bool = False
+    started_at: datetime
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
     error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class AgentTurn(DomainModel):
-    """Prompt/response/log/event data for an execution."""
+class ExecutionProcessLog(DomainModel):
+    """JSONL log stream for an execution process."""
+
+    execution_id: str
+    logs: str
+    byte_size: int
+    inserted_at: datetime
+
+
+class CodingAgentTurn(DomainModel):
+    """Prompt/summary data for an agent run."""
 
     id: str
-    execution_id: str
-    kind: AgentTurnKind
-    sequence: int = 0
-    source: str | None = None
-    content: str
+    execution_process_id: str
+    agent_session_id: str | None = None
+    prompt: str | None = None
+    summary: str | None = None
+    seen: bool = False
+    agent_message_id: str | None = None
     created_at: datetime
-    external_id: str | None = None
+    updated_at: datetime
+
+
+class ExecutionProcessRepoState(DomainModel):
+    """Per-repo state snapshot for an execution."""
+
+    id: str
+    execution_process_id: str
+    repo_id: str
+    before_head_commit: str | None = None
+    after_head_commit: str | None = None
+    merge_commit: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class Merge(DomainModel):
     """Merge action and result."""
 
     id: str
-    task_id: str
-    workspace_id: str | None = None
-    repo_id: str | None = None
-    strategy: str | None = None
-    target_branch: str | None = None
-    commit_sha: str | None = None
-    status: MergeStatus = MergeStatus.PENDING
-    readiness: MergeReadiness = MergeReadiness.RISK
+    workspace_id: str
+    repo_id: str
+    merge_type: MergeType
+    target_branch_name: str
+    merge_commit: str | None = None
     pr_url: str | None = None
     pr_number: int | None = None
-    error: str | None = None
-    merged_at: datetime | None = None
+    pr_status: MergeStatus = MergeStatus.OPEN
+    pr_merged_at: datetime | None = None
+    pr_merge_commit_sha: str | None = None
     created_at: datetime
-    updated_at: datetime
 
 
 class Tag(DomainModel):
@@ -208,10 +210,12 @@ class Tag(DomainModel):
 
 
 class Scratch(DomainModel):
-    """Scratchpad content tied to a task."""
+    """Scratch payload storage."""
 
-    task_id: str
-    content: str = ""
+    id: str
+    scratch_type: ScratchType
+    payload: dict[str, Any]
+    created_at: datetime
     updated_at: datetime
 
 

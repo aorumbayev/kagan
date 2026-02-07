@@ -8,6 +8,8 @@ import asyncio
 class TmuxError(RuntimeError):
     """Raised when tmux commands fail."""
 
+    pass
+
 
 async def run_tmux(*args: str) -> str:
     """Run a tmux command and return stdout."""

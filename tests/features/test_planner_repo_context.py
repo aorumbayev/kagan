@@ -6,12 +6,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.helpers.git import init_git_repo_with_commit
-from tests.snapshots.conftest import MockAgent
-from tests.snapshots.helpers import (
+from tests.helpers.mocks import MockAgent
+from tests.helpers.wait import (
     type_text,
     wait_for_planner_ready,
     wait_for_screen,
-    wait_for_workers,
 )
 
 from kagan.app import KaganApp
@@ -66,8 +65,7 @@ async def test_planner_uses_active_repo_context(
     config_path.write_text(
         """# Test config
 [general]
-auto_start = false
-auto_merge = false
+auto_review = false
 default_base_branch = "main"
 default_worker_agent = "claude"
 
@@ -110,11 +108,11 @@ active = true
         await wait_for_screen(pilot, PlannerScreen, timeout=10.0)
         await wait_for_planner_ready(pilot, timeout=10.0)
 
-        screen = cast(PlannerScreen, pilot.app.screen)
+        screen = cast("PlannerScreen", pilot.app.screen)
         screen.query_one(PlannerInput).focus()
         await type_text(pilot, "where")
         await pilot.press("enter")
-        await wait_for_workers(pilot, timeout=10.0)
+        await pilot.pause()
         await pilot.pause()
         assert str(repo_a) in _read_planner_output(screen)
 
@@ -125,10 +123,10 @@ active = true
         await wait_for_screen(pilot, PlannerScreen)
         await wait_for_planner_ready(pilot, timeout=10.0)
 
-        screen = cast(PlannerScreen, pilot.app.screen)
+        screen = cast("PlannerScreen", pilot.app.screen)
         screen.query_one(PlannerInput).focus()
         await type_text(pilot, "where")
         await pilot.press("enter")
-        await wait_for_workers(pilot, timeout=10.0)
+        await pilot.pause()
         await pilot.pause()
         assert str(repo_b) in _read_planner_output(screen)

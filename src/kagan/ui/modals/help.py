@@ -9,6 +9,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Label, Rule, Static, TabbedContent, TabPane
 
 from kagan.keybindings import HELP_BINDINGS
+from kagan.limits import DEBUG_BUILD
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -39,54 +40,277 @@ class HelpModal(ModalScreen[None]):
         """Compose the keybindings reference section."""
         children: list[Widget] = []
 
-        # Board Navigation
-        children.append(Static("Board Navigation", classes="help-section-title"))
-        children.append(self._key_row("h / Left", "Move focus to left column"))
-        children.append(self._key_row("l / Right", "Move focus to right column"))
-        children.append(self._key_row("j / Down", "Move focus down in column"))
-        children.append(self._key_row("k / Up", "Move focus up in column"))
-        children.append(self._key_row("Tab", "Cycle to next column"))
-        children.append(self._key_row("Shift+Tab", "Cycle to previous column"))
+        def add_section(title: str) -> None:
+            children.append(Static(title, classes="help-section-title"))
+
+        def add_subsection(title: str) -> None:
+            children.append(Static(title, classes="help-subsection"))
+
+        def add_rows(rows: list[tuple[str, str]]) -> None:
+            for key, desc in rows:
+                children.append(self._key_row(key, desc))
+
+        add_section("Global")
+        global_keys: list[tuple[str, str]] = [
+            ("? / F1", "Help"),
+            (". / Ctrl+P", "Actions palette"),
+            ("Ctrl+O", "Project selector"),
+            ("Ctrl+R", "Repo selector"),
+        ]
+        if DEBUG_BUILD:
+            global_keys.append(("F12", "Debug log"))
+        global_keys.append(("q", "Quit"))
+        add_rows(global_keys)
         children.append(Rule())
 
-        # Core Actions
-        children.append(Static("Core Actions", classes="help-section-title"))
-        children.append(self._key_row(".", "Open Actions palette"))
-        children.append(self._key_row("n", "Create new task"))
-        children.append(self._key_row("Enter", "Open session / start"))
-        children.append(self._key_row("/", "Search tasks"))
-        children.append(self._key_row("space", "Quick peek"))
+        add_section("Board (Kanban)")
+        add_subsection("Navigation")
+        add_rows(
+            [
+                ("h / Left", "Focus left column"),
+                ("l / Right", "Focus right column"),
+                ("j / Down", "Focus next card"),
+                ("k / Up", "Focus previous card"),
+                ("Tab", "Next column"),
+                ("Shift+Tab", "Previous column"),
+                ("Esc", "Clear focus / close search / close peek"),
+            ]
+        )
+        add_subsection("Tasks")
+        add_rows(
+            [
+                ("n", "New task"),
+                ("Shift+N", "New AUTO task"),
+                ("Enter", "Open task workspace"),
+                ("/", "Search tasks"),
+                ("v", "View details"),
+                ("e", "Edit task"),
+                ("x", "Delete task"),
+                ("y", "Duplicate task"),
+                ("c", "Copy task ID"),
+                ("space", "Peek overlay"),
+                ("f", "Expand description"),
+                ("F5", "Full editor"),
+            ]
+        )
+        add_subsection("Workflow")
+        add_rows(
+            [
+                ("Shift+H / Shift+L", "Move task left/right"),
+                ("p", "Plan mode"),
+                ("a", "Start agent (AUTO)"),
+                ("s", "Stop agent (AUTO)"),
+                ("Shift+D", "View diff (REVIEW)"),
+                ("r", "Review modal (REVIEW)"),
+                ("m", "Merge (REVIEW)"),
+                ("b", "Set task branch"),
+                ("Shift+B", "Set default branch"),
+                (",", "Settings"),
+                ("Ctrl+C", "Quit"),
+            ]
+        )
         children.append(Rule())
 
-        # Context-Specific
-        children.append(Static("Context-Specific", classes="help-section-title"))
-        children.append(self._key_row("e", "Edit selected task"))
-        children.append(self._key_row("v", "View task details"))
-        children.append(self._key_row("x", "Delete task"))
-        children.append(self._key_row("Shift+H / Shift+L", "Move task left / right"))
-        children.append(self._key_row("a", "Start agent (AUTO tasks)"))
-        children.append(self._key_row("s", "Stop agent (AUTO tasks)"))
-        children.append(self._key_row("w", "Watch agent output (AUTO tasks)"))
-        children.append(self._key_row("r", "Open review (REVIEW tasks)"))
-        children.append(self._key_row("Shift+D", "View diff (REVIEW tasks)"))
-        children.append(self._key_row("m", "Merge (REVIEW tasks)"))
+        add_section("Planner")
+        add_subsection("Screen")
+        add_rows(
+            [
+                ("Esc", "Back to board"),
+                ("Ctrl+C", "Stop current run"),
+                ("F2", "Enhance prompt"),
+                ("b", "Set task branch"),
+                ("Shift+B", "Set default branch"),
+            ]
+        )
+        add_subsection("Input")
+        add_rows(
+            [
+                ("Enter", "Send message"),
+                ("Shift+Enter / Ctrl+J", "New line"),
+                ("/clear", "Clear conversation"),
+                ("/help", "Show commands"),
+            ]
+        )
+        add_subsection("Slash Complete")
+        add_rows(
+            [
+                ("Up / Down", "Navigate commands"),
+                ("Enter", "Select command"),
+                ("Esc", "Dismiss list"),
+            ]
+        )
+        add_subsection("Plan Approval")
+        add_rows(
+            [
+                ("Up / Down or j / k", "Move selection"),
+                ("Enter", "Preview task"),
+                ("a", "Approve"),
+                ("e", "Edit"),
+                ("d / Esc", "Dismiss"),
+            ]
+        )
         children.append(Rule())
 
-        # Global
-        children.append(Static("Global", classes="help-section-title"))
-        children.append(self._key_row("?", "Open this help screen"))
-        children.append(self._key_row("Ctrl+O", "Open project selector"))
-        children.append(self._key_row("Ctrl+R", "Open repo selector"))
-        children.append(self._key_row("Ctrl+P", "Open Actions palette"))
-        children.append(self._key_row("q", "Quit application"))
-        children.append(self._key_row("Escape", "Close modal / cancel action"))
+        add_section("Welcome & Onboarding")
+        add_subsection("Welcome Screen")
+        add_rows(
+            [
+                ("Enter", "Open selected project"),
+                ("n", "New project"),
+                ("o", "Open folder"),
+                ("s", "Settings"),
+                ("1-9", "Open project by number"),
+                ("Esc", "Quit"),
+            ]
+        )
+        add_subsection("Onboarding")
+        add_rows([("Esc", "Quit")])
         children.append(Rule())
 
-        # Modal Patterns
-        children.append(Static("Modal Patterns", classes="help-section-title"))
-        children.append(self._key_row("Escape", "Close or cancel (never saves)"))
-        children.append(self._key_row("F2", "Save / finish (edit contexts)"))
-        children.append(self._key_row("Enter", "Primary confirm / approve"))
+        add_section("Repo Picker")
+        add_rows(
+            [
+                ("Up / Down or j / k", "Navigate repos"),
+                ("Enter", "Select repo"),
+                ("n", "Add repo"),
+                ("Esc", "Cancel"),
+            ]
+        )
+        children.append(Rule())
+
+        add_section("Modals")
+        add_subsection("Help")
+        add_rows([("Esc / q", "Close")])
+        add_subsection("Confirm")
+        add_rows(
+            [
+                ("Enter", "Confirm"),
+                ("y", "Yes"),
+                ("n", "No"),
+                ("Esc", "Cancel"),
+            ]
+        )
+        add_subsection("Task Details")
+        add_rows(
+            [
+                ("e", "Toggle edit"),
+                ("d", "Delete"),
+                ("f", "Expand description"),
+                ("F5", "Full editor"),
+                ("F2 / Alt+S", "Save (edit mode)"),
+                ("y", "Copy"),
+                ("Esc", "Close/Cancel"),
+            ]
+        )
+        add_subsection("Task Editor")
+        add_rows(
+            [
+                ("F2 / Alt+S", "Finish editing"),
+                ("Esc", "Cancel"),
+            ]
+        )
+        add_subsection("Description Editor")
+        add_rows(
+            [
+                ("F2 / Alt+S", "Save"),
+                ("Esc", "Cancel"),
+            ]
+        )
+        add_subsection("Settings")
+        add_rows(
+            [
+                ("F2 / Alt+S", "Save"),
+                ("Esc", "Cancel"),
+            ]
+        )
+        add_subsection("Duplicate Task")
+        add_rows(
+            [
+                ("Enter", "Create"),
+                ("Esc", "Cancel"),
+            ]
+        )
+        add_subsection("Diff")
+        add_rows(
+            [
+                ("Enter", "Approve"),
+                ("r", "Reject"),
+                ("y", "Copy"),
+                ("Esc", "Close"),
+            ]
+        )
+        add_subsection("Review")
+        add_rows(
+            [
+                ("Enter", "Approve"),
+                ("r", "Reject"),
+                ("g", "AI review"),
+                ("y", "Copy"),
+                ("Esc", "Close/Cancel"),
+            ]
+        )
+        add_subsection("Rejection Input")
+        add_rows(
+            [
+                ("Enter", "Back to In Progress"),
+                ("Esc", "Backlog"),
+            ]
+        )
+        add_subsection("Agent Output")
+        add_rows(
+            [
+                ("y", "Copy"),
+                ("c", "Cancel agent"),
+                ("Esc", "Close"),
+            ]
+        )
+        add_subsection("Agent/Review Chat Input")
+        add_rows(
+            [
+                ("Enter", "Send message"),
+                ("Shift+Enter / Ctrl+J", "New line"),
+            ]
+        )
+        if DEBUG_BUILD:
+            add_subsection("Debug Log")
+            add_rows(
+                [
+                    ("c", "Clear logs"),
+                    ("s", "Save logs"),
+                    ("Esc", "Close"),
+                ]
+            )
+        add_subsection("Tmux Gateway")
+        add_rows(
+            [
+                ("Enter", "Continue"),
+                ("Esc", "Cancel"),
+                ("s", "Don't show again"),
+            ]
+        )
+        add_subsection("Base Branch")
+        add_rows(
+            [
+                ("Enter", "Submit"),
+                ("Esc", "Cancel"),
+            ]
+        )
+        add_subsection("Permission Prompt")
+        add_rows(
+            [
+                ("Enter", "Allow once"),
+                ("a", "Allow always"),
+                ("Esc / n", "Deny"),
+            ]
+        )
+        add_subsection("No Dedicated Hotkeys")
+        add_rows(
+            [
+                ("Merge Dialog", "Use buttons and checkboxes"),
+                ("New Project", "Use inputs and buttons"),
+                ("Folder Picker", "Use input/tree and buttons"),
+            ]
+        )
 
         return Vertical(*children, id="keybindings-content")
 
@@ -109,7 +333,7 @@ class HelpModal(ModalScreen[None]):
             Rule(),
             Static("Actions Palette", classes="help-section-title"),
             Static(
-                "Press '.' to open the Actions palette. It lists available commands for the "
+                "Press '.' (or Ctrl+P) to open the Actions palette. It lists commands for the "
                 "current screen and task context.",
                 classes="help-paragraph",
             ),
@@ -221,8 +445,8 @@ class HelpModal(ModalScreen[None]):
             Static("AUTO Workflow:", classes="help-subsection"),
             Static(
                 "  1. Select task in BACKLOG, press Enter\n"
-                "  2. Agent starts working autonomously\n"
-                "  3. Press 'w' to watch progress\n"
+                "  2. Confirm start to run the agent and open output\n"
+                "  3. Enter on IN_PROGRESS opens output\n"
                 "  4. Agent moves task to REVIEW when done",
                 classes="help-paragraph-indented",
             ),
@@ -233,16 +457,15 @@ class HelpModal(ModalScreen[None]):
             Static("Review Process:", classes="help-subsection"),
             Static(
                 "  1. Select task in REVIEW\n"
-                "  2. Press g+d to view the diff\n"
-                "  3. Press g+r to open review modal\n"
-                "  4. Press 'g' to generate AI review\n"
-                "  5. Press 'a' to approve or 'r' to reject",
+                "  2. Press Enter to open review workspace\n"
+                "  3. Use Diff/AI Review/Agent Output tabs\n"
+                "  4. Press Enter to approve or 'r' to reject",
                 classes="help-paragraph-indented",
             ),
             Static(""),
             Static("Completing:", classes="help-subsection"),
             Static(
-                "  Approved tasks are merged to main, worktrees cleaned up, and moved to DONE.",
+                "  Press 'm' on the board to merge approved tasks. Worktrees are cleaned up.",
                 classes="help-paragraph-indented",
             ),
             id="workflows-content",

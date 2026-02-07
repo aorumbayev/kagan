@@ -23,6 +23,7 @@ from kagan.constants import (
 )
 from kagan.debug_log import setup_debug_logging
 from kagan.git_utils import has_git_repo
+from kagan.instance_lock import InstanceLock, LockInfo
 from kagan.keybindings import APP_BINDINGS
 from kagan.terminal import supports_truecolor
 from kagan.theme import KAGAN_THEME, KAGAN_THEME_256
@@ -54,19 +55,16 @@ class KaganApp(App):
         agent_factory: AgentFactory = create_agent,
     ):
         super().__init__()
-        # Register both themes and select based on terminal capabilities
+
         self.register_theme(KAGAN_THEME)
         self.register_theme(KAGAN_THEME_256)
 
-        # Auto-select theme based on truecolor support
         if supports_truecolor():
             self.theme = "kagan"
         else:
             self.theme = "kagan-256"
 
-        # Pub/sub signal for task changes - screens subscribe to this
         self.task_changed_signal: Signal[str] = Signal(self, "task_changed")
-        self.iteration_changed_signal: Signal[tuple[str, int]] = Signal(self, "iteration_changed")
 
         self.db_path = Path(db_path)
         self.config_path = Path(config_path)
@@ -75,6 +73,7 @@ class KaganApp(App):
         self.config: KaganConfig = KaganConfig()
         self.planner_state: PersistentPlannerState | None = None
         self._agent_factory = agent_factory
+        self._instance_lock: InstanceLock | None = None
 
     @property
     def ctx(self) -> AppContext:
@@ -84,16 +83,20 @@ class KaganApp(App):
 
     async def on_mount(self) -> None:
         """Initialize app on mount."""
-        # Set up debug logging capture for F12 viewer
         setup_debug_logging()
 
-        # Check for first boot (no config.toml file)
-        # The config directory may already exist (created by lock file),
-        # so we check for config.toml specifically
+        # Acquire per-repo instance lock before any initialization
+        self._instance_lock = InstanceLock(self.project_root)
+        if not self._instance_lock.acquire():
+            from kagan.ui.modals.instance_locked import InstanceLockedModal
+
+            lock_info = self._instance_lock.get_holder_info()
+            await self.push_screen(InstanceLockedModal(lock_info))
+            return
+
         if not self._config_exists():
-            # First boot - show onboarding screen to collect initial settings
             await self.push_screen(OnboardingScreen())
-            return  # _continue_after_onboarding will be called when onboarding finishes
+            return
 
         await self._initialize_app()
 
@@ -105,7 +108,6 @@ class KaganApp(App):
         """Initialize all app components."""
         self.config = KaganConfig.load(self.config_path)
         self.log("Config loaded", path=str(self.config_path))
-        self.log.debug("Config settings", auto_start=self.config.general.auto_start)
 
         if self._ctx is None:
             self._ctx = await create_app_context(
@@ -116,22 +118,18 @@ class KaganApp(App):
                 agent_factory=self._agent_factory,
             )
             ctx = self._ctx
-            # Wire signal bridge to map domain events to Textual signals
+
             bridge = create_signal_bridge(ctx.event_bus)
             wire_default_signals(bridge, self)
             ctx.signal_bridge = bridge
             self.log("AppContext initialized with SignalBridge")
 
-            # Reconcile orphaned worktrees/sessions before starting automation
             await self._reconcile_worktrees()
             await self._reconcile_sessions()
 
-            # Start automation service
             await ctx.automation_service.start()
-            await ctx.automation_service.initialize_existing_tasks()
             self.log("Automation service initialized (reactive mode)")
 
-        # Determine startup screen based on project context
         await self._startup_screen_decision()
 
     def _continue_after_welcome(self) -> None:
@@ -144,7 +142,6 @@ class KaganApp(App):
 
     def on_onboarding_screen_completed(self, message: OnboardingScreen.Completed) -> None:
         """Handle OnboardingScreen.Completed message."""
-        # Store the config from onboarding
         self.config = message.config
         self.call_later(self._continue_after_onboarding)
 
@@ -154,10 +151,9 @@ class KaganApp(App):
         Pops the onboarding screen, reinitializes context (now that config exists),
         and continues to the normal startup screen decision flow.
         """
-        # Pop the onboarding screen
+
         self.pop_screen()
 
-        # Initialize the app now that config exists
         await self._initialize_app()
 
     async def _startup_screen_decision(self) -> None:
@@ -171,10 +167,8 @@ class KaganApp(App):
         ctx = self.ctx
         cwd = self.project_root
 
-        # Try to find existing project containing this path
         project = await ctx.project_service.find_project_by_repo_path(str(cwd))
         if project:
-            # CWD is in an existing project - open it
             self.log("Detected project from CWD", project_id=project.id)
             ctx.active_project_id = project.id
             project = await ctx.project_service.open_project(project.id)
@@ -182,11 +176,9 @@ class KaganApp(App):
             await self._push_main_screen()
             return
 
-        # Check if CWD is a git repo not in any project
         suggest_cwd = await has_git_repo(cwd)
         cwd_path = str(cwd) if suggest_cwd else None
 
-        # Show welcome screen (with CWD suggestion if applicable)
         from kagan.ui.screens.welcome import WelcomeScreen
 
         await self.push_screen(WelcomeScreen(suggest_cwd=suggest_cwd, cwd_path=cwd_path))
@@ -203,7 +195,10 @@ class KaganApp(App):
         preferred_path: Path | None = None,
         allow_picker: bool = True,
     ) -> bool:
-        """Resolve and apply the active repo for a project."""
+        """Resolve and apply the active repo for a project.
+
+        Returns False if repo selection was cancelled or the repo is locked.
+        """
         repo = await self._select_repo_for_project(
             project,
             preferred_path=preferred_path,
@@ -212,8 +207,7 @@ class KaganApp(App):
         if repo is None:
             self._clear_active_repo()
             return False
-        self._apply_active_repo(repo)
-        return True
+        return await self._apply_active_repo(repo)
 
     async def _select_repo_for_project(
         self,
@@ -261,18 +255,55 @@ class KaganApp(App):
                 return repo
         return None
 
-    def _apply_active_repo(self, repo: Repo) -> None:
-        """Apply repo selection to app context and services."""
-        self.project_root = Path(repo.path)
+    async def _try_switch_lock(self, new_repo_path: Path) -> LockInfo | None:
+        """Attempt to switch lock to a new repo path.
+
+        Returns None on success, or LockInfo of the holder if the repo is locked.
+        This implements Option D: lock follows the active repo.
+        """
+        new_lock = InstanceLock(new_repo_path)
+
+        # Try to acquire the new lock first (before releasing old)
+        if not new_lock.acquire():
+            # New repo is locked by another instance
+            return new_lock.get_holder_info()
+
+        # Success - release old lock and switch
+        if self._instance_lock:
+            self._instance_lock.release()
+
+        self._instance_lock = new_lock
+        return None
+
+    async def _apply_active_repo(self, repo: Repo) -> bool:
+        """Apply repo selection to app context and services.
+
+        Returns True if successful, False if the repo is locked by another instance.
+        """
+        new_path = Path(repo.path)
+
+        # Check if we're switching to a different repo (not just re-applying same one)
+        if self._instance_lock and new_path.resolve() != self.project_root.resolve():
+            lock_holder = await self._try_switch_lock(new_path)
+            if lock_holder is not None:
+                # Repo is locked by another instance - show modal but don't quit
+                from kagan.ui.modals.instance_locked import InstanceLockedModal
+
+                await self.push_screen(InstanceLockedModal(lock_holder, is_startup=False))
+                return False
+
+        self.project_root = new_path
         self.ctx.active_repo_id = repo.id
 
-        from kagan.services.sessions import SessionServiceImpl
+        from kagan.services.sessions import SessionService
 
-        self.ctx.session_service = SessionServiceImpl(
+        self.ctx.session_service = SessionService(
             self.project_root,
             self.ctx.task_service,
+            self.ctx.workspace_service,
             self.config,
         )
+        return True
 
     def _clear_active_repo(self) -> None:
         """Clear active repo selection when a project has no repos."""
@@ -283,7 +314,7 @@ class KaganApp(App):
         ctx = self.ctx
         tasks = await ctx.task_service.list_tasks(project_id=ctx.active_project_id)
 
-        if len(tasks) == 0:
+        if not tasks:
             from kagan.ui.screens.planner import PlannerScreen
 
             await self.push_screen(PlannerScreen(agent_factory=self._agent_factory))
@@ -320,27 +351,28 @@ class KaganApp(App):
             for session_name in kagan_sessions:
                 task_id = session_name.replace("kagan-", "")
                 if task_id not in valid_task_ids:
-                    # Orphaned session - task no longer exists
                     await run_tmux("kill-session", "-t", session_name)
                     self.log(f"Killed orphaned session: {session_name}")
                 else:
-                    # Session exists, ensure session_active flag is correct
-                    await state.mark_session_active(task_id, True)
+                    continue
         except TmuxError:
-            pass  # No tmux server running
+            pass
 
     async def cleanup(self) -> None:
         """Terminate all agents and close resources."""
-        # Stop planner agent if it's still alive
         if self.planner_state and self.planner_state.agent:
             await self.planner_state.agent.stop()
         if self.planner_state and self.planner_state.refiner:
             await self.planner_state.refiner.stop()
 
-        # Close AppContext (handles automation + services)
         if self._ctx:
             await self._ctx.close()
             self._ctx = None
+
+        # Release instance lock
+        if self._instance_lock:
+            self._instance_lock.release()
+            self._instance_lock = None
 
     async def action_open_project_selector(self) -> None:
         """Return to the project selector screen."""
@@ -391,10 +423,14 @@ class KaganApp(App):
         if selected_repo is None:
             return
 
-        self._apply_active_repo(selected_repo)
+        if not await self._apply_active_repo(selected_repo):
+            # Repo is locked by another instance - modal was shown
+            return
+
+        from kagan.ui.screens.kanban import KanbanScreen
         from kagan.ui.screens.planner import PlannerScreen
 
-        if isinstance(self.screen, PlannerScreen):
+        if isinstance(self.screen, (PlannerScreen, KanbanScreen)):
             await self.screen.reset_for_repo_change()
         await self._sync_active_screen_header()
         display_name = selected_repo.display_name or selected_repo.name
@@ -492,7 +528,6 @@ class KaganApp(App):
                 ("Task: Move Right", "Move task to next column", "move_forward"),
                 ("Task: Start Agent", "Start AUTO agent", "start_agent"),
                 ("Task: Stop Agent", "Stop AUTO agent", "stop_agent"),
-                ("Task: Watch Agent", "Watch agent output", "watch_agent"),
                 ("Task: View Diff", "View diff (REVIEW tasks)", "view_diff"),
                 ("Task: Review", "Open review modal", "open_review"),
                 ("Task: Merge", "Merge task", "merge_direct"),
@@ -521,7 +556,13 @@ class KaganApp(App):
         self.push_screen(HelpModal())
 
     def action_toggle_debug_log(self) -> None:
-        """Toggle the debug log viewer (F12)."""
+        """Toggle the debug log viewer (F12). Disabled in production builds."""
+        from kagan.limits import DEBUG_BUILD
+
+        if not DEBUG_BUILD:
+            self.notify("Debug log disabled in production builds", severity="warning")
+            return
+
         from kagan.ui.modals.debug_log import DebugLogModal
 
         self.push_screen(DebugLogModal())

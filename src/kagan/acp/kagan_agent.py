@@ -45,6 +45,7 @@ from kagan.acp.buffers import AgentBuffers
 from kagan.acp.terminals import TerminalManager
 from kagan.debug_log import log
 from kagan.limits import SHUTDOWN_TIMEOUT, SUBPROCESS_LIMIT
+from kagan.mcp_naming import get_mcp_server_name
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -133,14 +134,16 @@ class KaganAgent:
     @property
     def command(self) -> str | None:
         from kagan import get_os_value
-        from kagan.ui.screens.troubleshooting import resolve_acp_command
+        from kagan.preflight import resolve_acp_command
 
         raw_command = get_os_value(self._agent_config.run_command)
         if raw_command is None:
             return None
 
         resolution = resolve_acp_command(raw_command, self._agent_config.name)
-        return resolution.resolved_command
+        if resolution.resolved_command is None:
+            return None
+        return shlex.join(resolution.resolved_command)
 
     def on_connect(self, conn) -> None:
         self._connection = conn
@@ -273,11 +276,11 @@ class KaganAgent:
             self.post_message(messages.AgentFail("Failed to initialize", str(exc)))
 
     def post_message(self, message: Message, buffer: bool = True) -> bool:
-        if self._message_target is not None:
-            return self._message_target.post_message(message)
-
         if buffer and not isinstance(message, messages.RequestPermission):
             self._buffers.buffer_message(message)
+
+        if self._message_target is not None:
+            return self._message_target.post_message(message)
         return False
 
     async def session_update(
@@ -633,7 +636,7 @@ class KaganAgent:
         log.info(f"[_acp_new_session] Sending session/new request with cwd={cwd}")
 
         kagan_mcp = McpServerStdio(
-            name="kagan",
+            name=get_mcp_server_name(),
             command="kagan",
             args=["mcp", "--readonly"],
             env=[],

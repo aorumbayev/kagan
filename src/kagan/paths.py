@@ -35,12 +35,7 @@ def get_cache_dir() -> Path:
 
 
 def get_worktree_base_dir() -> Path:
-    """Get the base directory for git worktrees.
-
-    - Linux: /var/tmp/kagan/
-    - macOS: /var/folders/.../kagan/ (via tempfile)
-    - Windows: %TEMP%/kagan/
-    """
+    """Get the base directory for git worktrees."""
     override = os.environ.get("KAGAN_WORKTREE_BASE")
     if override:
         return Path(override)

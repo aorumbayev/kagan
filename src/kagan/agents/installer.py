@@ -1,44 +1,131 @@
 """Agent installer functionality.
 
-Provides utilities to check if coding agents (Claude Code, OpenCode) are installed
+Provides utilities to check if coding agents are installed
 and install them via their official installation methods.
+
+Supports: Claude Code, OpenCode, Codex, Gemini CLI, Kimi CLI, GitHub Copilot.
 """
 
 from __future__ import annotations
 
 import asyncio
 import shutil
-from typing import TYPE_CHECKING, Literal
+from enum import StrEnum
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-# Default timeout for installation (2 minutes)
+    from kagan.builtin_agents import BuiltinAgent
+
+
 INSTALL_TIMEOUT_SECONDS = 120
 
-# Supported agent types
-type AgentType = Literal["claude", "opencode"]
 
-# Agent-specific install commands
-INSTALL_COMMANDS: dict[AgentType, str] = {
-    "claude": "curl -fsSL https://claude.ai/install.sh | sh",
-    "opencode": "npm i -g opencode-ai",
-}
+class AgentType(StrEnum):
+    """Supported agent types."""
 
-# Legacy constant for backward compatibility
-INSTALL_COMMAND = INSTALL_COMMANDS["claude"]
+    CLAUDE = "claude"
+    OPENCODE = "opencode"
+    CODEX = "codex"
+    GEMINI = "gemini"
+    KIMI = "kimi"
+    COPILOT = "copilot"
+
+
+# Agents that require npm for installation
+_NPM_AGENTS: frozenset[AgentType] = frozenset(
+    {AgentType.OPENCODE, AgentType.CODEX, AgentType.GEMINI, AgentType.COPILOT}
+)
+
+# Agents that require uv for installation
+_UV_AGENTS: frozenset[AgentType] = frozenset({AgentType.KIMI})
 
 
 class InstallerError(Exception):
     """Raised when installation operations fail."""
 
 
-def get_install_command(agent: AgentType = "claude") -> str:
+def _get_builtin_agent(agent: AgentType | str) -> BuiltinAgent:
+    """Get builtin agent or raise ValueError if not found."""
+    from kagan.builtin_agents import get_builtin_agent
+
+    builtin = get_builtin_agent(str(agent))
+    if not builtin:
+        valid = list(AgentType)
+        raise ValueError(f"Unsupported agent: {agent}. Supported agents: {valid}")
+    return builtin
+
+
+def check_agent_installed(agent: AgentType | str) -> bool:
+    """Check if an agent's CLI executable is available in PATH.
+
+    Args:
+        agent: The agent to check. One of: claude, opencode, codex, gemini, kimi, copilot.
+
+    Returns:
+        True if the agent's CLI is available, False otherwise.
+
+    Raises:
+        ValueError: If an unsupported agent is specified.
+    """
+    builtin = _get_builtin_agent(agent)
+    # Extract executable from interactive_command (e.g., "claude" from "claude")
+    from kagan.config import get_os_value
+
+    cmd = get_os_value(builtin.config.interactive_command)
+    if not cmd:
+        return False
+    executable = cmd.split()[0]
+    return shutil.which(executable) is not None
+
+
+def _check_prerequisites(agent: AgentType) -> str | None:
+    """Check if prerequisites for installing an agent are met.
+
+    Args:
+        agent: The agent to check prerequisites for.
+
+    Returns:
+        Error message if prerequisites are missing, None if all prerequisites are met.
+    """
+    if agent in _NPM_AGENTS:
+        if shutil.which("npm") is None:
+            return "npm is not installed. Please install Node.js and npm first: https://nodejs.org/"
+    elif agent in _UV_AGENTS:
+        if shutil.which("uv") is None:
+            return (
+                "uv is not installed. "
+                "Please install uv first: https://docs.astral.sh/uv/getting-started/installation/"
+            )
+    # claude uses curl which is typically available on all systems
+    return None
+
+
+def _get_path_hint(agent: AgentType) -> str:
+    """Get PATH hint message for post-installation.
+
+    Args:
+        agent: The agent that was installed.
+
+    Returns:
+        Hint string about PATH configuration.
+    """
+    if agent in _NPM_AGENTS:
+        return "You may need to add npm global bin directory to your PATH."
+    elif agent in _UV_AGENTS:
+        return "You may need to add ~/.local/bin to your PATH."
+    else:
+        # claude
+        return "You may need to restart your shell or add claude to your PATH."
+
+
+def get_install_command(agent: AgentType | str = AgentType.CLAUDE) -> str:
     """Return the install command string for display.
 
     Args:
         agent: The agent to get the install command for.
-               Supported values: "claude", "opencode".
+               One of: claude, opencode, codex, gemini, kimi, copilot.
                Defaults to "claude".
 
     Returns:
@@ -47,11 +134,8 @@ def get_install_command(agent: AgentType = "claude") -> str:
     Raises:
         ValueError: If an unsupported agent is specified.
     """
-    if agent not in INSTALL_COMMANDS:
-        raise ValueError(
-            f"Unsupported agent: {agent}. Supported agents: {list(INSTALL_COMMANDS.keys())}"
-        )
-    return INSTALL_COMMANDS[agent]
+    builtin = _get_builtin_agent(agent)
+    return builtin.install_command
 
 
 async def check_claude_code_installed() -> bool:
@@ -60,8 +144,7 @@ async def check_claude_code_installed() -> bool:
     Returns:
         True if claude command is available, False otherwise.
     """
-    # Use shutil.which for synchronous check - it's fast enough
-    # and doesn't require spawning a subprocess
+
     return shutil.which("claude") is not None
 
 
@@ -116,7 +199,6 @@ async def _run_install(
         stderr_str = stderr.decode().strip()
 
         if proc.returncode == 0:
-            # Verify installation - handle both sync and async verify functions
             result = verify_fn()
             if asyncio.iscoroutine(result):
                 verified = await result
@@ -163,10 +245,11 @@ async def install_claude_code(
         - success: True if installation completed successfully
         - message: Descriptive message about the result or error
     """
+    builtin = _get_builtin_agent(AgentType.CLAUDE)
     return await _run_install(
-        command=INSTALL_COMMANDS["claude"],
+        command=builtin.install_command,
         verify_fn=check_claude_code_installed,
-        agent_name="Claude Code",
+        agent_name=builtin.config.name,
         success_msg="Claude Code installed successfully",
         path_hint="You may need to restart your shell or add claude to your PATH.",
         timeout=timeout,
@@ -189,17 +272,17 @@ async def install_opencode(
         - success: True if installation completed successfully
         - message: Descriptive message about the result or error
     """
-    # Check if npm is available before attempting installation
     if shutil.which("npm") is None:
         return False, (
             "Installation failed: npm is not installed. "
             "Please install Node.js and npm first: https://nodejs.org/"
         )
 
+    builtin = _get_builtin_agent(AgentType.OPENCODE)
     return await _run_install(
-        command=INSTALL_COMMANDS["opencode"],
+        command=builtin.install_command,
         verify_fn=check_opencode_installed,
-        agent_name="OpenCode",
+        agent_name=builtin.config.name,
         success_msg="OpenCode installed successfully",
         path_hint="You may need to add npm global bin directory to your PATH.",
         timeout=timeout,
@@ -207,16 +290,16 @@ async def install_opencode(
 
 
 async def install_agent(
-    agent: AgentType,
+    agent: AgentType | str,
     timeout: float = INSTALL_TIMEOUT_SECONDS,
 ) -> tuple[bool, str]:
     """Install the specified coding agent.
 
-    This is a generic dispatcher that routes to the appropriate
-    agent-specific installer.
+    Generic installer that works for all supported agents.
+    Checks prerequisites, runs install command, and verifies installation.
 
     Args:
-        agent: The agent to install. Supported values: "claude", "opencode".
+        agent: The agent to install. One of: claude, opencode, codex, gemini, kimi, copilot.
         timeout: Maximum time in seconds to wait for installation.
                  Defaults to 120 seconds.
 
@@ -228,11 +311,22 @@ async def install_agent(
     Raises:
         ValueError: If an unsupported agent is specified.
     """
-    if agent == "claude":
-        return await install_claude_code(timeout=timeout)
-    elif agent == "opencode":
-        return await install_opencode(timeout=timeout)
-    else:
-        raise ValueError(
-            f"Unsupported agent: {agent}. Supported agents: {list(INSTALL_COMMANDS.keys())}"
-        )
+    builtin = _get_builtin_agent(agent)
+    agent_type = AgentType(str(agent))
+
+    # Check prerequisites
+    prereq_error = _check_prerequisites(agent_type)
+    if prereq_error:
+        return False, f"Installation failed: {prereq_error}"
+
+    agent_name = builtin.config.name
+    path_hint = _get_path_hint(agent_type)
+
+    return await _run_install(
+        command=builtin.install_command,
+        verify_fn=lambda: check_agent_installed(agent_type),
+        agent_name=agent_name,
+        success_msg=f"{agent_name} installed successfully",
+        path_hint=path_hint,
+        timeout=timeout,
+    )

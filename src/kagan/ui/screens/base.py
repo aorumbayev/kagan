@@ -15,8 +15,6 @@ if TYPE_CHECKING:
 
 
 class KaganScreen(Screen):
-    """Base screen with typed app access."""
-
     @property
     def kagan_app(self) -> KaganApp:
         """Get the typed KaganApp instance."""
@@ -41,11 +39,14 @@ class KaganScreen(Screen):
         if project is None:
             header.update_project(Path(self.kagan_app.project_root).name)
             header.update_repo("")
-            return
+        else:
+            header.update_project(project.name)
+            repo_name = await self._get_active_repo_name(project)
+            header.update_repo(repo_name or "")
 
-        header.update_project(project.name)
-        repo_name = await self._get_active_repo_name(project)
-        header.update_repo(repo_name or "")
+        tasks = await self.ctx.task_service.list_tasks(project_id=self.ctx.active_project_id)
+        header.update_count(len(tasks))
+        header.update_agent_from_config(self.kagan_app.config)
 
     async def _get_active_project(self) -> Project | None:
         project_service = self.ctx.project_service

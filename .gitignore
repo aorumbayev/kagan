@@ -196,3 +196,5 @@ kagan*.mcp.json
 *kagan.json
 
 coverage.json
+
+.claude/

@@ -40,12 +40,15 @@ class DiffService(Protocol):
 
     async def get_repo_diff(self, workspace_id: str, repo_id: str) -> RepoDiff:
         """Get diff for a single repo."""
+        ...
 
     async def get_all_diffs(self, workspace_id: str) -> list[RepoDiff]:
         """Get diffs for all repos in a workspace."""
+        ...
 
     async def get_unified_diff(self, workspace_id: str) -> str:
         """Get unified diff across all repos."""
+        ...
 
 
 class DiffServiceImpl:

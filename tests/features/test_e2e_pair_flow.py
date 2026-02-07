@@ -128,15 +128,9 @@ async def test_pair_flow_review_to_done(tmp_path: Path, monkeypatch: pytest.Monk
         await pilot.pause()
 
         await wait_for_screen(pilot, KanbanScreen, timeout=20.0)
-        cast("KaganApp", pilot.app).config.general.default_pair_terminal_backend = "tmux"
-        cast("KaganApp", pilot.app).ctx.config.general.default_pair_terminal_backend = "tmux"
-        cast("KaganApp", pilot.app).config.ui.skip_pair_instructions = True
+        cast("KaganApp", pilot.app).config.ui.skip_tmux_gateway = True
         tasks = await app.ctx.task_service.list_tasks()
         pair_task = next(task for task in tasks if task.task_type == TaskType.PAIR)
-        await app.ctx.task_service.update_fields(pair_task.id, terminal_backend="tmux")
-        refreshed_task = await app.ctx.task_service.get_task(pair_task.id)
-        assert refreshed_task is not None
-        pair_task = refreshed_task
         await wait_for_widget(pilot, f"#card-{pair_task.id}", timeout=10.0)
         card = pilot.app.screen.query_one(f"#card-{pair_task.id}", TaskCard)
         card.focus()

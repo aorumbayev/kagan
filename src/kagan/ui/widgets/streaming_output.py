@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from acp.schema import PlanEntry
@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from textual.containers import VerticalScroll
 from textual.widgets import Rule, Static
 
+from kagan.core.models.enums import StreamPhase, StreamRole
 from kagan.limits import MAX_TOOL_CALLS
 from kagan.ui.utils.animation import WAVE_FRAMES, WAVE_INTERVAL_MS
 from kagan.ui.widgets.agent_content import StreamingMarkdown, UserInput
@@ -31,14 +32,11 @@ if TYPE_CHECKING:
 
     from kagan.acp.messages import Answer
     from kagan.core.models.entities import Task
-    from kagan.ui.widgets.tool_call import ToolCallStatus
 
-# Phase state machine
-StreamPhase = Literal["idle", "thinking", "streaming", "complete"]
 
 # Regex to strip plan/todos XML blocks from response text
 XML_BLOCK_PATTERN = re.compile(r"<(todos|plan)>.*?</\1>", re.DOTALL | re.IGNORECASE)
-# Pattern to detect start of potential XML block (for buffering during streaming)
+
 XML_PARTIAL_START = re.compile(r"<(todos|plan)", re.IGNORECASE)
 
 
@@ -76,8 +74,8 @@ class StreamingOutput(VerticalScroll):
         self._tool_calls: OrderedDict[str, ToolCall] = OrderedDict()
         self._plan_display: PlanDisplay | None = None
         self._thinking_indicator: ThinkingIndicator | None = None
-        self._phase: StreamPhase = "idle"
-        self._xml_buffer: str = ""  # Buffer for potential partial XML tags
+        self._phase: StreamPhase = StreamPhase.IDLE
+        self._xml_buffer: str = ""
 
     @property
     def phase(self) -> StreamPhase:
@@ -102,7 +100,7 @@ class StreamingOutput(VerticalScroll):
         self._thinking_indicator = ThinkingIndicator(classes="thinking-indicator")
         await self.mount(self._thinking_indicator)
         self._scroll_to_end()
-        self._phase = "thinking"
+        self._phase = StreamPhase.THINKING
         return self._thinking_indicator
 
     async def _remove_thinking_indicator(self) -> None:
@@ -112,17 +110,16 @@ class StreamingOutput(VerticalScroll):
             self._thinking_indicator = None
 
     async def post_response(self, fragment: str = "") -> StreamingMarkdown:
-        """Get or create agent response widget. Resets thought state."""
+        """Get or create agent response widget."""
         await self._remove_thinking_indicator()
         self._agent_thought = None
-        self._phase = "streaming"
+        self._phase = StreamPhase.STREAMING
 
-        # Filter out XML blocks from fragment (with buffering for partial tags)
         if fragment:
             fragment = self._filter_xml_content(fragment)
 
         if self._agent_response is None:
-            self._agent_response = StreamingMarkdown(role="response")
+            self._agent_response = StreamingMarkdown(role=StreamRole.RESPONSE)
             await self.mount(self._agent_response)
             if fragment:
                 await self._agent_response.append_content(fragment)
@@ -132,29 +129,19 @@ class StreamingOutput(VerticalScroll):
         return self._agent_response
 
     def _filter_xml_content(self, fragment: str) -> str:
-        """Filter XML blocks from fragment, buffering partial tags.
-
-        This handles streaming where XML tags may arrive split across fragments.
-        """
-        # Combine buffer with new fragment
+        """Filter XML blocks from fragment, buffering partial tags."""
         combined = self._xml_buffer + fragment
         self._xml_buffer = ""
 
-        # First, remove any complete XML blocks
         combined = XML_BLOCK_PATTERN.sub("", combined)
 
-        # Check if we're inside an incomplete XML block
-        # Look for opening tag without matching closing tag
         match = XML_PARTIAL_START.search(combined)
         if match:
             tag_name = match.group(1).lower()
             close_tag = f"</{tag_name}>"
 
-            # Check if there's a closing tag after the opening
             close_pos = combined.lower().find(close_tag, match.start())
             if close_pos == -1:
-                # No closing tag found - we're in a partial block
-                # Buffer everything from the start of the XML tag
                 safe_content = combined[: match.start()]
                 self._xml_buffer = combined[match.start() :]
                 return safe_content
@@ -169,11 +156,9 @@ class StreamingOutput(VerticalScroll):
         if not self._xml_buffer:
             return ""
 
-        # At end of stream, filter complete blocks and return rest
         content = XML_BLOCK_PATTERN.sub("", self._xml_buffer)
         self._xml_buffer = ""
 
-        # If it still looks like an incomplete XML block, discard it
         if XML_PARTIAL_START.match(content):
             return ""
 
@@ -183,7 +168,7 @@ class StreamingOutput(VerticalScroll):
         """Get or create agent thought widget."""
         await self._remove_thinking_indicator()
         if self._agent_thought is None:
-            self._agent_thought = StreamingMarkdown(role="thought")
+            self._agent_thought = StreamingMarkdown(role=StreamRole.THOUGHT)
             await self.mount(self._agent_thought)
             await self._agent_thought.append_content(fragment)
         else:
@@ -200,23 +185,21 @@ class StreamingOutput(VerticalScroll):
         self._agent_response = None
         self._agent_thought = None
 
-        # Generate unique ID if tool_id is unknown/empty
         if not tool_id or tool_id == "unknown":
             tool_id = f"auto-{uuid4().hex[:8]}"
         elif tool_id in self._tool_calls:
-            # Avoid duplicate widget IDs for repeated tool call messages.
-            # Return existing widget - this makes the method idempotent.
             return self._tool_calls[tool_id]
 
-        # Double-check DOM for existing widget (defensive against race conditions)
-        widget_id = f"tool-{tool_id}"
+        # Sanitize tool_id for use as widget ID (only letters, numbers, underscores, hyphens)
+        sanitized_id = tool_id.replace("/", "-")
+        widget_id = f"tool-{sanitized_id}"
         try:
             existing = self.query_one(f"#{widget_id}", ToolCall)
             # Widget exists in DOM but not in our tracking dict - add it back
             self._tool_calls[tool_id] = existing
             return existing
         except Exception:
-            pass  # Widget doesn't exist in DOM, proceed to create
+            pass
 
         tool_data = AcpToolCall(
             toolCallId=tool_id,
@@ -227,10 +210,9 @@ class StreamingOutput(VerticalScroll):
         widget = ToolCall(tool_data, id=widget_id)
         self._tool_calls[tool_id] = widget
 
-        # Evict oldest entries if over limit
         while len(self._tool_calls) > MAX_TOOL_CALLS:
             _old_id, old_widget = self._tool_calls.popitem(last=False)
-            old_widget.remove()  # Remove from DOM (sync remove is fine)
+            old_widget.remove()
 
         await self.mount(widget)
         self._scroll_to_end()
@@ -239,7 +221,7 @@ class StreamingOutput(VerticalScroll):
     def update_tool_status(self, tool_id: str, status: str) -> None:
         """Update a tool call's status."""
         if tool_id in self._tool_calls:
-            self._tool_calls[tool_id].update_status(cast("ToolCallStatus", status))
+            self._tool_calls[tool_id].update_status(status)
 
     async def post_note(self, text: str, classes: str = "") -> Widget:
         """Post a simple text note."""
@@ -249,13 +231,12 @@ class StreamingOutput(VerticalScroll):
         return widget
 
     async def post_plan(self, entries: list[PlanEntry] | list[dict[str, object]]) -> PlanDisplay:
-        """Display agent plan entries. Updates existing if present."""
+        """Display agent plan entries."""
         self._agent_thought = None
-        # Do NOT reset _agent_response here - causes line overwriting bug
+
         normalized = _coerce_plan_entries(entries)
 
         if self._plan_display is not None:
-            # Update existing plan display in-place
             self._plan_display.update_entries(normalized)
         else:
             self._plan_display = PlanDisplay(normalized, classes="plan-display")
@@ -322,7 +303,7 @@ class StreamingOutput(VerticalScroll):
         self._agent_thought = None
         self._plan_display = None
         self._xml_buffer = ""
-        self._phase = "idle"
+        self._phase = StreamPhase.IDLE
 
     async def clear(self) -> None:
         """Clear all content from the container."""
@@ -333,7 +314,7 @@ class StreamingOutput(VerticalScroll):
         self._plan_display = None
         self._thinking_indicator = None
         self._xml_buffer = ""
-        self._phase = "idle"
+        self._phase = StreamPhase.IDLE
 
     def _scroll_to_end(self) -> None:
         """Scroll to the bottom of the container."""
@@ -349,17 +330,13 @@ class StreamingOutput(VerticalScroll):
 
         for child in self.children:
             if isinstance(child, StreamingMarkdown):
-                # StreamingMarkdown widgets - get content property
                 parts.append(child.content)
             elif isinstance(child, UserInput):
-                # User input has stored content
                 parts.append(f"> {child._content}")
             elif isinstance(child, ToolCall):
-                # Tool calls have title/status
                 title = child._tool_call.title
                 parts.append(f"[Tool: {title}]")
             elif isinstance(child, PlanDisplay):
-                # Plan display - extract entries
                 entries = [f"- {e.content}" for e in child._entries]
                 if entries:
                     parts.append("Plan:\n" + "\n".join(entries))

@@ -41,6 +41,7 @@ dependencies = [
     "tomlkit>=0.13.0",
     "aiofiles>=24.1.0",
     "platformdirs>=4.3.0",
+    "filelock>=3.16.0",
 ]
 
 [project.scripts]
@@ -115,6 +116,7 @@ markers = [
     "snapshot: visual regression tests",
     "e2e: full application tests",
     "property: property-based tests with hypothesis",
+    "mock_platform_system(name): override platform.system() for the test",
 ]
 addopts = ""
 
@@ -161,6 +163,15 @@ help = "Preview current and next prerelease version"
 [tool.poe.tasks.release-dry-run-beta]
 shell = "uv run semantic-release --noop -vv version --as-prerelease --prerelease-token beta --print-tag"
 help = "Dry-run beta release (no changes made)"
+
+[tool.poe.tasks.workflows-check]
+help = "Validate GitHub Actions workflows using act (requires act installed)"
+sequence = [
+    { shell = "act --list -W .github/workflows/" },
+    { shell = "act push --dryrun -W .github/workflows/ci.yml" },
+    { shell = "act workflow_dispatch --dryrun -W .github/workflows/cd.yaml" },
+    { shell = "act workflow_dispatch --dryrun -W .github/workflows/post-release-update-test.yaml" },
+]
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]

@@ -1,7 +1,4 @@
-"""Factory Protocol for creating Agent instances.
-
-Enables dependency injection for testing without modifying production behavior.
-"""
+"""Factory Protocol for creating Agent instances."""
 
 from __future__ import annotations
 
@@ -15,11 +12,7 @@ if TYPE_CHECKING:
 
 
 class AgentFactory(Protocol):
-    """Protocol for creating Agent instances.
-
-    Production code uses `create_agent` (default implementation).
-    Tests inject custom factories to return mocks.
-    """
+    """Protocol for creating Agent instances."""
 
     def __call__(
         self,
@@ -28,16 +21,7 @@ class AgentFactory(Protocol):
         *,
         read_only: bool = False,
     ) -> Agent:
-        """Create an Agent instance.
-
-        Args:
-            project_root: Project root directory for agent execution
-            agent_config: Configuration for the agent
-            read_only: If True, agent cannot modify files (review/planner mode)
-
-        Returns:
-            Agent instance ready for start()
-        """
+        """Create an Agent instance."""
         ...
 
 
@@ -47,19 +31,7 @@ def create_agent(
     *,
     read_only: bool = False,
 ) -> Agent:
-    """Default agent factory - returns real Agent instance.
-
-    This is the production implementation used by all components.
-    Tests can replace this with a mock factory via dependency injection.
-
-    Args:
-        project_root: Project root directory for agent execution
-        agent_config: Configuration for the agent
-        read_only: If True, agent cannot modify files
-
-    Returns:
-        Real Agent instance
-    """
+    """Create a production Agent instance."""
     from kagan.acp.agent import Agent
 
     return Agent(project_root, agent_config, read_only=read_only)

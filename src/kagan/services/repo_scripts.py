@@ -47,18 +47,23 @@ class RepoScriptService(Protocol):
         script_type: ScriptType,
     ) -> ScriptResult:
         """Run a script for a specific repo."""
+        ...
 
     async def run_all_setup(self, workspace_id: str) -> list[ScriptResult]:
         """Run setup scripts for all repos."""
+        ...
 
     async def run_all_cleanup(self, workspace_id: str) -> list[ScriptResult]:
         """Run cleanup scripts for all repos."""
+        ...
 
     async def start_dev_servers(self, workspace_id: str) -> list[asyncio.subprocess.Process]:
         """Start dev servers for all repos that have them."""
+        ...
 
     async def stop_dev_servers(self, workspace_id: str) -> None:
         """Stop dev servers for a workspace."""
+        ...
 
 
 class RepoScriptServiceImpl:

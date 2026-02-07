@@ -6,16 +6,26 @@ import asyncio
 import contextlib
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, Protocol
+from datetime import datetime
+from typing import TYPE_CHECKING
 
 from kagan.agents.agent_factory import AgentFactory, create_agent
-from kagan.agents.output import build_merge_conflict_note, serialize_agent_output
+from kagan.agents.output import serialize_agent_output
 from kagan.agents.prompt import build_prompt
 from kagan.agents.prompt_loader import get_review_prompt
 from kagan.agents.signals import Signal, SignalResult, parse_signal
 from kagan.constants import MODAL_TITLE_MAX_LENGTH
 from kagan.core.events import DomainEvent, EventBus, TaskStatusChanged
-from kagan.core.models.enums import MergeReadiness, TaskStatus, TaskType
+from kagan.core.models.enums import (
+    ExecutionKind,
+    ExecutionRunReason,
+    ExecutionStatus,
+    NotificationSeverity,
+    SessionStatus,
+    SessionType,
+    TaskStatus,
+    TaskType,
+)
 from kagan.debug_log import log
 from kagan.git_utils import get_git_user_identity
 from kagan.limits import AGENT_TIMEOUT_LONG
@@ -25,53 +35,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from kagan.acp.agent import Agent
+    from kagan.adapters.git.operations import GitOperationsAdapter
     from kagan.config import AgentConfig, KaganConfig
+    from kagan.services.executions import ExecutionService
     from kagan.services.merges import MergeService
-    from kagan.services.sessions import SessionServiceImpl
+    from kagan.services.queued_messages import QueuedMessageService
+    from kagan.services.sessions import SessionService
     from kagan.services.tasks import TaskService
     from kagan.services.types import TaskLike
     from kagan.services.workspaces import WorkspaceService
-
-
-class AutomationService(Protocol):
-    """Reactive automation service that responds to domain events."""
-
-    async def start(self) -> None:
-        """Start background automation tasks."""
-
-    async def stop(self) -> None:
-        """Stop background automation tasks."""
-
-    async def handle_event(self, event: DomainEvent) -> None:
-        """Process a domain event and trigger actions."""
-
-    async def initialize_existing_tasks(self) -> None:
-        """Spawn agents for existing in-progress AUTO tasks."""
-
-    @property
-    def running_tasks(self) -> set[str]:
-        """Return the IDs of tasks currently running."""
-
-    def is_running(self, task_id: str) -> bool:
-        """Return True if the task is currently running."""
-
-    def get_iteration_count(self, task_id: str) -> int:
-        """Return the current iteration count for a task."""
-
-    def get_running_agent(self, task_id: str) -> Agent | None:
-        """Return the running agent for a task, if any."""
-
-    def is_reviewing(self, task_id: str) -> bool:
-        """Return True if the task is currently in review phase."""
-
-    def get_review_agent(self, task_id: str) -> Agent | None:
-        """Return the running review agent for a task, if any."""
-
-    async def stop_task(self, task_id: str) -> bool:
-        """Stop automation for a task and return success."""
-
-    async def spawn_for_task(self, task: TaskLike) -> bool:
-        """Spawn automation for a task."""
 
 
 @dataclass(slots=True)
@@ -80,12 +52,24 @@ class RunningTaskState:
 
     task: asyncio.Task[None] | None = None
     agent: Agent | None = None
-    iteration: int = 0
-    review_agent: Agent | None = None  # Review agent for watching
-    is_reviewing: bool = False  # Currently in review phase
+    run_count: int = 0
+    review_agent: Agent | None = None
+    is_reviewing: bool = False
+    session_id: str | None = None
+    execution_id: str | None = None
 
 
-class AutomationServiceImpl:
+@dataclass(slots=True)
+class AutomationEvent:
+    """Queue item for automation worker."""
+
+    kind: ExecutionKind
+    task_id: str
+    old_status: TaskStatus | None = None
+    new_status: TaskStatus | None = None
+
+
+class AutomationService:
     """Reactive automation service for AUTO task processing.
 
     Instead of polling, reacts to task status changes via a queue.
@@ -98,39 +82,37 @@ class AutomationServiceImpl:
         task_service: TaskService,
         workspace_service: WorkspaceService,
         config: KaganConfig,
-        session_service: SessionServiceImpl | None = None,
+        session_service: SessionService | None = None,
+        execution_service: ExecutionService | None = None,
         merge_service: MergeService | None = None,
         on_task_changed: Callable[[], None] | None = None,
-        on_iteration_changed: Callable[[str, int], None] | None = None,
         on_error: Callable[[str, str], None] | None = None,
-        notifier: Callable[[str, str, Literal["information", "warning", "error"]], None]
-        | None = None,
+        notifier: Callable[[str, str, NotificationSeverity], None] | None = None,
         agent_factory: AgentFactory = create_agent,
         event_bus: EventBus | None = None,
+        queued_message_service: QueuedMessageService | None = None,
+        git_adapter: GitOperationsAdapter | None = None,
     ) -> None:
         self._tasks = task_service
         self._workspaces = workspace_service
         self._config = config
         self._sessions = session_service
+        self._executions = execution_service
         self._merge_service = merge_service
+        self._queued = queued_message_service
         self._running: dict[str, RunningTaskState] = {}
         self._on_task_changed = on_task_changed
-        self._on_iteration_changed = on_iteration_changed
         self._on_error = on_error
         self._notifier = notifier
         self._agent_factory = agent_factory
         self._event_bus = event_bus
+        self._git = git_adapter
 
-        # Event queue for reactive processing
-        self._event_queue: asyncio.Queue[tuple[str, TaskStatus | None, TaskStatus | None]] = (
-            asyncio.Queue()
-        )
+        self._event_queue: asyncio.Queue[AutomationEvent] = asyncio.Queue()
         self._worker_task: asyncio.Task[None] | None = None
         self._event_task: asyncio.Task[None] | None = None
         self._started = False
 
-        # Lock to serialize merge operations (prevents race conditions when
-        # multiple tasks complete around the same time)
         self._merge_lock = asyncio.Lock()
 
     @property
@@ -155,30 +137,20 @@ class AutomationServiceImpl:
     async def handle_event(self, event: DomainEvent) -> None:
         """Process a domain event and trigger actions."""
         if isinstance(event, TaskStatusChanged):
-            await self._event_queue.put((event.task_id, event.from_status, event.to_status))
+            await self._event_queue.put(
+                AutomationEvent(
+                    kind=ExecutionKind.STATUS,
+                    task_id=event.task_id,
+                    old_status=event.from_status,
+                    new_status=event.to_status,
+                )
+            )
 
     async def _event_loop(self) -> None:
         """Subscribe to domain events and enqueue relevant automation work."""
         assert self._event_bus is not None
         async for event in self._event_bus.subscribe(TaskStatusChanged):
             await self.handle_event(event)
-
-    async def initialize_existing_tasks(self) -> None:
-        """Spawn agents for existing IN_PROGRESS AUTO tasks.
-
-        Called on startup to handle tasks that were already in progress
-        before the automation service started listening for changes.
-        Only runs if auto_start is enabled in config.
-        """
-        if not self._config.general.auto_start:
-            log.info("auto_start disabled, skipping initialization of existing tasks")
-            return
-
-        tasks = await self._tasks.get_by_status(TaskStatus.IN_PROGRESS)
-        for task in tasks:
-            if task.task_type == TaskType.AUTO:
-                log.info(f"Queueing existing IN_PROGRESS task: {task.id}")
-                await self._event_queue.put((task.id, None, TaskStatus.IN_PROGRESS))
 
     async def handle_status_change(
         self, task_id: str, old_status: TaskStatus | None, new_status: TaskStatus | None
@@ -188,7 +160,14 @@ class AutomationServiceImpl:
         Called by TaskService when task status changes.
         Queues the event for processing by the worker loop.
         """
-        await self._event_queue.put((task_id, old_status, new_status))
+        await self._event_queue.put(
+            AutomationEvent(
+                kind=ExecutionKind.STATUS,
+                task_id=task_id,
+                old_status=old_status,
+                new_status=new_status,
+            )
+        )
         log.debug(f"Queued status change: {task_id} {old_status} -> {new_status}")
 
     async def _worker_loop(self) -> None:
@@ -200,77 +179,66 @@ class AutomationServiceImpl:
         log.info("Automation worker loop started")
         while True:
             try:
-                task_id, old_status, new_status = await self._event_queue.get()
-                await self._process_event(task_id, old_status, new_status)
+                event = await self._event_queue.get()
+                await self._process_event(event)
             except asyncio.CancelledError:
                 log.info("Automation worker loop cancelled")
                 break
             except Exception as e:
                 log.error(f"Error in automation worker: {e}")
 
-    async def _process_event(
+    async def _process_event(self, event: AutomationEvent) -> None:
+        """Process a queued automation event."""
+        if event.kind == ExecutionKind.SPAWN:
+            await self._process_spawn(event.task_id)
+            return
+
+        await self._process_status_event(event.task_id, event.old_status, event.new_status)
+
+    async def _process_status_event(
         self, task_id: str, old_status: TaskStatus | None, new_status: TaskStatus | None
     ) -> None:
         """Process a single status change event."""
-        # Task deleted
         if new_status is None:
             await self._stop_if_running(task_id)
             return
 
-        # Get full task to check type
         task = await self._tasks.get_task(task_id)
         if task is None:
             await self._stop_if_running(task_id)
             return
 
-        # Only handle AUTO tasks
         if task.task_type != TaskType.AUTO:
             return
 
-        # React to status
-        if new_status == TaskStatus.IN_PROGRESS:
-            await self._ensure_running(task)
-        elif old_status == TaskStatus.IN_PROGRESS and new_status != TaskStatus.REVIEW:
-            # Moved OUT of IN_PROGRESS to non-REVIEW status - stop if running
+        if old_status == TaskStatus.IN_PROGRESS and new_status != TaskStatus.REVIEW:
             # Don't stop for REVIEW transitions as that's part of normal completion flow
             await self._stop_if_running(task_id)
 
-    async def _ensure_running(self, task: TaskLike) -> None:
-        """Ensure an agent is running for this task."""
-        if task.id in self._running:
-            log.debug(f"Task {task.id} already running")
+    async def _process_spawn(self, task_id: str) -> None:
+        """Handle explicit spawn requests from the UI."""
+        if task_id in self._running:
+            log.debug(f"Task {task_id} already running")
+            return
+
+        task = await self._tasks.get_task(task_id)
+        if task is None:
+            return
+        if task.task_type != TaskType.AUTO:
             return
 
         max_agents = self._config.general.max_concurrent_agents
         if len(self._running) >= max_agents:
-            log.debug(
-                f"At capacity ({max_agents}), task {task.id[:8]} will start when capacity frees"
-            )
-            return  # Don't re-queue - will be checked when capacity frees
+            log.debug(f"At capacity ({max_agents}), task {task.id[:8]} will not start")
+            return
 
         await self._spawn(task)
 
     async def _spawn(self, task: TaskLike) -> None:
-        """Spawn an agent for a task. Called only from worker loop."""
+        """Spawn an agent for a task."""
         title = task.title[:MODAL_TITLE_MAX_LENGTH]
         log.info(f"Spawning agent for AUTO task {task.id}: {title}")
 
-        # Reset review state from previous attempts
-        await self._tasks.update_fields(
-            task.id,
-            checks_passed=None,
-            review_summary=None,
-            merge_failed=False,
-            merge_error=None,
-            last_error=None,
-            block_reason=None,
-        )
-
-        # Clear previous agent logs for fresh retry
-        await self._tasks.clear_agent_logs(task.id)
-
-        # Add to _running BEFORE creating task to avoid race condition
-        # where task checks _running before we've added the entry
         state = RunningTaskState()
         self._running[task.id] = state
 
@@ -280,7 +248,7 @@ class AutomationServiceImpl:
         runner_task.add_done_callback(self._make_done_callback(task.id))
 
     async def _stop_if_running(self, task_id: str) -> None:
-        """Stop agent if running. Called only from worker loop."""
+        """Stop agent if running."""
         state = self._running.get(task_id)
         if state is None:
             return
@@ -297,35 +265,9 @@ class AutomationServiceImpl:
 
         self._running.pop(task_id, None)
 
-        if self._on_iteration_changed:
-            self._on_iteration_changed(task_id, 0)
-
-        # After freeing capacity, check for waiting IN_PROGRESS AUTO tasks
-        asyncio.create_task(self._check_waiting_tasks())
-
-    async def _check_waiting_tasks(self) -> None:
-        """Check if any IN_PROGRESS AUTO tasks are waiting to start."""
-        max_agents = self._config.general.max_concurrent_agents
-        if len(self._running) >= max_agents:
-            return
-
-        # Get all tasks
-        tasks = await self._tasks.list_tasks()
-        for task in tasks:
-            if (
-                task.status == TaskStatus.IN_PROGRESS
-                and task.task_type == TaskType.AUTO
-                and task.id not in self._running
-            ):
-                # Trigger check for this task
-                await self._event_queue.put((task.id, None, TaskStatus.IN_PROGRESS))
-                return  # Only queue one at a time
-
     def _handle_task_done(self, task_id: str, task: asyncio.Task[None]) -> None:
         """Handle agent task completion."""
         self._running.pop(task_id, None)
-        if self._on_iteration_changed:
-            self._on_iteration_changed(task_id, 0)
 
     def _make_done_callback(self, task_id: str) -> Callable[[asyncio.Task[None]], None]:
         """Create task done callback with weak self reference."""
@@ -337,8 +279,6 @@ class AutomationServiceImpl:
                 service._handle_task_done(task_id, task)
 
         return on_done
-
-    # --- Public API (thread-safe via queue) ---
 
     @property
     def running_tasks(self) -> set[str]:
@@ -361,26 +301,15 @@ class AutomationServiceImpl:
         state = self._running[task_id]
         return state.agent
 
-    def get_iteration_count(self, task_id: str) -> int:
-        """Get current iteration count for a task."""
+    def get_execution_id(self, task_id: str) -> str | None:
+        """Get execution id for a running task."""
         state = self._running.get(task_id)
-        return state.iteration if state else 0
+        return state.execution_id if state else None
 
-    def reset_iterations(self, task_id: str) -> None:
-        """Reset the session iteration counter for a task.
-
-        This resets the in-memory "leash" counter used for the current session,
-        not the lifetime total_iterations stored in the database.
-        Called when a task is rejected and retried.
-        """
+    def get_run_count(self, task_id: str) -> int:
+        """Get current run count for a task."""
         state = self._running.get(task_id)
-        if state is not None:
-            log.info(f"Resetting session iteration counter for task {task_id}")
-            state.iteration = 0
-            if self._on_iteration_changed:
-                self._on_iteration_changed(task_id, 0)
-        else:
-            log.debug(f"Cannot reset iterations for {task_id}: not running")
+        return state.run_count if state else 0
 
     def is_reviewing(self, task_id: str) -> bool:
         """Check if task is currently in review phase."""
@@ -396,8 +325,15 @@ class AutomationServiceImpl:
         """Request to stop a task. Returns True if was running."""
         if task_id not in self._running:
             return False
-        # Queue a "moved out of IN_PROGRESS" event
-        await self._event_queue.put((task_id, TaskStatus.IN_PROGRESS, TaskStatus.BACKLOG))
+
+        await self._event_queue.put(
+            AutomationEvent(
+                kind=ExecutionKind.STATUS,
+                task_id=task_id,
+                old_status=TaskStatus.IN_PROGRESS,
+                new_status=TaskStatus.BACKLOG,
+            )
+        )
         return True
 
     async def spawn_for_task(self, task: TaskLike) -> bool:
@@ -406,31 +342,27 @@ class AutomationServiceImpl:
         Used by UI for manual agent starts. Returns True if spawn was queued.
         """
         if task.id in self._running:
-            return False  # Already running
+            return False
         if task.task_type != TaskType.AUTO:
-            return False  # Only AUTO tasks
+            return False
 
-        # Queue a spawn event
-        await self._event_queue.put((task.id, None, TaskStatus.IN_PROGRESS))
+        await self._event_queue.put(AutomationEvent(kind=ExecutionKind.SPAWN, task_id=task.id))
         return True
 
     async def stop(self) -> None:
         """Stop the automation service and all running agents."""
         log.info("Stopping automation service")
 
-        # Stop event subscription loop
         if self._event_task and not self._event_task.done():
             self._event_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._event_task
 
-        # Stop worker loop
         if self._worker_task and not self._worker_task.done():
             self._worker_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._worker_task
 
-        # Stop all agents
         for task_id, state in list(self._running.items()):
             log.info(f"Stopping agent for task {task_id}")
             if state.agent is not None:
@@ -441,8 +373,6 @@ class AutomationServiceImpl:
         self._running.clear()
         self._started = False
 
-    # --- Internal: task processing loop ---
-
     def _notify_task_changed(self) -> None:
         """Notify that a task has changed status."""
         if self._on_task_changed:
@@ -452,37 +382,35 @@ class AutomationServiceImpl:
         """Notify that an error occurred for a task."""
         if self._on_error:
             self._on_error(task_id, message)
-        # Persist error to database
-        _ = asyncio.create_task(self._tasks.update_fields(task_id, last_error=message[:500]))
 
     async def _run_task_loop(self, task: TaskLike) -> None:
-        """Run the iterative loop for a task until completion."""
+        """Run a single execution for a task."""
         log.info(f"Starting task loop for {task.id}")
         self._notify_error(task.id, "Agent starting...")
+        final_status: ExecutionStatus | None = None
+        agent: Agent | None = None
 
         try:
-            # Ensure worktree exists
             wt_path = await self._workspaces.get_path(task.id)
             if wt_path is None:
                 log.info(f"Creating worktree for {task.id}")
                 try:
                     wt_path = await self._workspaces.create(
-                        task.id, base_branch=self._config.general.default_base_branch
+                        task.id,
+                        base_branch=task.base_branch or self._config.general.default_base_branch,
                     )
                 except ValueError as exc:
-                    # Common errors: no repos, project not found
                     error_msg = str(exc)
                     log.error(f"Workspace creation failed for task {task.id}: {error_msg}")
                     self._notify_error(task.id, error_msg)
                     self._notify_user(
                         f"❌ {error_msg}",
                         title="Cannot Start Agent",
-                        severity="error",
+                        severity=NotificationSeverity.ERROR,
                     )
                     await self._update_task_status(task.id, TaskStatus.BACKLOG)
                     return
                 except Exception as exc:
-                    # Check for common git-related errors
                     error_str = str(exc).lower()
                     if "not a git repository" in error_str or "fatal:" in error_str:
                         error_msg = f"Repository is not a valid git repo: {exc}"
@@ -493,73 +421,101 @@ class AutomationServiceImpl:
                     self._notify_user(
                         f"❌ {error_msg}",
                         title="Cannot Start Agent",
-                        severity="error",
+                        severity=NotificationSeverity.ERROR,
                     )
                     await self._update_task_status(task.id, TaskStatus.BACKLOG)
                     return
             log.info(f"Worktree path: {wt_path}")
 
-            # Get git user identity for Co-authored-by attribution
+            if self._executions is None:
+                raise RuntimeError("Execution service is required for automation runs")
+
+            workspaces = await self._workspaces.list_workspaces(task_id=task.id)
+            if not workspaces:
+                raise RuntimeError(f"No workspace record found for task {task.id}")
+            workspace_id = workspaces[0].id
+
+            session_record = await self._tasks.create_session_record(
+                workspace_id=workspace_id,
+                session_type=SessionType.ACP,
+                external_id=None,
+            )
+
+            execution = await self._executions.create_execution(
+                session_id=session_record.id,
+                run_reason=ExecutionRunReason.CODINGAGENT,
+                executor_action={},
+            )
+
+            state = self._running.get(task.id)
+            if state:
+                state.session_id = session_record.id
+                state.execution_id = execution.id
+                state.run_count = 0
+
             user_name, user_email = await get_git_user_identity()
             log.debug(f"Git user identity: {user_name} <{user_email}>")
 
-            # Get agent config
             agent_config = self._get_agent_config(task)
             log.debug(f"Agent config: {agent_config.name}")
-            max_iterations = self._config.general.max_iterations
-            log.info(f"Starting iterations for {task.id}, max={max_iterations}")
+            run_count = await self._executions.count_executions_for_task(task.id)
+            log.info(f"Starting run for {task.id}, run={run_count}")
 
-            agent: Agent | None = None
+            state = self._running.get(task.id)
+            if state:
+                state.run_count = run_count
 
-            for iteration in range(1, max_iterations + 1):
-                # Increment lifetime total_iterations in database
-                await self._tasks.increment_total_iterations(task.id)
+            signal, agent = await self._run_execution(
+                task,
+                wt_path,
+                agent_config,
+                run_count,
+                execution.id,
+                user_name=user_name,
+                user_email=user_email,
+            )
 
-                # Update iteration count in running state
+            if agent is not None:
                 state = self._running.get(task.id)
                 if state:
-                    state.iteration = iteration
-                if self._on_iteration_changed:
-                    self._on_iteration_changed(task.id, iteration)
-                log.debug(f"Task {task.id} iteration {iteration}/{max_iterations}")
+                    state.agent = agent
 
-                signal, agent = await self._run_iteration(
-                    task,
-                    wt_path,
-                    agent_config,
-                    iteration,
-                    max_iterations,
-                    agent=agent,
-                    user_name=user_name,
-                    user_email=user_email,
-                )
+            log.debug(f"Task {task.id} run {run_count} signal: {signal}")
 
-                # Update agent in running state
-                if agent is not None:
-                    state = self._running.get(task.id)
-                    if state:
-                        state.agent = agent
+            if signal.signal == Signal.COMPLETE:
+                log.info(f"Task {task.id} completed, moving to REVIEW")
+                await self._handle_complete(task)
+                final_status = ExecutionStatus.COMPLETED
 
-                log.debug(f"Task {task.id} iteration {iteration} signal: {signal}")
+                state = self._running.get(task.id)
+                if self._queued and state and state.session_id:
+                    queue_status = await self._queued.get_status(state.session_id)
+                    if queue_status.has_queued:
+                        queued = await self._queued.take_queued(state.session_id)
+                        if queued:
+                            scratchpad = await self._tasks.get_scratchpad(task.id)
+                            user_note = f"\n\n--- USER MESSAGE ---\n{queued.content}"
+                            await self._tasks.update_scratchpad(task.id, scratchpad + user_note)
+                            await self._update_task_status(task.id, TaskStatus.IN_PROGRESS)
+                            self._notify_task_changed()
+                            log.info(f"Task {task.id} has queued messages, re-spawning")
+                            await self._event_queue.put(
+                                AutomationEvent(kind=ExecutionKind.SPAWN, task_id=task.id)
+                            )
+                return
+            if signal.signal == Signal.BLOCKED:
+                log.warning(f"Task {task.id} blocked: {signal.reason}")
+                self._notify_error(task.id, f"Blocked: {signal.reason}")
+                await self._handle_blocked(task, signal.reason)
+                final_status = ExecutionStatus.FAILED
+                return
 
-                if signal.signal == Signal.COMPLETE:
-                    log.info(f"Task {task.id} completed, moving to REVIEW")
-                    await self._handle_complete(task)
-                    return
-                elif signal.signal == Signal.BLOCKED:
-                    log.warning(f"Task {task.id} blocked: {signal.reason}")
-                    self._notify_error(task.id, f"Blocked: {signal.reason}")
-                    await self._handle_blocked(task, signal.reason)
-                    return
-
-                await asyncio.sleep(self._config.general.iteration_delay_seconds)
-
-            log.warning(f"Task {task.id} reached max iterations")
-            self._notify_error(task.id, "Reached max iterations without completing")
-            await self._handle_max_iterations(task)
+            log.info(f"Task {task.id} run {run_count} complete; awaiting next run")
+            final_status = ExecutionStatus.COMPLETED
 
         except asyncio.CancelledError:
             log.info(f"Task {task.id} cancelled")
+            final_status = ExecutionStatus.KILLED
             raise
         except Exception as e:
             import traceback
@@ -569,16 +525,28 @@ class AutomationServiceImpl:
             log.error(f"Traceback:\n{tb}")
             self._notify_error(task.id, f"Agent failed: {e}")
             await self._update_task_status(task.id, TaskStatus.BACKLOG)
+            final_status = ExecutionStatus.FAILED
         finally:
+            if agent is not None:
+                await agent.stop()
+            state = self._running.get(task.id)
+            if state and self._executions and state.execution_id:
+                await self._executions.update_execution(
+                    state.execution_id,
+                    status=final_status or ExecutionStatus.FAILED,
+                    completed_at=datetime.now(),
+                )
+            if state and state.session_id:
+                await self._tasks.close_session_record(
+                    state.session_id, status=SessionStatus.CLOSED
+                )
             log.info(f"Task loop ended for {task.id}")
 
     def _get_agent_config(self, task: TaskLike) -> AgentConfig:
         """Get agent config for a task."""
         return task.get_agent_config(self._config)
 
-    def _notify_user(
-        self, message: str, title: str, severity: Literal["information", "warning", "error"]
-    ) -> None:
+    def _notify_user(self, message: str, title: str, severity: NotificationSeverity) -> None:
         """Send a notification to the user via the app if available.
 
         Args:
@@ -597,7 +565,7 @@ class AutomationServiceImpl:
             agent_config: The agent configuration.
             context: Context string for logging (e.g., "task ABC-123" or "review").
         """
-        # Inline model resolution
+
         model = None
         if "claude" in agent_config.identity.lower():
             model = self._config.general.default_model_claude
@@ -608,147 +576,13 @@ class AutomationServiceImpl:
             agent.set_model_override(model)
             log.info(f"Applied model override for {context}: {model}")
 
-    async def _auto_merge(self, task: TaskLike) -> None:
-        """Auto-merge task to main and move to DONE.
-
-        Only called when auto_merge config is enabled.
-        If merge fails due to conflict and auto_retry_on_merge_conflict is also enabled,
-        attempts to rebase the branch and retry the task from IN_PROGRESS.
-
-        Uses a lock to serialize merge operations, preventing race conditions when
-        multiple tasks complete around the same time.
-        """
-        async with self._merge_lock:
-            log.info(f"Acquired merge lock for task {task.id}")
-            if self._merge_service is None:
-                log.warning("Auto-merge requested but merge service is not configured")
-                await self._tasks.update_fields(
-                    task.id,
-                    merge_failed=True,
-                    merge_error="Auto-merge unavailable: merge service not configured",
-                    merge_readiness=MergeReadiness.BLOCKED,
-                )
-                await self._tasks.append_event(
-                    task.id,
-                    "merge",
-                    "Auto-merge unavailable: merge service not configured",
-                )
-                self._notify_task_changed()
-                return
-            base = self._config.general.default_base_branch
-            success, message = await self._merge_service.merge_task(task)
-
-            if success:
-                log.info(f"Auto-merged task {task.id}: {task.title}")
-                await self._tasks.append_event(task.id, "merge", f"Auto-merged to {base}")
-            else:
-                # Check if this is a merge conflict and auto-retry is enabled
-                is_conflict = "conflict" in message.lower()
-                should_retry = is_conflict and self._config.general.auto_retry_on_merge_conflict
-
-                if should_retry:
-                    log.info(f"Merge conflict for {task.id}, attempting rebase and retry")
-                    await self._tasks.append_event(
-                        task.id, "merge", f"Auto-merge conflict: {message}"
-                    )
-                    await self._handle_merge_conflict_retry(task, base, message)
-                else:
-                    # Standard failure handling - stay in REVIEW with error
-                    log.warning(f"Auto-merge failed for {task.id}: {message}")
-                    await self._tasks.update_fields(
-                        task.id,
-                        merge_failed=True,
-                        merge_error=message[:500] if message else "Unknown error",
-                        merge_readiness=MergeReadiness.BLOCKED,
-                    )
-                    await self._tasks.append_event(
-                        task.id, "merge", f"Auto-merge failed: {message}"
-                    )
-                    self._notify_user(
-                        f"⚠ Merge failed: {message[:50]}",
-                        title="Merge Error",
-                        severity="error",
-                    )
-
-            self._notify_task_changed()
-            log.info(f"Released merge lock for task {task.id}")
-
-    async def _handle_merge_conflict_retry(
-        self, task: TaskLike, base_branch: str, original_error: str
-    ) -> None:
-        """Handle merge conflict by rebasing and sending task back to IN_PROGRESS.
-
-        This gives the agent a chance to resolve conflicts after rebasing onto
-        the latest base branch.
-        """
-        wt_path = await self._workspaces.get_path(task.id)
-        if wt_path is None:
-            log.error(f"Cannot retry {task.id}: worktree not found")
-            await self._tasks.update_fields(
-                task.id,
-                merge_failed=True,
-                merge_error="Worktree not found for conflict retry",
-            )
-            return
-
-        # Get info about what changed on base branch (for context)
-        files_on_base = await self._workspaces.get_files_changed_on_base(task.id, base_branch)
-
-        # Attempt to rebase onto latest base branch
-        rebase_success, rebase_msg, conflict_files = await self._workspaces.rebase_onto_base(
-            task.id, base_branch
-        )
-
-        if not rebase_success and conflict_files:
-            # Rebase had conflicts - this is expected, the agent needs to fix them
-            # The rebase was aborted, so we'll let the agent handle it manually
-            log.info(f"Rebase conflict for {task.id}, agent will resolve: {conflict_files}")
-
-        # Build detailed context for the scratchpad
-        scratchpad = await self._tasks.get_scratchpad(task.id)
-        conflict_note = build_merge_conflict_note(
-            original_error=original_error,
-            rebase_success=rebase_success,
-            rebase_msg=rebase_msg,
-            conflict_files=conflict_files,
-            files_on_base=files_on_base,
-            base_branch=base_branch,
-        )
-        await self._tasks.update_scratchpad(task.id, scratchpad + conflict_note)
-
-        # Clear the review state since we're retrying
-        await self._tasks.update_fields(
-            task.id,
-            status=TaskStatus.IN_PROGRESS,
-            checks_passed=None,
-            review_summary=None,
-            merge_failed=False,
-            merge_error=None,
-            merge_readiness=MergeReadiness.RISK,
-        )
-        await self._tasks.append_event(
-            task.id, "merge", "Merge conflict retry: moved back to IN_PROGRESS"
-        )
-
-        # Notify user about the retry
-        self._notify_user(
-            f"🔄 Merge conflict - retrying: {task.title[:30]}",
-            title="Auto-Retry",
-            severity="warning",
-        )
-
-        log.info(f"Task {task.id} sent back to IN_PROGRESS for merge conflict resolution")
-
-        # Queue the task for processing (it's now IN_PROGRESS again)
-        await self._event_queue.put((task.id, TaskStatus.REVIEW, TaskStatus.IN_PROGRESS))
-
     async def _update_task_status(self, task_id: str, status: TaskStatus) -> None:
         """Update task status."""
         await self._tasks.update_fields(task_id, status=status)
 
-    # --- Methods merged from TaskRunner ---
-
-    async def run_review(self, task: TaskLike, wt_path: Path) -> tuple[bool, str]:
+    async def run_review(
+        self, task: TaskLike, wt_path: Path, execution_id: str
+    ) -> tuple[bool, str]:
         """Run agent-based review and return (passed, summary).
 
         Args:
@@ -764,19 +598,28 @@ class AutomationServiceImpl:
         agent = self._agent_factory(wt_path, agent_config, read_only=True)
         agent.set_auto_approve(True)
 
-        # Apply model override for review
         self._apply_model_override(agent, agent_config, f"review of task {task.id}")
 
         agent.start()
+
+        state = self._running.get(task.id)
+        if state:
+            state.review_agent = agent
+            state.is_reviewing = True
 
         try:
             await agent.wait_ready(timeout=AGENT_TIMEOUT_LONG)
             await agent.send_prompt(prompt)
             response = agent.get_response_text()
 
-            # Persist review logs
             serialized_output = serialize_agent_output(agent)
-            await self._tasks.append_agent_log(task.id, "review", 1, serialized_output)
+            if self._executions is not None:
+                await self._executions.append_log(execution_id, serialized_output)
+                await self._executions.append_agent_turn(
+                    execution_id,
+                    prompt=prompt,
+                    summary=response,
+                )
 
             signal = parse_signal(response)
             if signal.signal == Signal.APPROVE:
@@ -792,136 +635,147 @@ class AutomationServiceImpl:
             log.error(f"Review agent failed for {task.id}: {e}")
             return False, f"Review agent error: {e}"
         finally:
+            state = self._running.get(task.id)
+            if state:
+                state.review_agent = None
+                state.is_reviewing = False
             await agent.stop()
 
-    async def _run_iteration(
+    async def _run_execution(
         self,
         task: TaskLike,
         wt_path: Path,
         agent_config: AgentConfig,
-        iteration: int,
-        max_iterations: int,
-        agent: Agent | None = None,
+        run_count: int,
+        execution_id: str,
         user_name: str = "Developer",
         user_email: str = "developer@localhost",
     ) -> tuple[SignalResult, Agent | None]:
-        """Run a single iteration for a task.
+        """Run a single execution for a task.
 
         Returns:
-            Tuple of (signal_result, agent) where agent is the created/reused agent.
+            Tuple of (signal_result, agent) where agent is the created agent.
         """
-        # Get or create agent
-        if agent is None:
-            agent = self._agent_factory(wt_path, agent_config)
-            agent.set_auto_approve(self._config.general.auto_approve)
+        agent = self._agent_factory(wt_path, agent_config)
+        # Worker agents always auto-approve: they run in isolated worktrees
+        # with path-confined file access. The auto_approve config setting
+        # only governs the interactive planner agent.
+        agent.set_auto_approve(True)
 
-            # Apply model override
-            self._apply_model_override(agent, agent_config, f"task {task.id}")
+        self._apply_model_override(agent, agent_config, f"task {task.id}")
 
-            agent.start()
+        agent.start()
 
-            # Expose the agent immediately so watch mode can attach during startup.
-            state = self._running.get(task.id)
-            if state:
-                state.agent = agent
+        state = self._running.get(task.id)
+        if state:
+            state.agent = agent
 
-            try:
-                await agent.wait_ready(timeout=AGENT_TIMEOUT_LONG)
-            except TimeoutError:
-                log.error(f"Agent timeout for task {task.id}")
-                return (parse_signal('<blocked reason="Agent failed to start"/>'), None)
-        else:
-            # Re-sync auto_approve from config
-            agent.set_auto_approve(self._config.general.auto_approve)
+        try:
+            await agent.wait_ready(timeout=AGENT_TIMEOUT_LONG)
+        except TimeoutError:
+            log.error(f"Agent timeout for task {task.id}")
+            return (parse_signal('<blocked reason="Agent failed to start"/>'), agent)
 
-        # Build prompt with scratchpad context
         scratchpad = await self._tasks.get_scratchpad(task.id)
         prompt = build_prompt(
             task=task,
-            iteration=iteration,
-            max_iterations=max_iterations,
+            run_count=run_count,
             scratchpad=scratchpad,
             user_name=user_name,
             user_email=user_email,
         )
 
-        # Send prompt and get response
-        log.info(f"Sending prompt to agent for task {task.id}, iteration {iteration}")
+        log.info(f"Sending prompt to agent for task {task.id}, run {run_count}")
         try:
             await agent.send_prompt(prompt)
         except Exception as e:
             log.error(f"Agent prompt failed for {task.id}: {e}")
             return (parse_signal(f'<blocked reason="Agent error: {e}"/>'), agent)
         finally:
-            # Clear tool calls to prevent memory accumulation
             agent.clear_tool_calls()
 
-        # Get response and parse signal
         response = agent.get_response_text()
         signal_result = parse_signal(response)
 
-        # Persist FULL agent output as JSON
         serialized_output = serialize_agent_output(agent)
-        await self._tasks.append_agent_log(task.id, "implementation", iteration, serialized_output)
+        if self._executions is not None:
+            await self._executions.append_log(execution_id, serialized_output)
+            await self._executions.append_agent_turn(
+                execution_id,
+                prompt=prompt,
+                summary=response,
+            )
 
-        # Update scratchpad with progress
-        progress_note = f"\n\n--- Iteration {iteration} ---\n{response[-2000:]}"
+        progress_note = f"\n\n--- Run {run_count} ---\n{response[-2000:]}"
         await self._tasks.update_scratchpad(task.id, scratchpad + progress_note)
 
         return (signal_result, agent)
 
     async def _handle_complete(self, task: TaskLike) -> None:
-        """Handle task completion - move to REVIEW immediately, then run review."""
-        # Move to REVIEW status IMMEDIATELY
-        await self._tasks.update_fields(
-            task.id,
-            status=TaskStatus.REVIEW,
-            merge_failed=False,
-            merge_error=None,
-            merge_readiness=MergeReadiness.RISK,
-        )
+        """Handle task completion - auto-commit leftover changes, move to REVIEW, then review."""
+        # Safety net: commit any uncommitted changes the agent left behind
+        wt_path = await self._workspaces.get_path(task.id)
+        if wt_path is not None and self._git is not None:
+            if await self._git.has_uncommitted_changes(str(wt_path)):
+                short_id = task.id[:8]
+                await self._git.commit_all(
+                    str(wt_path),
+                    f"chore: adding uncommitted agent changes ({short_id})",
+                )
+                log.info(f"Auto-committed leftover changes for task {task.id}")
+
+        await self._tasks.update_fields(task.id, status=TaskStatus.REVIEW)
         self._notify_task_changed()
 
+        if not self._config.general.auto_review:
+            log.info(f"Auto review disabled, skipping review for task {task.id}")
+            return
+
         wt_path = await self._workspaces.get_path(task.id)
-        checks_passed = False
-        review_summary = ""
+        review_passed = False
+        review_note = ""
+        review_attempted = False
+        execution_id = None
+        state = self._running.get(task.id)
+        if state:
+            execution_id = state.execution_id
 
-        if wt_path is not None:
-            checks_passed, review_summary = await self.run_review(task, wt_path)
+        if wt_path is not None and execution_id is not None:
+            review_passed, review_note = await self.run_review(task, wt_path, execution_id)
+            review_attempted = True
 
-            status = "approved" if checks_passed else "rejected"
+            status = "approved" if review_passed else "rejected"
             log.info(f"Task {task.id} review: {status}")
 
-            # Emit toast notification for review result
-            if checks_passed:
+            if review_passed:
                 self._notify_user(
                     f"✓ Review passed: {task.title[:30]}",
                     title="Review Complete",
-                    severity="information",
+                    severity=NotificationSeverity.INFORMATION,
                 )
             else:
                 self._notify_user(
-                    f"✗ Review failed: {review_summary[:50]}",
+                    f"✗ Review failed: {review_note[:50]}",
                     title="Review Complete",
-                    severity="warning",
+                    severity=NotificationSeverity.WARNING,
                 )
 
-        # Update task with review results
-        review_updates = {
-            "checks_passed": checks_passed,
-            "review_summary": review_summary,
-        }
-        if not checks_passed:
-            review_updates["merge_readiness"] = MergeReadiness.BLOCKED
-        await self._tasks.update_fields(task.id, **review_updates)
-        self._notify_task_changed()
-        review_event = "Review passed" if checks_passed else f"Review failed: {review_summary}"
-        await self._tasks.append_event(task.id, "review", review_event[:200])
+        if review_note:
+            scratchpad = await self._tasks.get_scratchpad(task.id)
+            note = f"\n\n--- REVIEW ---\n{review_note}"
+            await self._tasks.update_scratchpad(task.id, scratchpad + note)
+            self._notify_task_changed()
 
-        # Auto-merge if enabled and review passed
-        if checks_passed and self._config.general.auto_merge:
-            log.info(f"Auto-merge enabled, merging task {task.id}")
-            await self._auto_merge(task)
+        if review_attempted and execution_id is not None and self._executions is not None:
+            review_result = {
+                "status": "approved" if review_passed else "rejected",
+                "summary": review_note,
+                "completed_at": datetime.now().isoformat(),
+            }
+            await self._executions.update_execution(
+                execution_id,
+                metadata={"review_result": review_result},
+            )
 
     async def _handle_blocked(self, task: TaskLike, reason: str) -> None:
         """Handle blocked task - move back to BACKLOG with reason."""
@@ -929,26 +783,12 @@ class AutomationServiceImpl:
         block_note = f"\n\n--- BLOCKED ---\nReason: {reason}\n"
         await self._tasks.update_scratchpad(task.id, scratchpad + block_note)
 
-        await self._tasks.update_fields(
-            task.id, status=TaskStatus.BACKLOG, block_reason=reason[:500]
-        )
-        self._notify_task_changed()
-
-    async def _handle_max_iterations(self, task: TaskLike) -> None:
-        """Handle task that reached max iterations."""
-        scratchpad = await self._tasks.get_scratchpad(task.id)
-        max_iter_note = (
-            f"\n\n--- MAX ITERATIONS ---\n"
-            f"Reached {self._config.general.max_iterations} iterations without completion.\n"
-        )
-        await self._tasks.update_scratchpad(task.id, scratchpad + max_iter_note)
-
-        await self._update_task_status(task.id, TaskStatus.BACKLOG)
+        await self._tasks.update_fields(task.id, status=TaskStatus.BACKLOG)
         self._notify_task_changed()
 
     async def _build_review_prompt(self, task: TaskLike) -> str:
         """Build review prompt from template with commits and diff."""
-        base = self._config.general.default_base_branch
+        base = task.base_branch or self._config.general.default_base_branch
         commits = await self._workspaces.get_commit_log(task.id, base)
         diff_summary = await self._workspaces.get_diff_stats(task.id, base)
 

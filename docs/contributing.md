@@ -61,4 +61,13 @@ uv run poe docs-serve  # Serve docs at http://127.0.0.1:8000/
 uv run poe docs-build  # Build static docs
 ```
 
+## Workflow Validation
+
+Validate GitHub Actions workflows locally before pushing:
+
+```bash
+brew install act         # Install act (macOS)
+uv run poe workflows-check  # Validate all workflows
+```
+
 See the [CONTRIBUTING.md](https://github.com/aorumbayev/kagan/blob/main/CONTRIBUTING.md) for complete guidelines.

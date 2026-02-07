@@ -38,9 +38,11 @@ class EventBus(Protocol):
 
     async def publish(self, event: DomainEvent) -> None:
         """Publish a single event to subscribers."""
+        ...
 
     def subscribe(self, event_type: type[DomainEvent] | None = None) -> AsyncIterator[DomainEvent]:
         """Subscribe to events (optionally filtered by type)."""
+        ...
 
     def add_handler(
         self,
@@ -48,9 +50,11 @@ class EventBus(Protocol):
         event_type: type[DomainEvent] | None = None,
     ) -> None:
         """Register a sync handler for events (UI bridges use this)."""
+        ...
 
     def remove_handler(self, handler: EventHandler) -> None:
         """Remove a previously registered handler."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -203,6 +207,8 @@ class MergeFailed:
     workspace_id: str
     repo_id: str
     error: str
+    conflict_op: str | None = None
+    conflict_files: list[str] | None = None
     event_id: str = field(default_factory=_new_event_id)
     occurred_at: datetime = field(default_factory=_now)
 

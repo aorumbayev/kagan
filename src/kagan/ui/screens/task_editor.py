@@ -12,6 +12,7 @@ from textual.widgets import Button, Input, Label, Select, TabbedContent, TabPane
 from kagan.core.models.entities import Task
 from kagan.core.models.enums import TaskPriority, TaskType
 from kagan.keybindings import TASK_EDITOR_BINDINGS
+from kagan.ui.widgets.base import BaseBranchInput
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -29,7 +30,7 @@ class TaskEditorScreen(ModalScreen[list[Task] | None]):
 
     def __init__(self, tasks: list[Task]) -> None:
         super().__init__()
-        self._tasks = list(tasks)  # Mutable copy
+        self._tasks = list(tasks)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="task-editor-container"):
@@ -67,6 +68,11 @@ class TaskEditorScreen(ModalScreen[list[Task] | None]):
                                 id=f"type-{i}",
                                 classes="task-select",
                             )
+                            yield Label("Base Branch:", classes="task-label")
+                            yield BaseBranchInput(
+                                value=task.base_branch or "",
+                                widget_id=f"base-branch-{i}",
+                            )
                             yield Label("Acceptance Criteria (one per line):", classes="task-label")
                             ac_text = (
                                 "\n".join(task.acceptance_criteria)
@@ -95,13 +101,12 @@ class TaskEditorScreen(ModalScreen[list[Task] | None]):
             description_input = self.query_one(f"#description-{i}", TextArea)
             priority_select: Select[int] = self.query_one(f"#priority-{i}", Select)
             type_select: Select[str] = self.query_one(f"#type-{i}", Select)
+            base_branch_input = self.query_one(f"#base-branch-{i}", BaseBranchInput)
             ac_input = self.query_one(f"#ac-{i}", TextArea)
 
-            # Parse acceptance criteria from TextArea
             ac_lines = ac_input.text.strip().split("\n") if ac_input.text.strip() else []
             acceptance_criteria = [line.strip() for line in ac_lines if line.strip()]
 
-            # Get values with fallbacks
             title = title_input.value.strip() or original.title
             description = description_input.text or original.description
 
@@ -117,6 +122,8 @@ class TaskEditorScreen(ModalScreen[list[Task] | None]):
             else:
                 task_type = TaskType(cast("str", type_value))
 
+            base_branch = base_branch_input.value.strip() or None
+
             edited_tasks.append(
                 Task(
                     id=original.id,
@@ -130,15 +137,7 @@ class TaskEditorScreen(ModalScreen[list[Task] | None]):
                     agent_backend=original.agent_backend,
                     parent_id=original.parent_id,
                     acceptance_criteria=acceptance_criteria,
-                    review_summary=original.review_summary,
-                    checks_passed=original.checks_passed,
-                    session_active=original.session_active,
-                    total_iterations=original.total_iterations,
-                    merge_failed=original.merge_failed,
-                    merge_error=original.merge_error,
-                    merge_readiness=original.merge_readiness,
-                    last_error=original.last_error,
-                    block_reason=original.block_reason,
+                    base_branch=base_branch,
                     created_at=original.created_at,
                     updated_at=original.updated_at,
                 )

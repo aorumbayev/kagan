@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from textual.widgets import Markdown
 from textual.widgets.markdown import MarkdownStream  # noqa: TC002 (used at runtime)
+
+from kagan.core.models.enums import StreamRole  # noqa: TC001 (used at runtime for type)
 
 
 class StreamingMarkdown(Markdown):
@@ -13,13 +13,13 @@ class StreamingMarkdown(Markdown):
 
     def __init__(
         self,
-        role: Literal["response", "thought"],
+        role: StreamRole,
         **kwargs,
     ) -> None:
         """Initialize StreamingMarkdown widget.
 
         Args:
-            role: The role type ("response" or "thought") for CSS classification
+            role: The role type (RESPONSE or THOUGHT) for CSS classification
             **kwargs: Additional arguments passed to Markdown
         """
         super().__init__("", **kwargs)
@@ -29,9 +29,9 @@ class StreamingMarkdown(Markdown):
         self.add_class(f"agent-{role}")
 
     @property
-    def role(self) -> Literal["response", "thought"]:
+    def role(self) -> StreamRole:
         """Get the widget's role."""
-        return self._role  # type: ignore[return-value]
+        return self._role
 
     @property
     def content(self) -> str:

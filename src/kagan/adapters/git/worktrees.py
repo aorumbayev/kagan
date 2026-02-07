@@ -21,13 +21,11 @@ class GitWorktreeAdapter:
         repo_path_obj = Path(repo_path)
         worktree_path_obj = Path(worktree_path)
 
-        # Try to fetch from origin, but gracefully handle repos without remotes
         has_remote = await self._has_remote(repo_path_obj, "origin")
         if has_remote:
             await self._run_git(repo_path_obj, ["fetch", "origin", base_branch])
             start_point = f"origin/{base_branch}"
         else:
-            # No remote - use local base branch directly
             start_point = base_branch
 
         await self._run_git(
@@ -73,8 +71,11 @@ class GitWorktreeAdapter:
 
     async def has_uncommitted_changes(self, worktree_path: str) -> bool:
         """Check if worktree has uncommitted changes."""
+        worktree_path_obj = Path(worktree_path)
+        if not worktree_path_obj.exists():
+            return False
         stdout = await self._run_git(
-            Path(worktree_path),
+            worktree_path_obj,
             ["status", "--porcelain"],
         )
         return bool(stdout.strip())
@@ -85,9 +86,12 @@ class GitWorktreeAdapter:
         target_branch: str,
     ) -> str:
         """Get diff between worktree and target branch."""
-        base_ref = await self._resolve_base_ref(Path(worktree_path), target_branch)
+        worktree_path_obj = Path(worktree_path)
+        if not worktree_path_obj.exists():
+            return ""
+        base_ref = await self._resolve_base_ref(worktree_path_obj, target_branch)
         return await self._run_git(
-            Path(worktree_path),
+            worktree_path_obj,
             ["diff", f"{base_ref}..HEAD"],
         )
 
@@ -97,9 +101,12 @@ class GitWorktreeAdapter:
         target_branch: str,
     ) -> dict:
         """Get diff statistics."""
-        base_ref = await self._resolve_base_ref(Path(worktree_path), target_branch)
+        worktree_path_obj = Path(worktree_path)
+        if not worktree_path_obj.exists():
+            return {"files": 0, "insertions": 0, "deletions": 0}
+        base_ref = await self._resolve_base_ref(worktree_path_obj, target_branch)
         stat_output = await self._run_git(
-            Path(worktree_path),
+            worktree_path_obj,
             ["diff", "--stat", f"{base_ref}..HEAD"],
         )
 
@@ -118,18 +125,24 @@ class GitWorktreeAdapter:
 
     async def get_commit_log(self, worktree_path: str, base_branch: str) -> list[str]:
         """Get commit log for the worktree."""
-        base_ref = await self._resolve_base_ref(Path(worktree_path), base_branch)
+        worktree_path_obj = Path(worktree_path)
+        if not worktree_path_obj.exists():
+            return []
+        base_ref = await self._resolve_base_ref(worktree_path_obj, base_branch)
         stdout = await self._run_git(
-            Path(worktree_path),
+            worktree_path_obj,
             ["log", "--oneline", f"{base_ref}..HEAD"],
         )
         return [line.strip() for line in stdout.split("\n") if line.strip()]
 
     async def get_files_changed(self, worktree_path: str, base_branch: str) -> list[str]:
         """Get file list changed in a worktree compared to base branch."""
-        base_ref = await self._resolve_base_ref(Path(worktree_path), base_branch)
+        worktree_path_obj = Path(worktree_path)
+        if not worktree_path_obj.exists():
+            return []
+        base_ref = await self._resolve_base_ref(worktree_path_obj, base_branch)
         stdout = await self._run_git(
-            Path(worktree_path),
+            worktree_path_obj,
             ["diff", "--name-only", f"{base_ref}..HEAD"],
         )
         return [line.strip() for line in stdout.split("\n") if line.strip()]
@@ -142,6 +155,23 @@ class GitWorktreeAdapter:
             check=False,
         )
         return f"origin/{base_branch}" if stdout.strip() else base_branch
+
+    async def run_git(self, *args: str, cwd: Path, check: bool = True) -> tuple[str, str]:
+        """Run an arbitrary git command, returning (stdout, stderr)."""
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        stdout = stdout_bytes.decode().strip() if stdout_bytes else ""
+        stderr = stderr_bytes.decode().strip() if stderr_bytes else ""
+        if check and proc.returncode != 0:
+            msg = f"git {args[0]} failed (rc={proc.returncode}): {stderr}"
+            raise RuntimeError(msg)
+        return stdout, stderr
 
     async def _run_git(self, cwd: Path, args: list[str], check: bool = True) -> str:
         """Run a git command."""
@@ -161,5 +191,5 @@ class GitWorktreeAdapter:
 
     def _extract_number(self, text: str, word: str) -> int:
         """Extract number before a word in text."""
-        match = re.search(rf"(\\d+)\\s+{word}", text)
+        match = re.search(rf"(\d+)\s+{word}", text)
         return int(match.group(1)) if match else 0

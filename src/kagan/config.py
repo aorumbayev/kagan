@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
-# OS detection for platform-specific commands
+
 type OS = Literal["linux", "macos", "windows", "*"]
 
 _OS_MAP = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
@@ -52,14 +52,15 @@ class GeneralConfig(BaseModel):
     """General configuration settings."""
 
     max_concurrent_agents: int = Field(default=1)
+    mcp_server_name: str = Field(
+        default="kagan",
+        description="MCP server name for tool registration and config entries",
+    )
     default_base_branch: str = Field(default="main")
-    auto_start: bool = Field(default=False)
-    auto_approve: bool = Field(default=False)
-    auto_merge: bool = Field(default=False)
-    auto_retry_on_merge_conflict: bool = Field(
-        default=True,
-        description="When auto_merge is enabled and fails due to conflict, "
-        "rebase and retry automatically",
+    auto_review: bool = Field(default=True, description="Run AI review on task completion")
+    auto_approve: bool = Field(
+        default=False,
+        description="Skip permission prompts in the planner agent (workers always auto-approve)",
     )
     require_review_approval: bool = Field(
         default=False, description="Require approved review before merge actions"
@@ -67,8 +68,6 @@ class GeneralConfig(BaseModel):
     serialize_merges: bool = Field(
         default=False, description="Serialize manual merges to reduce conflicts"
     )
-    max_iterations: int = Field(default=10)
-    iteration_delay_seconds: float = Field(default=2.0)
     default_worker_agent: str = Field(default="claude")
     default_model_claude: str | None = Field(
         default=None, description="Default Claude model alias or full name (None = agent default)"
@@ -144,14 +143,12 @@ class KaganConfig(BaseModel):
         """
         doc = tomlkit.document()
 
-        # General section
         general_table = tomlkit.table()
         for key, value in self.general.model_dump().items():
             if value is not None:
                 general_table[key] = value
         doc["general"] = general_table
 
-        # Agents section (if any)
         if self.agents:
             agents_table = tomlkit.table()
             for agent_name, agent_cfg in self.agents.items():
@@ -162,14 +159,12 @@ class KaganConfig(BaseModel):
                 agents_table[agent_name] = agent_table
             doc["agents"] = agents_table
 
-        # Refinement section
         refinement_table = tomlkit.table()
         for key, value in self.refinement.model_dump().items():
             if value is not None:
                 refinement_table[key] = value
         doc["refinement"] = refinement_table
 
-        # UI section
         ui_table = tomlkit.table()
         for key, value in self.ui.model_dump().items():
             if value is not None:
@@ -193,7 +188,6 @@ class KaganConfig(BaseModel):
         """
         import aiofiles
 
-        # Load existing TOML or create minimal structure
         if path.exists():
             async with aiofiles.open(path, encoding="utf-8") as f:
                 content = await f.read()
@@ -201,18 +195,13 @@ class KaganConfig(BaseModel):
         else:
             doc = tomlkit.document()
             doc["general"] = tomlkit.table()
-            doc["general"]["auto_start"] = False  # type: ignore[index]
 
-        # Ensure [ui] section exists
         if "ui" not in doc:
             doc["ui"] = tomlkit.table()
 
-        # Update preferences
         if skip_tmux_gateway is not None:
-            # Type checker workaround: cast to dict-like for assignment
             doc["ui"]["skip_tmux_gateway"] = skip_tmux_gateway  # type: ignore[index]
 
-        # Write back
         content = tomlkit.dumps(doc)
         await asyncio.to_thread(atomic_write, path, content)
 

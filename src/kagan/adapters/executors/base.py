@@ -66,9 +66,12 @@ class ExecutorAdapter(Protocol):
 
     async def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Run a command and return the execution result."""
+        ...
 
     def stream(self, request: ExecutionRequest) -> AsyncIterator[ExecutionOutput]:
         """Stream output for long-running executions."""
+        ...
 
     async def cancel(self, execution_id: str, *, reason: str | None = None) -> None:
         """Cancel an in-flight execution."""
+        ...

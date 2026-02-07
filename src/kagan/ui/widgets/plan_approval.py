@@ -46,6 +46,8 @@ class PlanApprovalWidget(VerticalGroup):
     class Dismissed(Message):
         """Message posted when the plan is dismissed."""
 
+        pass
+
     def __init__(
         self,
         tasks: list[Task],
@@ -73,13 +75,8 @@ class PlanApprovalWidget(VerticalGroup):
 
     def _make_task_row(self, task: Task, index: int) -> Static:
         """Create a row displaying a single task."""
-        # Type badge
         type_badge = "⚡ AUTO" if task.task_type == TaskType.AUTO else "👤 PAIR"
-
-        # Priority badge
         priority_label = task.priority.label.upper()
-
-        # Title (truncate if needed)
         title = task.title
         if len(title) > 60:
             title = title[:57] + "..."
@@ -117,7 +114,6 @@ class PlanApprovalWidget(VerticalGroup):
                 self._update_selection()
             event.stop()
         elif event.key == "enter":
-            # Show preview of selected task
             self._show_preview()
             event.stop()
 
@@ -125,7 +121,7 @@ class PlanApprovalWidget(VerticalGroup):
         """Show preview of the selected task."""
         if 0 <= self._selected_index < len(self._tasks):
             task = self._tasks[self._selected_index]
-            # Build preview text
+
             type_str = (
                 "AUTO (AI autonomous)"
                 if task.task_type == TaskType.AUTO

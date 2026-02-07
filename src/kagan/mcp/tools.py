@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kagan.constants import KAGAN_GENERATED_PATTERNS
-from kagan.core.models.enums import MergeReadiness, TaskStatus
+from kagan.core.models.enums import TaskStatus
 from kagan.services.tasks import TaskService  # noqa: TC001
 
 if TYPE_CHECKING:
+    from kagan.services.executions import ExecutionService
     from kagan.services.projects import ProjectService
     from kagan.services.workspaces import WorkspaceService
 
@@ -24,10 +25,12 @@ class KaganMCPServer:
         *,
         workspace_service: WorkspaceService | None = None,
         project_service: ProjectService | None = None,
+        execution_service: ExecutionService | None = None,
     ) -> None:
         self._state = state_manager
         self._workspaces = workspace_service
         self._projects = project_service
+        self._executions = execution_service
 
     async def get_context(self, task_id: str) -> dict:
         """Get task context for AI tools."""
@@ -91,6 +94,23 @@ class KaganMCPServer:
                 }
             )
 
+        # Resolve @mention linked tasks
+        linked_ids = await self._state.get_task_links(task_id)
+        if linked_ids:
+            linked_tasks = []
+            for lid in linked_ids:
+                linked = await self._state.get_task(lid)
+                if linked:
+                    linked_tasks.append(
+                        {
+                            "task_id": linked.id,
+                            "title": linked.title,
+                            "status": linked.status.value,
+                            "description": linked.description,
+                        }
+                    )
+            context["linked_tasks"] = linked_tasks
+
         return context
 
     async def update_scratchpad(self, task_id: str, content: str) -> bool:
@@ -110,7 +130,6 @@ class KaganMCPServer:
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
 
-        # Check for uncommitted changes before allowing review
         has_uncommitted = await self._check_uncommitted_changes(task_id)
         if has_uncommitted:
             return {
@@ -119,24 +138,14 @@ class KaganMCPServer:
                 "Please commit your work first.",
             }
 
-        await self._state.update_fields(
-            task_id,
-            review_summary=summary,
-            checks_passed=None,
-            status=TaskStatus.REVIEW,
-            merge_failed=False,
-            merge_error=None,
-            merge_readiness=MergeReadiness.RISK,
-        )
-        await self._state.append_event(task_id, "review", "Review requested")
+        await self._state.update_fields(task_id, status=TaskStatus.REVIEW)
+        scratchpad = await self._state.get_scratchpad(task_id)
+        note = f"\n\n--- REVIEW REQUEST ---\n{summary}"
+        await self._state.update_scratchpad(task_id, scratchpad + note)
         return {"status": "review", "message": "Ready for merge"}
 
     async def _check_uncommitted_changes(self, task_id: str | None = None) -> bool:
-        """Check if there are uncommitted changes in the working directory.
-
-        Excludes Kagan-generated files from the check since they are
-        local development metadata, not project files.
-        """
+        """Check if there are uncommitted changes in the working directory."""
         if self._workspaces and task_id:
             workspaces = await self._workspaces.list_workspaces(task_id=task_id)
             if workspaces:
@@ -162,22 +171,50 @@ class KaganMCPServer:
         if not stdout.strip():
             return False
 
-        # Filter out Kagan-generated files
         for line in stdout.decode().strip().split("\n"):
             if not line:
                 continue
-            # git status --porcelain format: "XY filename" or "XY  filename -> newname"
-            # The filename starts at position 3
+
             filepath = line[3:].split(" -> ")[0]
-            # Check if this file matches any Kagan pattern
+
             is_kagan_file = any(
                 filepath.startswith(p.rstrip("/")) or filepath == p.rstrip("/")
                 for p in KAGAN_GENERATED_PATTERNS
             )
             if not is_kagan_file:
-                return True  # Found a non-Kagan uncommitted change
+                return True
 
-        return False  # Only Kagan files are uncommitted
+        return False
+
+    async def get_task(
+        self,
+        task_id: str,
+        *,
+        include_scratchpad: bool | None = None,
+        include_logs: bool | None = None,
+        include_review: bool | None = None,
+        mode: str = "summary",
+    ) -> dict:
+        """Get task details with optional extended context."""
+        del mode
+        task = await self._state.get_task(task_id)
+        if task is None:
+            raise ValueError(f"Task not found: {task_id}")
+        result: dict = {
+            "task_id": task.id,
+            "title": task.title,
+            "status": task.status.value,
+            "description": task.description,
+            "acceptance_criteria": task.acceptance_criteria,
+        }
+        if include_scratchpad:
+            result["scratchpad"] = await self._state.get_scratchpad(task_id)
+        if include_logs and self._executions:
+            logs = await self._get_agent_logs(task_id)
+            result["logs"] = logs
+        if include_review and self._executions:
+            result["review_feedback"] = await self._get_review_feedback(task_id)
+        return result
 
     async def get_parallel_tasks(self, exclude_task_id: str | None = None) -> list[dict]:
         """Get all IN_PROGRESS tasks for coordination awareness.
@@ -204,7 +241,7 @@ class KaganMCPServer:
             )
         return result
 
-    async def get_agent_logs(
+    async def _get_agent_logs(
         self, task_id: str, log_type: str = "implementation", limit: int = 1
     ) -> list[dict]:
         """Get agent execution logs for a task.
@@ -212,24 +249,56 @@ class KaganMCPServer:
         Args:
             task_id: The task to get logs for.
             log_type: 'implementation' or 'review'.
-            limit: Max iterations to return (most recent).
+            limit: Max runs to return (most recent).
 
         Returns:
-            List of log entries with iteration, content, created_at.
+            List of log entries with run, content, created_at.
         """
         task = await self._state.get_task(task_id)
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
 
-        logs = await self._state.get_agent_logs(task_id, log_type)
-        # Get most recent N logs, then reverse for ascending order
-        logs = sorted(logs, key=lambda x: x.sequence, reverse=True)[:limit]
-        logs = list(reversed(logs))  # O(n) instead of O(n log n)
+        if self._executions is None:
+            return []
+
+        execution = await self._executions.get_latest_execution_for_task(task_id)
+        if execution is None:
+            return []
+
+        log_entry = await self._executions.get_logs(execution.id)
+        if log_entry is None:
+            return []
+
+        run_count = await self._executions.count_executions_for_task(task_id)
+
         return [
             {
-                "iteration": log.sequence,
-                "content": log.content,
-                "created_at": log.created_at.isoformat(),
+                "run": run_count,
+                "content": log_entry.logs,
+                "created_at": log_entry.inserted_at.isoformat(),
             }
-            for log in logs
         ]
+
+    async def _get_review_feedback(self, task_id: str) -> str | None:
+        if self._executions is None:
+            return None
+        execution = await self._executions.get_latest_execution_for_task(task_id)
+        if execution is None:
+            return None
+        return _format_review_feedback(execution.metadata_.get("review_result"))
+
+
+def _format_review_feedback(review_result: object) -> str | None:
+    if not isinstance(review_result, dict):
+        return None
+    summary = str(review_result.get("summary") or "").strip()
+    status = review_result.get("status")
+    approved = review_result.get("approved")
+    if status is None and isinstance(approved, bool):
+        status = "approved" if approved else "rejected"
+    status_label = str(status).strip().lower() if status is not None else ""
+    if summary:
+        return f"{status_label}: {summary}" if status_label else summary
+    if status_label:
+        return f"Review {status_label}."
+    return None

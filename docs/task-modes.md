@@ -32,8 +32,8 @@ AUTO mode is like assigning a task to a capable assistant who works on their own
    └─────────┘        └──────────┘         └─────────┘         └─────────┘
                            │                                         ▲
                            │ If blocked or                           │
-                           │ needs help                    Auto-merge│
-                           ▼                              (optional) │
+                           │ needs help                  Approve & merge│
+                           ▼                               (manual) │
                       ┌─────────┐                                    │
                       │ BACKLOG │────────────────────────────────────┘
                       └─────────┘    (fix issue, restart)
@@ -46,11 +46,11 @@ AUTO mode is like assigning a task to a capable assistant who works on their own
    - Give it a clear title and description
    - Make sure task type is `AUTO` (default)
 
-1. **Start the agent** (press `a` or move to IN_PROGRESS)
+1. **Start the agent** (press `Enter` or `a`)
 
    - Kagan spawns an AI agent in the background
    - Agent works in an isolated git branch (your main branch stays safe)
-   - Watch progress with `w`
+   - Open output with `Enter`
 
 1. **Agent works autonomously**
 
@@ -69,43 +69,40 @@ AUTO mode is like assigning a task to a capable assistant who works on their own
    - Check the diff (`Shift+D`)
    - Run tests
    - Check merge readiness (Ready / At Risk / Blocked)
-   - Approve (`a`) to merge, or reject (`r`) to send back
+   - Approve (`Enter`) to merge, or reject (`r`) to send back
    - If there are no changes, use **Close as Exploratory** to finish without merging
    - Merges run in a dedicated merge worktree to keep main clean
 
 ### What Can Happen
 
-| Agent Says       | What Happens     | Your Action                   |
-| ---------------- | ---------------- | ----------------------------- |
-| "Done!"          | Moves to REVIEW  | Review the work               |
-| "Blocked"        | Moves to BACKLOG | Read the reason, help unblock |
-| (max iterations) | Moves to BACKLOG | Add clarification, restart    |
-| (error)          | Moves to BACKLOG | Check logs, fix issue         |
+| Agent Says | What Happens     | Your Action                   |
+| ---------- | ---------------- | ----------------------------- |
+| "Done!"    | Moves to REVIEW  | Review the work               |
+| "Blocked"  | Moves to BACKLOG | Read the reason, help unblock |
+| (error)    | Moves to BACKLOG | Check logs, fix issue         |
 
-### Rejection Flow (Active Iteration Model)
+### Rejection Flow
 
-When you reject work from REVIEW, you have three options:
+When you reject work from REVIEW, you have two options:
 
 ```
 REVIEW task rejected:
-├── Enter (Retry) → IN_PROGRESS + agent auto-restarts + iterations reset
-├── F2 (Stage) → IN_PROGRESS + agent paused + iterations reset
-└── Esc (Shelve) → BACKLOG + iterations preserved
+├── Enter (Send Back) → IN_PROGRESS (manual restart)
+└── Esc (Backlog) → BACKLOG
 ```
 
-| Key     | Action     | Result                                                         |
-| ------- | ---------- | -------------------------------------------------------------- |
-| `Enter` | **Retry**  | Task stays IN_PROGRESS, agent auto-restarts with your feedback |
-| `F2`    | **Stage**  | Task stays IN_PROGRESS but paused - restart manually with `a`  |
-| `Esc`   | **Shelve** | Task goes to BACKLOG for later                                 |
+| Key     | Action        | Result                                       |
+| ------- | ------------- | -------------------------------------------- |
+| `Enter` | **Send Back** | Task moves to IN_PROGRESS (restart manually) |
+| `Esc`   | **Backlog**   | Task moves to BACKLOG for later              |
 
-The **Retry** action is the most common - it immediately restarts the agent with your rejection feedback, resetting the iteration counter for a fresh attempt.
+Send-back moves the task to IN_PROGRESS with your feedback appended. Start a new run manually when you're ready.
 
 ### Tips for AUTO Mode
 
 - **Be specific** - Clear acceptance criteria help the agent succeed
 - **Start small** - Break big tasks into focused tasks
-- **Watch sometimes** - Press `w` to see what the agent is doing
+- **Watch sometimes** - Press `Enter` to see current output
 - **Check scratchpad** - Agent's notes show its thinking process
 
 ## PAIR Mode: Work Together with AI
@@ -154,7 +151,7 @@ PAIR mode opens an interactive terminal session where you and the AI collaborate
 
 1. **Move task manually**
 
-   - When ready, move to REVIEW (`g` `l`)
+   - When ready, move to REVIEW (`Shift+L`)
    - Review and merge as usual (merge readiness shown in REVIEW)
 
 ### Tips for PAIR Mode
@@ -186,11 +183,12 @@ These settings in the XDG config `config.toml` affect agent and merge behavior:
 
 ```toml
 [general]
-# Automatically start agents for IN_PROGRESS tasks on launch
-auto_start = true
+# Run AI review on task completion
+auto_review = true
 
-# Automatically merge when review passes
-auto_merge = false
+# Skip permission prompts in the planner agent
+# (workers always auto-approve — they run in isolated worktrees)
+auto_approve = false
 
 # Require approved review before merge actions
 require_review_approval = false
@@ -198,42 +196,42 @@ require_review_approval = false
 # Serialize manual merges to reduce conflicts
 serialize_merges = false
 
-# Skip permission prompts for AI actions
-auto_approve = false
-
-# Stop agent after this many iterations without completing
-max_iterations = 10
+# Default agent (e.g., "claude")
+default_worker_agent = "claude"
 
 # How many agents can run simultaneously
-max_concurrent_agents = 2
+max_concurrent_agents = 1
+
+# Default base branch for new repos
+default_base_branch = "main"
 ```
 
 ## Keyboard Reference
 
 Mode-specific shortcuts at a glance:
 
-| Key     | AUTO Mode    | PAIR Mode     |
-| ------- | ------------ | ------------- |
-| `a`     | Start agent  | -             |
-| `Enter` | Watch agent  | Open terminal |
-| `w`     | Watch output | -             |
+| Key       | AUTO Mode              | PAIR Mode     |
+| --------- | ---------------------- | ------------- |
+| `a`       | Start agent            | -             |
+| `s`       | Stop agent             | -             |
+| `Enter`   | Open task workspace    | Open/attach session |
+| `Shift+L` | Move right (to REVIEW) | Move right    |
 
-> **[Full Keyboard Reference →](keybindings.md)** — Complete list of all shortcuts including the rejection modal options (Retry/Stage/Shelve).
+> **[Full Keyboard Reference ->](keybindings.md)** - Complete list of all shortcuts including the rejection modal options.
 
 ## Troubleshooting
 
 ### AUTO task keeps going back to BACKLOG
 
-- Check the scratchpad (`v` to view details) for the reason
+- Check the task details (`v`) or peek overlay (`space`) for the reason
 - Agent may be blocked on something it can't figure out
 - Try adding more context to the description
 - Consider switching to PAIR mode for complex issues
 
 ### Agent seems stuck
 
-- Press `w` to watch what it's doing
-- Check iteration count in the card badge
-- Stop (`s`) and restart (`a`) if needed
+- Press `Enter` on the task to open output
+- Stop (`s`) and start a new run (`a`) if needed
 - Reduce complexity of the task
 
 ### PAIR session won't open

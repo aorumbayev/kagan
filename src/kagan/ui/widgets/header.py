@@ -10,6 +10,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Label
 
+from kagan.builtin_agents import get_builtin_agent
 from kagan.constants import KAGAN_LOGO_SMALL
 from kagan.ui.utils import safe_query_one
 
@@ -18,7 +19,9 @@ if TYPE_CHECKING:
 
     from textual.app import ComposeResult
 
-# Visual separator for header sections
+    from kagan.config import KaganConfig
+
+
 HEADER_SEPARATOR = "│"
 
 
@@ -62,25 +65,25 @@ class KaganHeader(Widget):
     git_branch: reactive[str] = reactive("")
     project_name: reactive[str] = reactive("")
     repo_name: reactive[str] = reactive("")
+    agent_display: reactive[str] = reactive("")
 
     def __init__(self, task_count: int = 0, **kwargs) -> None:
         super().__init__(**kwargs)
         self.task_count = task_count
 
     def compose(self) -> ComposeResult:
-        # Left section: Logo and project name
         yield Label(KAGAN_LOGO_SMALL, classes="header-logo")
         yield Label("", id="header-project", classes="header-title")
         yield Label("", id="header-repo", classes="header-repo")
 
-        # Spacer pushes stats to the right
         yield Label("", classes="header-spacer")
 
-        # Stats section with separators: branch | active | tasks | help
         yield Label("", id="header-branch", classes="header-branch")
         yield Label(HEADER_SEPARATOR, id="sep-branch", classes="header-branch")
         yield Label("", id="header-sessions", classes="header-sessions")
         yield Label(HEADER_SEPARATOR, id="sep-sessions", classes="header-branch")
+        yield Label("", id="header-agent", classes="header-agent")
+        yield Label(HEADER_SEPARATOR, id="sep-agent", classes="header-branch")
         yield Label("", id="header-stats", classes="header-stats")
         yield Label(HEADER_SEPARATOR, id="sep-stats", classes="header-branch")
         yield Label("? help", id="header-help", classes="header-branch")
@@ -91,6 +94,7 @@ class KaganHeader(Widget):
         self._update_repo_display()
         self._update_branch_display()
         self._update_sessions_display()
+        self._update_agent_display()
         self._update_stats_display()
 
     def _update_project_display(self) -> None:
@@ -147,6 +151,22 @@ class KaganHeader(Widget):
         if stats_label := safe_query_one(self, "#header-stats", Label):
             stats_label.update(f"📋 {self.task_count} tasks")
 
+    def _update_agent_display(self) -> None:
+        """Update selected global agent label and separator visibility."""
+        agent_label = safe_query_one(self, "#header-agent", Label)
+        sep_agent = safe_query_one(self, "#sep-agent", Label)
+        if agent_label:
+            if self.agent_display:
+                agent_label.update(self.agent_display)
+                agent_label.display = True
+                if sep_agent:
+                    sep_agent.display = True
+            else:
+                agent_label.update("")
+                agent_label.display = False
+                if sep_agent:
+                    sep_agent.display = False
+
     def watch_task_count(self, count: int) -> None:
         self._update_stats_display()
 
@@ -161,6 +181,9 @@ class KaganHeader(Widget):
 
     def watch_repo_name(self, name: str) -> None:
         self._update_repo_display()
+
+    def watch_agent_display(self, value: str) -> None:
+        self._update_agent_display()
 
     def update_count(self, count: int) -> None:
         self.task_count = count
@@ -178,3 +201,26 @@ class KaganHeader(Widget):
     def update_repo(self, name: str) -> None:
         """Update the displayed repo name."""
         self.repo_name = name
+
+    def update_agent(self, display: str) -> None:
+        """Update the displayed global agent label."""
+        self.agent_display = display
+
+    def update_agent_from_config(self, config: KaganConfig) -> None:
+        """Build and update the global agent label from config."""
+        short_name = config.general.default_worker_agent.strip()
+        if not short_name:
+            self.update_agent("")
+            return
+
+        builtin = get_builtin_agent(short_name)
+        name = builtin.config.name.removesuffix(" Code") if builtin else short_name.capitalize()
+
+        model = ""
+        if short_name == "claude":
+            model = config.general.default_model_claude or ""
+        elif short_name == "opencode":
+            model = config.general.default_model_opencode or ""
+
+        model_suffix = f" ({model})" if model else ""
+        self.update_agent(f"AI: {name}{model_suffix}")

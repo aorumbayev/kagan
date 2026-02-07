@@ -6,9 +6,11 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from kagan.config import get_os_value
+from kagan.core.models.enums import SessionStatus, SessionType
+from kagan.mcp_naming import get_mcp_server_name
 from kagan.tmux import TmuxError, run_tmux
 
 if TYPE_CHECKING:
@@ -17,36 +19,24 @@ if TYPE_CHECKING:
     from kagan.config import AgentConfig, KaganConfig
     from kagan.services.tasks import TaskService
     from kagan.services.types import TaskLike
+    from kagan.services.workspaces import WorkspaceService
 
 log = logging.getLogger(__name__)
 
 
-class SessionService(Protocol):
-    """Service interface for session operations."""
-
-    async def create_session(self, task: TaskLike, worktree_path: Path) -> str: ...
-
-    async def create_resolution_session(self, task: TaskLike, workdir: Path) -> str: ...
-
-    async def attach_session(self, task_id: str) -> bool: ...
-
-    async def attach_resolution_session(self, task_id: str) -> bool: ...
-
-    async def session_exists(self, task_id: str) -> bool: ...
-
-    async def resolution_session_exists(self, task_id: str) -> bool: ...
-
-    async def kill_session(self, task_id: str) -> None: ...
-
-    async def kill_resolution_session(self, task_id: str) -> None: ...
-
-
-class SessionServiceImpl:
+class SessionService:
     """Manages tmux sessions for tasks."""
 
-    def __init__(self, project_root: Path, task_service: TaskService, config: KaganConfig) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        task_service: TaskService,
+        workspace_service: WorkspaceService,
+        config: KaganConfig,
+    ) -> None:
         self._root = project_root
         self._tasks = task_service
+        self._workspaces = workspace_service
         self._config = config
 
     async def create_session(self, task: TaskLike, worktree_path: Path) -> str:
@@ -70,19 +60,24 @@ class SessionServiceImpl:
             f"KAGAN_PROJECT_ROOT={self._root}",
         )
 
-        # Get agent config first - needed for context files
         agent_config = self._get_agent_config(task)
         await self._write_context_files(worktree_path, agent_config)
-        await self._tasks.mark_session_active(task.id, True)
 
-        # Resolve model from config
+        workspaces = await self._workspaces.list_workspaces(task_id=task.id)
+        if not workspaces:
+            raise RuntimeError(f"No workspace found for task {task.id}")
+        await self._tasks.create_session_record(
+            workspace_id=workspaces[0].id,
+            session_type=SessionType.TMUX,
+            external_id=session_name,
+        )
+
         model = None
         if "claude" in agent_config.identity.lower():
             model = self._config.general.default_model_claude
         elif "opencode" in agent_config.identity.lower():
             model = self._config.general.default_model_opencode
 
-        # Auto-launch the agent's interactive CLI with the startup prompt
         startup_prompt = self._build_startup_prompt(task)
         launch_cmd = self._build_launch_command(agent_config, startup_prompt, model)
         if launch_cmd:
@@ -114,10 +109,16 @@ class SessionServiceImpl:
             f"KAGAN_PROJECT_ROOT={self._root}",
         )
 
-        # Seed basic context for conflict resolution.
         await run_tmux("send-keys", "-t", session_name, "git status", "Enter")
         await run_tmux("send-keys", "-t", session_name, "git diff", "Enter")
-
+        workspaces = await self._workspaces.list_workspaces(task_id=task.id)
+        if not workspaces:
+            raise RuntimeError(f"No workspace found for task {task.id}")
+        await self._tasks.create_session_record(
+            workspace_id=workspaces[0].id,
+            session_type=SessionType.TMUX,
+            external_id=session_name,
+        )
         return session_name
 
     def _get_agent_config(self, task: TaskLike) -> AgentConfig:
@@ -148,18 +149,17 @@ class SessionServiceImpl:
 
         escaped_prompt = shlex.quote(prompt)
 
-        # Agent-specific command formats with optional model flag
-        if agent_config.short_name == "claude":
-            # claude --model opus "prompt"
-            model_flag = f"--model {model} " if model else ""
-            return f"{base_cmd} {model_flag}{escaped_prompt}"
-        elif agent_config.short_name == "opencode":
-            # opencode --model anthropic/claude-sonnet-4-5 --prompt "prompt"
-            model_flag = f"--model {model} " if model else ""
-            return f"{base_cmd} {model_flag}--prompt {escaped_prompt}"
-        else:
-            # Fallback: just run the base command (no auto-prompt)
-            return base_cmd
+        match agent_config.short_name:
+            case "claude":
+                model_flag = f"--model {model} " if model else ""
+                return f"{base_cmd} {model_flag}{escaped_prompt}"
+            case "opencode":
+                model_flag = f"--model {model} " if model else ""
+                return f"{base_cmd} {model_flag}--prompt {escaped_prompt}"
+            case "codex" | "gemini" | "kimi" | "copilot":
+                return f"{base_cmd} {escaped_prompt}"
+            case _:
+                return base_cmd
 
     async def _attach_tmux_session(self, session_name: str) -> bool:
         """Attach to a tmux session, returning True if attach succeeded."""
@@ -192,7 +192,6 @@ class SessionServiceImpl:
             output = await run_tmux("list-sessions", "-F", "#{session_name}")
             return f"kagan-{task_id}" in output.split("\n")
         except TmuxError:
-            # No tmux server running = no sessions exist
             return False
 
     async def resolution_session_exists(self, task_id: str) -> bool:
@@ -207,33 +206,45 @@ class SessionServiceImpl:
         """Kill session and mark inactive."""
         with contextlib.suppress(TmuxError):
             await run_tmux("kill-session", "-t", f"kagan-{task_id}")
-        await self._tasks.mark_session_active(task_id, False)
+        await self._tasks.close_session_by_external_id(
+            f"kagan-{task_id}", status=SessionStatus.CLOSED
+        )
 
     async def kill_resolution_session(self, task_id: str) -> None:
         """Kill resolution session if present."""
         with contextlib.suppress(TmuxError):
             await run_tmux("kill-session", "-t", self._resolve_session_name(task_id))
+        await self._tasks.close_session_by_external_id(
+            self._resolve_session_name(task_id),
+            status=SessionStatus.CLOSED,
+        )
 
     async def _write_context_files(self, worktree_path: Path, agent_config: AgentConfig) -> None:
         """Create MCP configuration in worktree (merging if file exists).
 
         Note: We no longer create CLAUDE.md, AGENTS.md, or CONTEXT.md because:
         - CLAUDE.md/AGENTS.md: Already present in worktree from git clone
-        - CONTEXT.md: Redundant with kagan_get_context MCP tool
+        - CONTEXT.md: Redundant with MCP get_context tool
         """
         mcp_file = await self._write_mcp_config(worktree_path, agent_config)
-        await self._ensure_worktree_gitignored(worktree_path, mcp_file)
+        if mcp_file:
+            modified = await self._ensure_worktree_gitignored(worktree_path, mcp_file)
+            await self._commit_gitignore_if_needed(worktree_path, modified)
 
-    async def _write_mcp_config(self, worktree_path: Path, agent_config: AgentConfig) -> str:
-        """Write/merge MCP config based on agent type. Returns filename written."""
+    async def _write_mcp_config(self, worktree_path: Path, agent_config: AgentConfig) -> str | None:
+        """Write/merge MCP config based on agent type. Returns filename written or None."""
         import aiofiles
 
         from kagan.builtin_agents import get_builtin_agent
 
         builtin = get_builtin_agent(agent_config.short_name)
 
+        if builtin and not builtin.supports_worktree_mcp:
+            return None
+
+        server_name = get_mcp_server_name()
+
         if builtin and builtin.mcp_config_format == "opencode":
-            # OpenCode format: opencode.json with {"mcp": {"name": {...}}}
             filename = "opencode.json"
             kagan_entry = {
                 "type": "local",
@@ -242,7 +253,6 @@ class SessionServiceImpl:
             }
             mcp_key = "mcp"
         else:
-            # Default: Claude Code format - .mcp.json with {"mcpServers": {"name": {...}}}
             filename = ".mcp.json"
             kagan_entry = {
                 "command": "kagan",
@@ -252,7 +262,6 @@ class SessionServiceImpl:
 
         config_path = worktree_path / filename
 
-        # Merge with existing config if present
         if config_path.exists():
             try:
                 async with aiofiles.open(config_path, encoding="utf-8") as f:
@@ -262,10 +271,10 @@ class SessionServiceImpl:
                 existing = {}
             if mcp_key not in existing:
                 existing[mcp_key] = {}
-            existing[mcp_key]["kagan"] = kagan_entry
+            existing[mcp_key][server_name] = kagan_entry
             config = existing
         else:
-            config: dict[str, object] = {mcp_key: {"kagan": kagan_entry}}
+            config: dict[str, object] = {mcp_key: {server_name: kagan_entry}}
             if filename == "opencode.json":
                 config["$schema"] = "https://opencode.ai/config.json"
 
@@ -273,12 +282,12 @@ class SessionServiceImpl:
             await f.write(json.dumps(config, indent=2))
         return filename
 
-    async def _ensure_worktree_gitignored(self, worktree_path: Path, mcp_file: str) -> None:
-        """Add Kagan MCP config to worktree's .gitignore."""
+    async def _ensure_worktree_gitignored(self, worktree_path: Path, mcp_file: str) -> bool:
+        """Add Kagan MCP config to worktree's .gitignore. Returns True if file was modified."""
         import aiofiles
 
         gitignore = worktree_path / ".gitignore"
-        # Only the MCP config file needs to be gitignored now
+
         kagan_entries = [mcp_file]
 
         existing_content = ""
@@ -286,11 +295,10 @@ class SessionServiceImpl:
             async with aiofiles.open(gitignore, encoding="utf-8") as f:
                 existing_content = await f.read()
             existing_lines = set(existing_content.split("\n"))
-            # Check if all entries already present
-            if all(e in existing_lines for e in kagan_entries):
-                return
 
-        # Append Kagan entries
+            if all(e in existing_lines for e in kagan_entries):
+                return False
+
         addition = "\n# Kagan MCP config (auto-generated)\n"
         addition += "\n".join(kagan_entries) + "\n"
 
@@ -299,15 +307,42 @@ class SessionServiceImpl:
 
         async with aiofiles.open(gitignore, "w", encoding="utf-8") as f:
             await f.write(existing_content + addition)
+        return True
+
+    async def _commit_gitignore_if_needed(self, worktree_path: Path, modified: bool) -> None:
+        """Auto-commit .gitignore so agents start with clean git status."""
+        if not modified:
+            return
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(worktree_path),
+            "add",
+            ".gitignore",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(worktree_path),
+            "commit",
+            "-m",
+            "chore: gitignore kagan mcp config files",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
 
     def _build_startup_prompt(self, task: TaskLike) -> str:
-        """Build startup prompt for pair mode.
-
-        This includes the task overview plus essential rules that were
-        previously in CONTEXT.md. The agent gets full details (acceptance
-        criteria and scratchpad) via the kagan_get_context MCP tool.
-        """
+        """Build startup prompt for pair mode."""
         desc = task.description or "No description provided."
+        server_name = get_mcp_server_name()
+        tool_format_note = (
+            f"Tool names vary by client. Use the Kagan MCP server tools named like "
+            f"`mcp__{server_name}__<tool>` or `{server_name}_<tool>`."
+        )
         return f"""Hello! I'm starting a pair programming session for task **{task.id}**.
 
 Act as a Senior Developer collaborating with me on this implementation.
@@ -322,29 +357,31 @@ Act as a Senior Developer collaborating with me on this implementation.
 - You are in a git worktree, NOT the main repository
 - Only modify files within this worktree
 - **COMMIT all changes before requesting review** (use semantic commits: feat:, fix:, docs:, etc.)
-- When complete: commit your work, then call `kagan_request_review` MCP tool
+- When complete: commit your work, then call the `request_review` MCP tool
 
 ## MCP Tools Available
+{tool_format_note}
 
 **Context Tools:**
-- `kagan_get_context` - Get full task details (acceptance criteria, scratchpad)
-- `kagan_update_scratchpad` - Save progress notes for future reference
+- `get_context` - Get full task details (acceptance criteria, scratchpad, linked tasks)
+- `get_task` - Look up any task's details by ID (useful for @mentioned tasks)
+- `update_scratchpad` - Save progress notes for future reference
 
 **Coordination Tools (USE THESE):**
-- `kagan_get_parallel_tasks` - Discover concurrent work to avoid merge conflicts
-- `kagan_get_agent_logs` - Get execution logs from any task to learn from prior work
+- `get_parallel_tasks` - Discover concurrent work to avoid merge conflicts
+- `get_task(task_id, include_logs=true)` - Get execution logs to learn from prior work
 
 **Completion Tools:**
-- `kagan_request_review` - Submit work for review (commit first!)
+- `request_review` - Submit work for review (commit first!)
 
 ## Coordination Workflow
 
 Before implementing, check for parallel work and historical context:
 
-1. **Check parallel work**: Call `kagan_get_parallel_tasks` with your task_id to exclude self.
+1. **Check parallel work**: Call `get_parallel_tasks` with your task_id to exclude self.
    Review concurrent tasks to identify overlapping file modifications or shared dependencies.
 
-2. **Learn from history**: Call `kagan_get_agent_logs` on related completed tasks.
+2. **Learn from history**: Call `get_task(task_id, include_logs=true)` on related completed tasks.
    Avoid repeating failed approaches; reuse successful patterns.
 
 3. **Coordinate strategy**: If overlap exists, plan which files to modify first or wait for.
@@ -352,8 +389,8 @@ Before implementing, check for parallel work and historical context:
 ## Setup Verification
 
 Please confirm you have access to the Kagan MCP tools by:
-1. Calling `kagan_get_context` with task_id: `{task.id}`
-2. Calling `kagan_get_parallel_tasks` to check for concurrent work
+1. Calling `get_context` with task_id: `{task.id}`
+2. Calling `get_parallel_tasks` to check for concurrent work
 
 After confirming MCP access, please:
 1. Summarize your understanding of this task (including acceptance criteria from MCP)

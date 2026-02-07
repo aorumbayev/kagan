@@ -9,16 +9,24 @@ if TYPE_CHECKING:
     from kagan.acp.agent import Agent
 
 
-def serialize_agent_output(agent: Agent) -> str:
-    """Serialize agent output including tool calls, thinking, and response to JSON."""
+def serialize_agent_output(agent: Agent, *, include_thinking: bool = False) -> str:
+    """Serialize agent output into a compact JSON payload.
+
+    Compact mode keeps high-signal events (tool calls, plans, failures) and stores
+    the final response once, instead of persisting every streamed response chunk.
+    """
     from kagan.acp import messages as msg_types
 
     serialized_messages: list[dict[str, Any]] = []
     for message in agent._buffers.messages:
         if isinstance(message, msg_types.AgentUpdate):
-            serialized_messages.append({"type": "response", "content": message.text})
+            # Streamed agent text chunks are reconstructed from get_response_text()
+            # and appended once below to avoid quadratic log growth.
+            if message.content_type != "text" and message.text:
+                serialized_messages.append({"type": "response", "content": message.text})
         elif isinstance(message, msg_types.Thinking):
-            serialized_messages.append({"type": "thinking", "content": message.text})
+            if include_thinking and message.text:
+                serialized_messages.append({"type": "thinking", "content": message.text})
         elif isinstance(message, msg_types.ToolCall):
             serialized_messages.append(
                 {
@@ -54,12 +62,11 @@ def serialize_agent_output(agent: Agent) -> str:
                 }
             )
 
-    return json.dumps(
-        {
-            "messages": serialized_messages,
-            "response_text": agent.get_response_text(),
-        }
-    )
+    response_text = agent.get_response_text()
+    if response_text:
+        serialized_messages.append({"type": "response", "content": response_text})
+
+    return json.dumps({"messages": serialized_messages})
 
 
 def build_merge_conflict_note(
@@ -72,7 +79,7 @@ def build_merge_conflict_note(
 ) -> str:
     """Build a detailed scratchpad note about merge conflict for agent context."""
     lines = [
-        "\n\n--- MERGE CONFLICT - AUTO RETRY ---",
+        "\n\n--- MERGE CONFLICT - AUTO MERGE ---",
         f"Original merge error: {original_error}",
         "",
     ]
@@ -90,12 +97,12 @@ def build_merge_conflict_note(
         lines.append(f"2. Run: git rebase origin/{base_branch}")
         lines.append("3. For each conflict, edit the file to resolve, then: git add <file>")
         lines.append("4. Run: git rebase --continue")
-        lines.append("5. Once resolved, signal COMPLETE to retry the merge")
+        lines.append("5. Once resolved, signal COMPLETE to re-attempt the merge")
 
     if conflict_files:
         lines.append("")
         lines.append("Files with conflicts:")
-        for f in conflict_files[:10]:  # Limit to first 10
+        for f in conflict_files[:10]:
             lines.append(f"  - {f}")
         if len(conflict_files) > 10:
             lines.append(f"  ... and {len(conflict_files) - 10} more")
@@ -103,7 +110,7 @@ def build_merge_conflict_note(
     if files_on_base:
         lines.append("")
         lines.append(f"Files recently changed on {base_branch} (potential conflict sources):")
-        for f in files_on_base[:10]:  # Limit to first 10
+        for f in files_on_base[:10]:
             lines.append(f"  - {f}")
         if len(files_on_base) > 10:
             lines.append(f"  ... and {len(files_on_base) - 10} more")

@@ -37,7 +37,6 @@ def focus_horizontal(screen: KanbanScreen, direction: int) -> None:
     card = get_focused_card(screen)
     columns = get_columns(screen)
 
-    # If no card focused, focus first available card
     if not card or not card.task_model:
         focus_first_card(screen)
         return
@@ -45,7 +44,6 @@ def focus_horizontal(screen: KanbanScreen, direction: int) -> None:
     col_idx = next((i for i, s in enumerate(COLUMN_ORDER) if s == card.task_model.status), -1)
     card_idx = columns[col_idx].get_focused_card_index() or 0
 
-    # Search in direction until we find a column with cards
     target_idx = col_idx + direction
     while 0 <= target_idx < len(COLUMN_ORDER):
         cards = columns[target_idx].get_cards()
@@ -58,7 +56,6 @@ def focus_horizontal(screen: KanbanScreen, direction: int) -> None:
 def focus_vertical(screen: KanbanScreen, direction: int) -> None:
     card = get_focused_card(screen)
 
-    # If no card focused, focus first available card
     if not card or not card.task_model:
         focus_first_card(screen)
         return

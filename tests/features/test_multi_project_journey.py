@@ -444,10 +444,8 @@ async def test_multi_project_ui_journey(tmp_path: Path, monkeypatch: pytest.Monk
         kagan_app = cast("KaganApp", pilot.app)
         kagan_app.config.general.max_concurrent_agents = 8
         kagan_app.ctx.config.general.max_concurrent_agents = 8
-        kagan_app.config.general.default_pair_terminal_backend = "tmux"
-        kagan_app.ctx.config.general.default_pair_terminal_backend = "tmux"
-        kagan_app.config.ui.skip_pair_instructions = True
-        kagan_app.ctx.config.ui.skip_pair_instructions = True
+        kagan_app.config.ui.skip_tmux_gateway = True
+        kagan_app.ctx.config.ui.skip_tmux_gateway = True
 
         project_a_id = await _create_project(pilot, "Project A", project_a_repo1)
         await _create_auto_task_from_planner(pilot, "Auto task for repo A1")

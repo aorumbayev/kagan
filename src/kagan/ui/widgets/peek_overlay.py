@@ -18,39 +18,6 @@ class PeekOverlay(Vertical):
     requiring a full modal switch.
     """
 
-    DEFAULT_CSS = """
-    PeekOverlay {
-        layer: overlay;
-        width: 50;
-        height: auto;
-        max-height: 12;
-        background: $surface;
-        border: round $primary;
-        padding: 1;
-        display: none;
-        position: absolute;
-        overflow-y: auto;
-    }
-
-    PeekOverlay.visible {
-        display: block;
-    }
-
-    PeekOverlay .peek-title {
-        text-style: bold;
-        color: $primary;
-        margin-bottom: 1;
-    }
-
-    PeekOverlay .peek-status {
-        color: $text;
-    }
-
-    PeekOverlay .peek-content {
-        color: $text-muted;
-    }
-    """
-
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._title_widget = Static("", classes="peek-title", id="peek-title")
@@ -88,4 +55,4 @@ class PeekOverlay(Vertical):
         if self.has_class("visible"):
             self.hide()
             return False
-        return True  # Caller should call show_at() with position
+        return True

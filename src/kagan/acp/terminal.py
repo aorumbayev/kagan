@@ -92,7 +92,7 @@ class TerminalRunner:
         """
         try:
             self._task = asyncio.create_task(self._run())
-            # Give it a moment to start
+
             await asyncio.sleep(0.1)
             return self._process is not None
         except OSError:
@@ -100,16 +100,13 @@ class TerminalRunner:
 
     async def _run(self) -> None:
         """Run the command and capture output."""
-        # Build the full command
         full_command = f"{self.command} {shlex.join(self.args)}" if self.args else self.command
 
-        # Determine working directory
         if self.cwd:
             work_dir = self.cwd if os.path.isabs(self.cwd) else str(self.project_root / self.cwd)
         else:
             work_dir = str(self.project_root)
 
-        # Build environment
         environment = os.environ.copy()
         environment.update(self.env)
 
@@ -148,7 +145,6 @@ class TerminalRunner:
         if self.output_byte_limit is None:
             return
 
-        # Trim oldest output if over limit
         while self._output_bytes_count > self.output_byte_limit and self._output:
             oldest = self._output[0]
             if self._output_bytes_count - len(oldest) < self.output_byte_limit:
@@ -168,7 +164,8 @@ class TerminalRunner:
         if self.output_byte_limit is not None and len(output_bytes) > self.output_byte_limit:
             truncated = True
             output_bytes = output_bytes[-self.output_byte_limit :]
-            # Ensure we start on a UTF-8 boundary
+
+            # Trim to a UTF-8 boundary after slicing raw bytes.
             for offset, byte_val in enumerate(output_bytes):
                 if (byte_val & 0b11000000) != 0b10000000:
                     if offset:
@@ -189,7 +186,7 @@ class TerminalRunner:
             return False
         try:
             self._process.kill()
-            # Also cancel the task to prevent it from blocking on read
+
             if self._task is not None and not self._task.done():
                 self._task.cancel()
             return True
@@ -199,10 +196,10 @@ class TerminalRunner:
     def release(self) -> None:
         """Release the terminal (no longer usable via ACP)."""
         self._released = True
-        # Cancel task if still running
+
         if self._task is not None and not self._task.done():
             self._task.cancel()
-        # Clear output buffer to free memory
+
         self._output.clear()
         self._output_bytes_count = 0
 

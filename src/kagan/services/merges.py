@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
-from kagan.core.models.enums import MergeReadiness, TaskStatus
+from kagan.core.models.enums import MergeStatus, MergeType, RejectionAction, TaskStatus
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from kagan.config import KaganConfig
     from kagan.core.events import EventBus
     from kagan.core.models.entities import Task
-    from kagan.services.automation import AutomationServiceImpl
+    from kagan.services.automation import AutomationService
     from kagan.services.sessions import SessionService
     from kagan.services.tasks import TaskService
     from kagan.services.types import TaskLike
@@ -43,56 +43,11 @@ class MergeResult:
     message: str
     pr_url: str | None = None
     commit_sha: str | None = None
+    conflict_op: str | None = None
+    conflict_files: list[str] | None = None
 
 
-class MergeService(Protocol):
-    """Service interface for merge operations."""
-
-    async def delete_task(self, task: TaskLike) -> tuple[bool, str]: ...
-
-    async def merge_task(self, task: TaskLike) -> tuple[bool, str]: ...
-
-    async def close_exploratory(self, task: TaskLike) -> tuple[bool, str]: ...
-
-    async def apply_rejection_feedback(
-        self,
-        task: TaskLike,
-        feedback: str | None,
-        action: str = "shelve",
-    ) -> Task: ...
-
-    async def has_no_changes(self, task: TaskLike) -> bool: ...
-
-    async def merge_repo(
-        self,
-        workspace_id: str,
-        repo_id: str,
-        *,
-        strategy: MergeStrategy = MergeStrategy.DIRECT,
-        pr_title: str | None = None,
-        pr_body: str | None = None,
-    ) -> MergeResult: ...
-
-    async def merge_all(
-        self,
-        workspace_id: str,
-        *,
-        strategy: MergeStrategy = MergeStrategy.DIRECT,
-        skip_unchanged: bool = True,
-    ) -> list[MergeResult]: ...
-
-    async def create_pr(
-        self,
-        workspace_id: str,
-        repo_id: str,
-        *,
-        title: str,
-        body: str,
-        draft: bool = False,
-    ) -> str: ...
-
-
-class MergeServiceImpl:
+class MergeService:
     """Manages merge lifecycle operations without UI coupling."""
 
     def __init__(
@@ -100,7 +55,7 @@ class MergeServiceImpl:
         task_service: TaskService,
         worktrees: WorkspaceService,
         sessions: SessionService,
-        automation: AutomationServiceImpl,
+        automation: AutomationService,
         config: KaganConfig,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         event_bus: EventBus | None = None,
@@ -133,21 +88,17 @@ class MergeServiceImpl:
         """
         steps_completed: list[str] = []
         try:
-            # Step 1: Stop agent if running
             if self.automation.is_running(task.id):
                 await self.automation.stop_task(task.id)
             steps_completed.append("agent_stopped")
 
-            # Step 2: Kill session
             await self.sessions.kill_session(task.id)
             steps_completed.append("session_killed")
 
-            # Step 3: Delete worktree
             if await self.worktrees.get_path(task.id):
                 await self.worktrees.delete(task.id, delete_branch=True)
             steps_completed.append("worktree_deleted")
 
-            # Step 4: Delete from database (point of no return)
             await self.tasks.delete_task(task.id)
             steps_completed.append("db_deleted")
 
@@ -161,69 +112,39 @@ class MergeServiceImpl:
 
     async def merge_task(self, task: TaskLike) -> tuple[bool, str]:
         """Merge task changes and clean up. Returns (success, message)."""
-        base = self.config.general.default_base_branch
         config = self.config.general
 
-        if config.require_review_approval and task.checks_passed is not True:
-            message = "Review approval required before merge."
-            await self.tasks.update_fields(
-                task.id,
-                merge_failed=True,
-                merge_error=message,
-                merge_readiness=MergeReadiness.BLOCKED,
-            )
-            await self.tasks.append_event(task.id, "policy", message)
-            return False, message
-
         async def _do_merge() -> tuple[bool, str]:
-            await self.tasks.update_fields(
-                task.id,
-                merge_failed=False,
-                merge_error=None,
-                merge_readiness=MergeReadiness.RISK,
-            )
-
             workspace_id = await self._get_latest_workspace_id(task.id)
             if not workspace_id:
                 message = f"Workspace not found for task {task.id}"
-                await self.tasks.update_fields(
-                    task.id,
-                    merge_failed=True,
-                    merge_error=message[:500],
-                    merge_readiness=MergeReadiness.BLOCKED,
-                )
-                await self.tasks.append_event(task.id, "merge", message)
                 return False, message
 
+            short_id = task.id.split("-")[0] if "-" in task.id else task.id[:8]
+            commit_msg = f"{task.title} (kagan {short_id})"
+            if task.description and task.description.strip():
+                commit_msg += f"\n\n{task.description}"
+
+            skip_unchanged = await self.has_no_changes(task)
             results = await self.merge_all(
                 workspace_id,
                 strategy=MergeStrategy.DIRECT,
-                skip_unchanged=True,
+                skip_unchanged=skip_unchanged,
+                commit_message=commit_msg,
             )
             failures = [result for result in results if not result.success]
             if failures:
                 message = "; ".join(f"{result.repo_name}: {result.message}" for result in failures)[
                     :500
                 ]
-                await self.tasks.update_fields(
-                    task.id,
-                    merge_failed=True,
-                    merge_error=message,
-                    merge_readiness=MergeReadiness.BLOCKED,
-                )
-                await self.tasks.append_event(task.id, "merge", f"Merge failed: {message}")
                 return False, message
 
-            await self.worktrees.delete(task.id, delete_branch=True)
+            await self.worktrees.release(workspace_id, cleanup=False, reason="merged")
             await self.sessions.kill_session(task.id)
             await self.tasks.update_fields(
                 task.id,
                 status=TaskStatus.DONE,
-                merge_failed=False,
-                merge_error=None,
-                merge_readiness=MergeReadiness.READY,
             )
-            await self.tasks.append_event(task.id, "merge", f"Merged to {base}")
             return True, "Merged all repos"
 
         if config.serialize_merges:
@@ -232,39 +153,42 @@ class MergeServiceImpl:
         return await _do_merge()
 
     async def close_exploratory(self, task: TaskLike) -> tuple[bool, str]:
-        """Close a DONE task by deleting it (used for no-change exploratory tasks)."""
-        if await self.worktrees.get_path(task.id):
-            await self.worktrees.delete(task.id, delete_branch=True)
-        await self.sessions.kill_session(task.id)
-
-        # Stop agent if running
+        """Close a no-change task by marking DONE and archiving its workspace."""
         if self.automation.is_running(task.id):
             await self.automation.stop_task(task.id)
 
-        # Delete task (exploratory tasks are removed, not kept as DONE)
-        await self.tasks.delete_task(task.id)
-        return True, "Closed as exploratory"
+        await self.sessions.kill_session(task.id)
+
+        workspace_id = await self._get_latest_workspace_id(task.id)
+        if workspace_id:
+            await self.worktrees.release(workspace_id, cleanup=False, reason="no_changes")
+
+        await self.tasks.update_fields(
+            task.id,
+            status=TaskStatus.DONE,
+        )
+        return True, "Closed with no changes"
 
     async def apply_rejection_feedback(
         self,
         task: TaskLike,
         feedback: str | None,
-        action: str = "shelve",  # "retry" | "stage" | "shelve"
+        action: str = "backlog",
     ) -> Task:
-        """Apply rejection feedback with state transition per Active Iteration Model.
+        """Apply rejection feedback and move the task out of REVIEW.
 
         State Transitions:
-            - retry: REVIEW → IN_PROGRESS (agent spawned, iterations reset)
-            - stage: REVIEW → IN_PROGRESS (agent paused, iterations reset)
-            - shelve: REVIEW → BACKLOG (iterations preserved)
+            - return: REVIEW → IN_PROGRESS (manual restart)
+            - backlog: REVIEW → BACKLOG
 
         Returns:
             Updated task from database.
         """
-        # Determine target status based on action
-        target_status = TaskStatus.BACKLOG if action == "shelve" else TaskStatus.IN_PROGRESS
 
-        # Append feedback to description if provided
+        target_status = (
+            TaskStatus.BACKLOG if action == RejectionAction.BACKLOG else TaskStatus.IN_PROGRESS
+        )
+
         if feedback:
             from datetime import datetime
 
@@ -276,28 +200,13 @@ class MergeServiceImpl:
                 task.id,
                 description=new_description,
                 status=target_status,
-                merge_failed=False,
-                merge_error=None,
-                merge_readiness=MergeReadiness.RISK,
-            )
-            await self.tasks.append_event(
-                task.id, "review", f"Rejected with feedback: {feedback[:200]}"
             )
         else:
             await self.tasks.update_fields(
                 task.id,
                 status=target_status,
-                merge_failed=False,
-                merge_error=None,
-                merge_readiness=MergeReadiness.RISK,
             )
-            await self.tasks.append_event(task.id, "review", "Rejected")
 
-        # Reset iterations for retry/stage actions (not shelve)
-        if action in ("retry", "stage"):
-            self.automation.reset_iterations(task.id)
-
-        # Return refreshed task
         refreshed_task = await self.tasks.get_task(task.id)
         assert refreshed_task is not None
         return refreshed_task
@@ -308,7 +217,12 @@ class MergeServiceImpl:
         if not workspace_id:
             return True
         repos = await self.workspace_service.get_workspace_repos(workspace_id)
-        return not any(repo.get("has_changes") for repo in repos)
+        if any(repo.get("has_changes") for repo in repos):
+            return False
+
+        base_branch = task.base_branch or self.config.general.default_base_branch
+        commits = await self.workspace_service.get_commit_log(task.id, base_branch)
+        return not commits
 
     async def merge_repo(
         self,
@@ -318,6 +232,7 @@ class MergeServiceImpl:
         strategy: MergeStrategy = MergeStrategy.DIRECT,
         pr_title: str | None = None,
         pr_body: str | None = None,
+        commit_message: str | None = None,
     ) -> MergeResult:
         """Merge a single repo's changes."""
         if self._events is None or self._git is None:
@@ -329,7 +244,6 @@ class MergeServiceImpl:
 
         from kagan.adapters.db.schema import Merge, Repo, Workspace, WorkspaceRepo
         from kagan.core.events import MergeCompleted, MergeFailed, PRCreated
-        from kagan.core.models.enums import MergeStatus
 
         async with self._get_session() as session:
             result = await session.execute(
@@ -348,15 +262,18 @@ class MergeServiceImpl:
         if not workspace_repo.worktree_path:
             raise ValueError(f"Repo {repo_id} has no worktree for workspace {workspace_id}")
 
+        merge_result: MergeResult | None = None
         if await self._git.has_uncommitted_changes(workspace_repo.worktree_path):
+            short_id = workspace.task_id[:8] if workspace.task_id else "unknown"
             await self._git.commit_all(
                 workspace_repo.worktree_path,
-                message="Auto-commit before merge",
+                f"chore: adding uncommitted agent changes ({short_id})",
             )
+            log.info(f"Auto-committed changes before merge for repo {repo.name}")
 
         await self._git.push(workspace_repo.worktree_path, workspace.branch_name)
 
-        if strategy == MergeStrategy.PULL_REQUEST:
+        if merge_result is None and strategy == MergeStrategy.PULL_REQUEST:
             pr_url = await self._create_pr(
                 repo_path=repo.path,
                 branch=workspace.branch_name,
@@ -379,61 +296,114 @@ class MergeServiceImpl:
                     pr_url=pr_url,
                 )
             )
-        else:
-            try:
-                commit_sha = await self._git.merge_branch(
-                    repo_path=repo.path,
-                    source_branch=workspace.branch_name,
-                    target_branch=workspace_repo.target_branch,
-                )
-                merge_result = MergeResult(
-                    repo_id=repo_id,
-                    repo_name=repo.name,
-                    strategy=strategy,
-                    success=True,
-                    message=f"Merged to {workspace_repo.target_branch}",
-                    commit_sha=commit_sha,
-                )
-                await self._events.publish(
-                    MergeCompleted(
-                        workspace_id=workspace_id,
-                        repo_id=repo_id,
-                        target_branch=workspace_repo.target_branch,
-                        commit_sha=commit_sha,
-                    )
-                )
-            except Exception as exc:
+        elif merge_result is None:
+            if self._is_remote_target(workspace_repo.target_branch):
                 merge_result = MergeResult(
                     repo_id=repo_id,
                     repo_name=repo.name,
                     strategy=strategy,
                     success=False,
-                    message=str(exc),
+                    message=(
+                        f"Direct merge blocked for remote target {workspace_repo.target_branch}"
+                    ),
                 )
                 await self._events.publish(
                     MergeFailed(
                         workspace_id=workspace_id,
                         repo_id=repo_id,
-                        error=str(exc),
+                        error=merge_result.message,
                     )
                 )
+            else:
+                try:
+                    git_result = await self._git.merge_squash(
+                        repo_path=repo.path,
+                        source_branch=workspace.branch_name,
+                        target_branch=workspace_repo.target_branch,
+                        commit_message=commit_message,
+                    )
+                    if git_result.success:
+                        merge_result = MergeResult(
+                            repo_id=repo_id,
+                            repo_name=repo.name,
+                            strategy=strategy,
+                            success=True,
+                            message=git_result.message,
+                            commit_sha=git_result.commit_sha,
+                        )
+                        if git_result.commit_sha:
+                            await self._events.publish(
+                                MergeCompleted(
+                                    workspace_id=workspace_id,
+                                    repo_id=repo_id,
+                                    target_branch=workspace_repo.target_branch,
+                                    commit_sha=git_result.commit_sha,
+                                )
+                            )
+                    else:
+                        merge_result = MergeResult(
+                            repo_id=repo_id,
+                            repo_name=repo.name,
+                            strategy=strategy,
+                            success=False,
+                            message=git_result.message,
+                            conflict_op=git_result.conflict.op if git_result.conflict else None,
+                            conflict_files=git_result.conflict.files
+                            if git_result.conflict
+                            else None,
+                        )
+                        await self._events.publish(
+                            MergeFailed(
+                                workspace_id=workspace_id,
+                                repo_id=repo_id,
+                                error=git_result.message,
+                                conflict_op=merge_result.conflict_op,
+                                conflict_files=merge_result.conflict_files,
+                            )
+                        )
+                except Exception as exc:
+                    merge_result = MergeResult(
+                        repo_id=repo_id,
+                        repo_name=repo.name,
+                        strategy=strategy,
+                        success=False,
+                        message=str(exc),
+                    )
+                    await self._events.publish(
+                        MergeFailed(
+                            workspace_id=workspace_id,
+                            repo_id=repo_id,
+                            error=str(exc),
+                        )
+                    )
 
-        if workspace.task_id:
-            async with self._get_session() as session:
-                merge_record = Merge(
-                    task_id=workspace.task_id,
-                    workspace_id=workspace_id,
-                    repo_id=repo_id,
-                    strategy=strategy.value,
-                    target_branch=workspace_repo.target_branch,
-                    commit_sha=merge_result.commit_sha,
-                    status=MergeStatus.MERGED if merge_result.success else MergeStatus.FAILED,
-                    pr_url=merge_result.pr_url,
-                    error=None if merge_result.success else merge_result.message,
-                    merged_at=datetime.now() if merge_result.success else None,
-                )
-                session.add(merge_record)
-                await session.commit()
+        async with self._get_session() as session:
+            merge_type = (
+                MergeType.PR if strategy == MergeStrategy.PULL_REQUEST else MergeType.DIRECT
+            )
+            merge_record = Merge(
+                workspace_id=workspace_id,
+                repo_id=repo_id,
+                merge_type=merge_type,
+                target_branch_name=workspace_repo.target_branch,
+                merge_commit=merge_result.commit_sha if merge_type == MergeType.DIRECT else None,
+                pr_url=merge_result.pr_url if merge_type == MergeType.PR else None,
+                pr_status=(
+                    MergeStatus.OPEN
+                    if merge_type == MergeType.PR and merge_result.success
+                    else MergeStatus.MERGED
+                    if merge_result.success
+                    else MergeStatus.CLOSED
+                ),
+                pr_merged_at=datetime.now()
+                if merge_type == MergeType.PR and merge_result.success
+                else None,
+                pr_merge_commit_sha=merge_result.commit_sha
+                if merge_type == MergeType.PR and merge_result.success
+                else None,
+            )
+            session.add(merge_record)
+            await session.commit()
 
         return merge_result
 
@@ -443,6 +413,7 @@ class MergeServiceImpl:
         *,
         strategy: MergeStrategy = MergeStrategy.DIRECT,
         skip_unchanged: bool = True,
+        commit_message: str | None = None,
     ) -> list[MergeResult]:
         """Merge all repos in a workspace."""
         repos = await self.workspace_service.get_workspace_repos(workspace_id)
@@ -465,6 +436,7 @@ class MergeServiceImpl:
                     workspace_id,
                     repo["repo_id"],
                     strategy=strategy,
+                    commit_message=commit_message,
                 )
             )
 
@@ -526,3 +498,7 @@ class MergeServiceImpl:
             raise RuntimeError(f"Failed to create PR: {stderr.decode()}")
 
         return stdout.decode().strip()
+
+    @staticmethod
+    def _is_remote_target(target_branch: str) -> bool:
+        return target_branch.startswith("origin/") or target_branch.startswith("refs/remotes/")

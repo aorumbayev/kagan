@@ -1,7 +1,4 @@
-"""Shared fixtures for feature tests.
-
-These fixtures extend the main conftest.py fixtures with feature-test-specific setup.
-"""
+"""Shared fixtures for feature tests."""
 
 from __future__ import annotations
 

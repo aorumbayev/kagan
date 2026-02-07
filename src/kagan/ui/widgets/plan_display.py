@@ -2,27 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from textual.containers import VerticalGroup
 from textual.widgets import Static
 
+from kagan.core.models.enums import PlanStatus
 from kagan.ui.utils.clipboard import copy_with_notification
 
 if TYPE_CHECKING:
     from acp.schema import PlanEntry as AcpPlanEntry
     from textual.app import ComposeResult
     from textual.events import Click
-
-STATUS_ICONS: dict[str, str] = {
-    "pending": "○",
-    "in_progress": "◐",
-    "completed": "●",
-    "failed": "✗",
-}
-
-PlanStatus = Literal["pending", "in_progress", "completed", "failed"]
-AcpPlanStatus = Literal["pending", "in_progress", "completed"]
 
 
 class PlanEntry(Static):
@@ -48,7 +39,7 @@ class PlanEntry(Static):
         self.refresh()
 
     def render(self) -> str:
-        icon = STATUS_ICONS.get(self._status, "○")
+        icon = self._status.icon
         return f"  {icon} {self._entry_content}"
 
     async def _on_click(self, event: Click) -> None:
@@ -74,7 +65,7 @@ class PlanDisplay(VerticalGroup):
 
     def compose(self) -> ComposeResult:
         for entry in self._entries:
-            status = cast("PlanStatus", entry.status)
+            status = PlanStatus(entry.status)
             content = entry.content
             yield PlanEntry(entry_content=content, status=status)
 
@@ -82,15 +73,18 @@ class PlanDisplay(VerticalGroup):
         self._entries = entries
         self.remove_children()
         for entry in self._entries:
-            status = cast("PlanStatus", entry.status)
+            status = PlanStatus(entry.status)
             content = entry.content
             self.mount(PlanEntry(entry_content=content, status=status))
 
     def update_entry_status(self, index: int, status: PlanStatus) -> None:
         if 0 <= index < len(self._entries):
             entry = self._entries[index]
-            entry_status = "pending" if status == "failed" else status
-            entry.status = cast("AcpPlanStatus", entry_status)
+            # ACP schema doesn't have "failed", map it to "pending"
+            entry_status: Literal["pending", "in_progress", "completed"] = (
+                "pending" if status == PlanStatus.FAILED else cast("Any", status.value)
+            )
+            entry.status = entry_status
             children = list(self.query(PlanEntry))
             if 0 <= index < len(children):
                 children[index].update_status(status)

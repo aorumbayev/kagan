@@ -15,11 +15,15 @@ if TYPE_CHECKING:
 class OfflineBanner(Static):
     """Banner shown when agent is unavailable."""
 
-    class Retry(Message):
-        """User clicked retry."""
+    class Reconnect(Message):
+        """User clicked reconnect."""
+
+        pass
 
     class Dismissed(Message):
         """User dismissed banner."""
+
+        pass
 
     def __init__(self, message: str | None = None) -> None:
         super().__init__()
@@ -29,13 +33,13 @@ class OfflineBanner(Static):
         yield Label("⚠️  OFFLINE MODE", id="offline-title")
         yield Label(self._message, id="offline-message")
         with Horizontal(id="offline-actions"):
-            yield Button("Retry", id="offline-retry", variant="primary")
+            yield Button("Reconnect", id="offline-reconnect", variant="primary")
             yield Button("Dismiss", id="offline-dismiss")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
-        if event.button.id == "offline-retry":
-            self.post_message(self.Retry())
+        if event.button.id == "offline-reconnect":
+            self.post_message(self.Reconnect())
         elif event.button.id == "offline-dismiss":
             self.post_message(self.Dismissed())
             self.remove()

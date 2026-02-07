@@ -27,15 +27,19 @@ class ProjectService(Protocol):
         description: str | None = None,
     ) -> str:
         """Create a project with repos, return project_id."""
+        ...
 
     async def open_project(self, project_id: ProjectId) -> Project:
         """Open project (update last_opened_at, publish ProjectOpened event)."""
+        ...
 
     async def get_project(self, project_id: ProjectId) -> Project | None:
         """Return a project by ID."""
+        ...
 
     async def list_recent_projects(self, limit: int = 10) -> list[Project]:
         """Get recently opened projects sorted by last_opened_at desc."""
+        ...
 
     async def add_repo_to_project(
         self,
@@ -44,6 +48,7 @@ class ProjectService(Protocol):
         is_primary: bool = False,
     ) -> str:
         """Add repo to project, return repo_id."""
+        ...
 
     async def remove_repo_from_project(
         self,
@@ -51,15 +56,19 @@ class ProjectService(Protocol):
         repo_id: RepoId,
     ) -> None:
         """Remove repo from project."""
+        ...
 
     async def get_project_repos(self, project_id: ProjectId) -> list[Repo]:
         """Get all repos for a project."""
+        ...
 
     async def get_project_repo_details(self, project_id: ProjectId) -> list[dict]:
         """Get all repos for a project with junction metadata."""
+        ...
 
     async def find_project_by_repo_path(self, repo_path: str | Path) -> Project | None:
         """Find project containing the repo."""
+        ...
 
 
 class ProjectServiceImpl:
@@ -103,7 +112,6 @@ class ProjectServiceImpl:
 
             project_id = project.id
 
-        # Add repos to project
         for i, repo_path in enumerate(repo_paths):
             is_primary = i == 0
             await self.add_repo_to_project(project_id, repo_path, is_primary=is_primary)
@@ -165,14 +173,11 @@ class ProjectServiceImpl:
         is_primary: bool = False,
     ) -> str:
         """Add repo to project, return repo_id."""
-        # Get or create repo
         repo, _ = await self._repo_repository.get_or_create(path=repo_path)
 
-        # Get current repo count for display_order
         existing_repos = await self._repo_repository.list_for_project(project_id)
         display_order = len(existing_repos)
 
-        # Add to project via junction table
         await self._repo_repository.add_to_project(
             project_id=project_id,
             repo_id=repo.id,
@@ -225,14 +230,12 @@ class ProjectServiceImpl:
         resolved_path = str(Path(repo_path).resolve())
 
         async with self._get_session() as session:
-            # Find repo by path
             result = await session.execute(select(Repo).where(Repo.path == resolved_path))
             repo = result.scalars().first()
 
             if repo is None:
                 return None
 
-            # Find project via junction table
             result = await session.execute(
                 select(ProjectRepo).where(ProjectRepo.repo_id == repo.id)
             )

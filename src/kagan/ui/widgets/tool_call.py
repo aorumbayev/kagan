@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, cast
 
 from textual import containers, events, on
 from textual.content import Content
@@ -11,6 +11,7 @@ from textual.css.query import NoMatches
 from textual.reactive import var
 from textual.widgets import Static
 
+from kagan.core.models.enums import ToolCallStatus
 from kagan.ui.utils.clipboard import copy_with_notification
 
 if TYPE_CHECKING:
@@ -20,8 +21,6 @@ if TYPE_CHECKING:
     ToolCallData = AcpToolCall
 else:
     ToolCallData = object
-
-ToolCallStatus = Literal["pending", "in_progress", "completed", "failed"]
 
 
 class ToolCallHeader(Static):
@@ -54,9 +53,10 @@ class ToolCall(containers.VerticalGroup):
         self._tool_call = tool_call
         self.refresh(recompose=True)
 
-    def update_status(self, status: ToolCallStatus) -> None:
+    def update_status(self, status: str) -> None:
         """Update tool call status and refresh display."""
-        self._tool_call.status = status
+        # Cast to Any to allow assignment to ACP schema's Literal type
+        self._tool_call.status = cast("Any", status)
         with suppress(NoMatches):
             self.query_one(ToolCallHeader).update(self._header_content)
 
@@ -74,7 +74,7 @@ class ToolCall(containers.VerticalGroup):
     @property
     def _header_content(self) -> Content:
         title = self._tool_call.title
-        status = self._tool_call.status or "pending"
+        status_str = self._tool_call.status or "pending"
 
         expand_icon = (
             Content("▼ " if self.expanded else "▶ ")
@@ -83,12 +83,15 @@ class ToolCall(containers.VerticalGroup):
         )
         header = Content.assemble(expand_icon, "🔧 ", (title, "$text-success"))
 
-        status_icons = {"pending": " ⏲", "in_progress": " ⋯", "completed": " ✔", "failed": " ❌"}
-        if status in status_icons:
-            if status == "completed":
-                header += Content.from_markup(f" [$success]{status_icons[status]}")
+        # Try to get icon from enum, handle unknown statuses gracefully
+        try:
+            status_enum = ToolCallStatus(status_str)
+            if status_enum == ToolCallStatus.COMPLETED:
+                header += Content.from_markup(f" [$success]{status_enum.icon}")
             else:
-                header += Content.assemble(status_icons[status])
+                header += Content.assemble(status_enum.icon)
+        except ValueError:
+            pass  # Unknown status, skip icon
         return header
 
     def watch_expanded(self) -> None:

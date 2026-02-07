@@ -10,6 +10,7 @@ from textual.widgets import Button, Footer, Label, RichLog, Rule, Static, Tabbed
 
 from kagan.keybindings import DIFF_BINDINGS
 from kagan.ui.utils.clipboard import copy_with_notification
+from kagan.ui.utils.diff import colorize_diff
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -64,7 +65,6 @@ class DiffModal(ModalScreen[str | None]):
         yield Footer(show_command_palette=False)
 
     def on_mount(self) -> None:
-        # Style button row for center alignment (match other modals)
         button_row = self.query_one(".button-row", Horizontal)
         button_row.styles.width = "100%"
         button_row.styles.height = "auto"
@@ -73,7 +73,7 @@ class DiffModal(ModalScreen[str | None]):
 
         if not self._diffs:
             log = self.query_one("#diff-log", RichLog)
-            # Remove border to avoid double-border effect (container already has border)
+
             log.styles.border = ("none", "transparent")
             for line in self._diff_text.splitlines() or ["(No diff available)"]:
                 log.write(line)
@@ -86,22 +86,9 @@ class DiffModal(ModalScreen[str | None]):
                     classes="diff-header",
                 )
                 yield Static(
-                    self._colorize_diff(file.diff_content),
+                    colorize_diff(file.diff_content),
                     classes="diff-content",
                 )
-
-    def _colorize_diff(self, content: str) -> str:
-        lines: list[str] = []
-        for line in content.split("\n"):
-            if line.startswith("+") and not line.startswith("+++"):
-                lines.append(f"[green]{line}[/green]")
-            elif line.startswith("-") and not line.startswith("---"):
-                lines.append(f"[red]{line}[/red]")
-            elif line.startswith("@@"):
-                lines.append(f"[cyan]{line}[/cyan]")
-            else:
-                lines.append(line)
-        return "\n".join(lines)
 
     def action_close(self) -> None:
         """Close the modal without any action."""

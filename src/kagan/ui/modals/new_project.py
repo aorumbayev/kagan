@@ -57,10 +57,20 @@ class NewProjectModal(ModalScreen[dict | None]):
                 return
 
             if not (resolved_path / ".git").exists():
-                self.notify(f"Not a git repository: {resolved_path}", severity="warning")
-                # Allow creation anyway - they might want to init later
+                from kagan.git_utils import init_git_repo
 
-        # Create the project via service
+                self.notify("Initializing git repository...", severity="information")
+                result = await init_git_repo(resolved_path, base_branch="main")
+                if not result.success:
+                    msg = result.error.message if result.error else "Unknown error"
+                    details = result.error.details if result.error else ""
+                    self.notify(
+                        f"Failed to initialize git repository: {msg}\n{details}",
+                        severity="error",
+                    )
+                    return
+                self.notify("Git repository initialized", severity="information")
+
         app = cast("KaganApp", self.app)
         project_service = app.ctx.project_service
         repo_paths: list[str | Path] = []

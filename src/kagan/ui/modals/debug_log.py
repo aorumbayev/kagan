@@ -71,7 +71,6 @@ class DebugLogModal(ModalScreen[None]):
 
     async def _update_logs(self) -> None:
         """Update the log display with new entries."""
-        # Check if buffer was cleared externally
         current_gen = get_buffer_generation()
         if current_gen != self._buffer_generation:
             self._buffer_generation = current_gen
@@ -79,12 +78,9 @@ class DebugLogModal(ModalScreen[None]):
             rich_log = self.query_one("#debug-log", RichLog)
             rich_log.clear()
 
-        # Only process new entries without copying the entire buffer
         buffer_len = len(log_buffer)
         if buffer_len <= self._line_count:
-            # No new entries (or buffer wrapped around)
             if buffer_len < self._line_count:
-                # Buffer wrapped - reset and show current entries
                 self._line_count = 0
                 rich_log = self.query_one("#debug-log", RichLog)
                 rich_log.clear()
@@ -92,7 +88,7 @@ class DebugLogModal(ModalScreen[None]):
         if buffer_len > self._line_count:
             rich_log = self.query_one("#debug-log", RichLog)
             # Convert deque to list once and slice only new entries (O(k) where k = new entries)
-            # This avoids iterating through all old entries
+
             new_entries = list(log_buffer)[self._line_count :]
             for entry in new_entries:
                 formatted = self._format_entry(entry)
@@ -104,7 +100,6 @@ class DebugLogModal(ModalScreen[None]):
         ts = datetime.fromtimestamp(entry.timestamp).strftime("%H:%M:%S")
         color = self._get_color(entry.group)
 
-        # Add source indicator for logging module entries
         source_indicator = "" if entry.source == LogSource.TEXTUAL else " [PY]"
 
         return f"[{color}]{ts} [{entry.group}]{source_indicator}[/{color}] {entry.message}"

@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 class SearchBar(Widget):
     """A search bar widget for filtering tasks on the Kanban board."""
 
-    # Start hidden and non-focusable
     can_focus = False
 
     search_query: reactive[str] = reactive("")

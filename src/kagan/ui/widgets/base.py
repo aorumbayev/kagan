@@ -1,14 +1,10 @@
-"""Reusable base widget classes for forms and modals.
-
-Provides consistent styling and configuration for common form components.
-Based on patterns from JiraTUI.
-"""
+"""Reusable base widget classes for forms and modals."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from textual.widgets import Input, Select, Static, TextArea
+from textual.widgets import Input, Select, TextArea
 
 from kagan.constants import PRIORITY_LABELS
 from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
@@ -98,7 +94,7 @@ class PrioritySelect(Select[int]):
         options: Sequence[tuple[str, int]] = [
             (label, p.value) for p, label in PRIORITY_LABELS.items()
         ]
-        # Ensure value is int for Select
+
         initial_value = value.value if isinstance(value, TaskPriority) else value
         super().__init__(
             options=options,
@@ -124,7 +120,6 @@ class TaskTypeSelect(Select[str]):
         widget_id: str = "type-select",
         **kwargs,
     ) -> None:
-        # Ensure value is str for Select
         initial_value = value.value if isinstance(value, TaskType) else value
         super().__init__(
             options=self.OPTIONS,
@@ -152,7 +147,6 @@ class StatusSelect(Select[str]):
         widget_id: str = "status-select",
         **kwargs,
     ) -> None:
-        # Ensure value is str for Select
         initial_value = value.value if isinstance(value, TaskStatus) else value
         super().__init__(
             options=self.OPTIONS,
@@ -171,11 +165,10 @@ class AgentBackendSelect(Select[str]):
         value: str = "",
         *,
         widget_id: str = "agent-backend-select",
-        allow_blank: bool = True,
+        allow_blank: bool = False,
         **kwargs,
     ) -> None:
-        # Default options if none provided
-        opts = options if options is not None else [("Default", "")]
+        opts = options if options is not None else []
         super().__init__(
             options=opts,
             value=value,
@@ -185,27 +178,23 @@ class AgentBackendSelect(Select[str]):
         )
 
 
-class ReadOnlyField(Static):
-    """A read-only display field for view mode."""
+class BaseBranchInput(Input):
+    DEFAULT_PLACEHOLDER = "e.g. main, develop (blank = use default)"
+    DEFAULT_MAX_LENGTH = 100
 
     def __init__(
         self,
-        content: str = "",
+        value: str = "",
         *,
-        label: str = "",
-        widget_id: str | None = None,
-        classes: str = "",
+        placeholder: str | None = None,
+        max_length: int | None = None,
+        widget_id: str = "base-branch-input",
         **kwargs,
     ) -> None:
         super().__init__(
-            content,
+            value=value or "",
+            placeholder=placeholder or self.DEFAULT_PLACEHOLDER,
+            max_length=max_length or self.DEFAULT_MAX_LENGTH,
             id=widget_id,
-            classes=f"readonly-field {classes}".strip(),
             **kwargs,
         )
-        self._label = label
-
-    @property
-    def label(self) -> str:
-        """Return the field label."""
-        return self._label

@@ -33,11 +33,10 @@ class LogEntry:
     source: LogSource
 
 
-# Global log buffer (ring buffer)
 MAX_LOG_LINES = 2000
 log_buffer: deque[LogEntry] = deque(maxlen=MAX_LOG_LINES)
 
-# Track generation to detect buffer clears
+
 _buffer_generation: int = 0
 
 
@@ -50,17 +49,14 @@ class KaganLogger:
 
     def _log(self, level: str, *args: object, **kwargs: Any) -> None:
         """Internal logging method."""
-        # Build the log message
         output = " ".join(str(arg) for arg in args)
         if kwargs:
             key_values = " ".join(f"{key}={value!r}" for key, value in kwargs.items())
             output = f"{output} {key_values}" if output else key_values
 
-        # Truncate oversized messages
         if len(output) > MAX_LOG_MESSAGE_LENGTH:
             output = output[:MAX_LOG_MESSAGE_LENGTH] + "... [truncated]"
 
-        # Store in buffer
         log_buffer.append(
             LogEntry(
                 group=level,
@@ -70,7 +66,6 @@ class KaganLogger:
             )
         )
 
-        # Also pass to Textual's devtools logger
         try:
             from textual import log as textual_log
 
@@ -126,10 +121,7 @@ _debug_logging_initialized: bool = False
 
 
 def setup_debug_logging() -> None:
-    """Set up the debug logging handler for Python's logging module.
-
-    This is idempotent - calling it multiple times has no effect after the first call.
-    """
+    """Set up the debug logging handler for Python's logging module."""
     global _debug_logging_initialized
 
     if _debug_logging_initialized:
@@ -138,13 +130,11 @@ def setup_debug_logging() -> None:
     handler = DebugLogHandler()
     handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
 
-    # Add to root logger
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
 
     _debug_logging_initialized = True
 
-    # Add a startup log entry
     log.info("Debug logging initialized - press F12 to view logs")
 
 
@@ -190,5 +180,4 @@ def export_logs_to_file(file_path: str) -> int:
     return len(log_buffer)
 
 
-# Create the global logger instance (replaces `from textual import log`)
 log = KaganLogger()
