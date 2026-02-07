@@ -28,6 +28,8 @@ from kagan.core.events import (
     ExecutionFailed,
     MergeCompleted,
     MergeFailed,
+    PRCreated,
+    ScriptCompleted,
     TaskCreated,
     TaskStatusChanged,
     TaskUpdated,
@@ -41,8 +43,11 @@ if TYPE_CHECKING:
     from textual.signal import Signal
 
     from kagan.services.automation import AutomationService
+    from kagan.services.diffs import DiffService
     from kagan.services.executions import ExecutionService
     from kagan.services.merges import MergeService
+    from kagan.services.projects import ProjectService
+    from kagan.services.repo_scripts import RepoScriptService
     from kagan.services.sessions import SessionService
     from kagan.services.tasks import TaskService
     from kagan.services.workspaces import WorkspaceService
@@ -227,7 +232,13 @@ class AppContext:
     session_service: SessionService = field(init=False)
     execution_service: ExecutionService = field(init=False)
     merge_service: MergeService = field(init=False)
+    diff_service: DiffService = field(init=False)
+    repo_script_service: RepoScriptService = field(init=False)
     automation_service: AutomationService = field(init=False)
+    project_service: ProjectService = field(init=False)
+
+    # Active project tracking
+    active_project_id: str | None = None
 
     async def close(self) -> None:
         """Clean up all resources."""
@@ -336,11 +347,16 @@ async def create_app_context(
         event_bus=event_bus,
     )
 
-    from kagan.adapters.db.repositories import TaskRepository
+    from kagan.adapters.db.repositories import RepoRepository, TaskRepository
+    from kagan.adapters.git.operations import GitOperationsAdapter
+    from kagan.adapters.git.worktrees import GitWorktreeAdapter
     from kagan.services import (
         AutomationServiceImpl,
+        DiffServiceImpl,
         ExecutionServiceImpl,
         MergeServiceImpl,
+        ProjectServiceImpl,
+        RepoScriptServiceImpl,
         SessionServiceImpl,
         TaskServiceImpl,
         WorkspaceServiceImpl,
@@ -355,8 +371,29 @@ async def create_app_context(
     )
     await task_repo.initialize()
 
+    # Get session factory from task_repo for project service
+    # After initialize(), session_factory is guaranteed to be set
+    session_factory = task_repo._session_factory
+    assert session_factory is not None, "TaskRepository not initialized"
+
+    # Create repo repository for project service
+    repo_repository = RepoRepository(session_factory)
+
     ctx.task_service = TaskServiceImpl(task_repo, event_bus)
-    ctx.workspace_service = WorkspaceServiceImpl(project_root, ctx.task_service, config)
+    ctx.project_service = ProjectServiceImpl(
+        session_factory,
+        event_bus,
+        repo_repository,
+    )
+    git_adapter = GitWorktreeAdapter()
+    git_ops_adapter = GitOperationsAdapter()
+    ctx.workspace_service = WorkspaceServiceImpl(
+        session_factory,
+        event_bus,
+        git_adapter,
+        ctx.task_service,
+        ctx.project_service,
+    )
     ctx.session_service = SessionServiceImpl(project_root, ctx.task_service, config)
     ctx.execution_service = ExecutionServiceImpl()
     ctx.automation_service = AutomationServiceImpl(
@@ -372,6 +409,15 @@ async def create_app_context(
         ctx.session_service,
         ctx.automation_service,
         config,
+        session_factory,
+        event_bus,
+        git_ops_adapter,
+    )
+    ctx.diff_service = DiffServiceImpl(session_factory, git_ops_adapter, ctx.workspace_service)
+    ctx.repo_script_service = RepoScriptServiceImpl(
+        session_factory,
+        ctx.workspace_service,
+        event_bus,
     )
 
     return ctx
@@ -393,6 +439,8 @@ __all__ = [
     "InMemoryEventBus",
     "MergeCompleted",
     "MergeFailed",
+    "PRCreated",
+    "ScriptCompleted",
     # Signal Bridge
     "SignalBridge",
     "TaskCreated",

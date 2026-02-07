@@ -3,19 +3,45 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Protocol
 
 from kagan.core.models.enums import MergeReadiness, TaskStatus
 
 if TYPE_CHECKING:
-    from kagan.adapters.git.worktrees import WorktreeManager
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from kagan.adapters.git.operations import GitOperationsAdapter
     from kagan.config import KaganConfig
     from kagan.core.models.entities import Task
+    from kagan.core.events import EventBus
     from kagan.services.automation import AutomationServiceImpl
     from kagan.services.sessions import SessionService
     from kagan.services.tasks import TaskService
+    from kagan.services.workspaces import WorkspaceService
 
 log = logging.getLogger(__name__)
+
+
+class MergeStrategy(str, Enum):
+    """How to merge changes."""
+
+    DIRECT = "direct"
+    PULL_REQUEST = "pr"
+
+
+@dataclass
+class MergeResult:
+    """Result of a merge operation."""
+
+    repo_id: str
+    repo_name: str
+    strategy: MergeStrategy
+    success: bool
+    message: str
+    pr_url: str | None = None
+    commit_sha: str | None = None
 
 
 class MergeService(Protocol):
@@ -35,6 +61,34 @@ class MergeService(Protocol):
     ) -> Task: ...
 
     async def has_no_changes(self, task: Task) -> bool: ...
+
+    async def merge_repo(
+        self,
+        workspace_id: str,
+        repo_id: str,
+        *,
+        strategy: MergeStrategy = MergeStrategy.DIRECT,
+        pr_title: str | None = None,
+        pr_body: str | None = None,
+    ) -> MergeResult: ...
+
+    async def merge_all(
+        self,
+        workspace_id: str,
+        *,
+        strategy: MergeStrategy = MergeStrategy.DIRECT,
+        skip_unchanged: bool = True,
+    ) -> list[MergeResult]: ...
+
+    async def create_pr(
+        self,
+        workspace_id: str,
+        repo_id: str,
+        *,
+        title: str,
+        body: str,
+        draft: bool = False,
+    ) -> str: ...
 
 
 def _parse_conflict_files(git_output: str) -> list[str]:
@@ -79,16 +133,28 @@ class MergeServiceImpl:
     def __init__(
         self,
         task_service: TaskService,
-        worktrees: WorktreeManager,
+        worktrees: WorkspaceService,
         sessions: SessionService,
         automation: AutomationServiceImpl,
         config: KaganConfig,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+        event_bus: EventBus | None = None,
+        git_adapter: GitOperationsAdapter | None = None,
     ) -> None:
         self.tasks = task_service
         self.worktrees = worktrees
+        self.workspace_service: WorkspaceService = worktrees
         self.sessions = sessions
         self.automation = automation
         self.config = config
+        self._session_factory = session_factory
+        self._events = event_bus
+        self._git = git_adapter
+
+    def _get_session(self) -> AsyncSession:
+        if self._session_factory is None:
+            raise RuntimeError("Merge service missing session factory for per-repo operations")
+        return self._session_factory()
 
     async def delete_task(self, task: Task) -> tuple[bool, str]:
         """Delete task with rollback-aware error handling.
@@ -276,3 +342,217 @@ class MergeServiceImpl:
         commits = await self.worktrees.get_commit_log(task.id, base_branch=base)
         diff_stats = await self.worktrees.get_diff_stats(task.id, base_branch=base)
         return not commits and not diff_stats.strip()
+
+    async def merge_repo(
+        self,
+        workspace_id: str,
+        repo_id: str,
+        *,
+        strategy: MergeStrategy = MergeStrategy.DIRECT,
+        pr_title: str | None = None,
+        pr_body: str | None = None,
+    ) -> MergeResult:
+        """Merge a single repo's changes."""
+        if self._events is None or self._git is None:
+            raise RuntimeError("Merge service missing dependencies for per-repo operations")
+
+        from datetime import datetime
+
+        from sqlmodel import select
+
+        from kagan.adapters.db.schema import Merge, Repo, Workspace, WorkspaceRepo
+        from kagan.core.events import MergeCompleted, MergeFailed, PRCreated
+        from kagan.core.models.enums import MergeStatus
+
+        async with self._get_session() as session:
+            result = await session.execute(
+                select(WorkspaceRepo, Repo, Workspace)
+                .join(Repo, WorkspaceRepo.repo_id == Repo.id)
+                .join(Workspace, WorkspaceRepo.workspace_id == Workspace.id)
+                .where(WorkspaceRepo.workspace_id == workspace_id)
+                .where(WorkspaceRepo.repo_id == repo_id)
+            )
+            row = result.first()
+
+        if not row:
+            raise ValueError(f"Repo {repo_id} not found in workspace {workspace_id}")
+
+        workspace_repo, repo, workspace = row
+        if not workspace_repo.worktree_path:
+            raise ValueError(f"Repo {repo_id} has no worktree for workspace {workspace_id}")
+
+        if await self._git.has_uncommitted_changes(workspace_repo.worktree_path):
+            await self._git.commit_all(
+                workspace_repo.worktree_path,
+                message="Auto-commit before merge",
+            )
+
+        await self._git.push(workspace_repo.worktree_path, workspace.branch_name)
+
+        if strategy == MergeStrategy.PULL_REQUEST:
+            pr_url = await self._create_pr(
+                repo_path=repo.path,
+                branch=workspace.branch_name,
+                target=workspace_repo.target_branch,
+                title=pr_title or f"Merge {workspace.branch_name}",
+                body=pr_body or "",
+            )
+            merge_result = MergeResult(
+                repo_id=repo_id,
+                repo_name=repo.name,
+                strategy=strategy,
+                success=True,
+                message=f"PR created: {pr_url}",
+                pr_url=pr_url,
+            )
+            await self._events.publish(
+                PRCreated(
+                    workspace_id=workspace_id,
+                    repo_id=repo_id,
+                    pr_url=pr_url,
+                )
+            )
+        else:
+            try:
+                commit_sha = await self._git.merge_branch(
+                    repo_path=repo.path,
+                    source_branch=workspace.branch_name,
+                    target_branch=workspace_repo.target_branch,
+                )
+                merge_result = MergeResult(
+                    repo_id=repo_id,
+                    repo_name=repo.name,
+                    strategy=strategy,
+                    success=True,
+                    message=f"Merged to {workspace_repo.target_branch}",
+                    commit_sha=commit_sha,
+                )
+                await self._events.publish(
+                    MergeCompleted(
+                        workspace_id=workspace_id,
+                        repo_id=repo_id,
+                        target_branch=workspace_repo.target_branch,
+                        commit_sha=commit_sha,
+                    )
+                )
+            except Exception as exc:
+                merge_result = MergeResult(
+                    repo_id=repo_id,
+                    repo_name=repo.name,
+                    strategy=strategy,
+                    success=False,
+                    message=str(exc),
+                )
+                await self._events.publish(
+                    MergeFailed(
+                        workspace_id=workspace_id,
+                        repo_id=repo_id,
+                        error=str(exc),
+                    )
+                )
+
+        if workspace.task_id:
+            async with self._get_session() as session:
+                merge_record = Merge(
+                    task_id=workspace.task_id,
+                    workspace_id=workspace_id,
+                    repo_id=repo_id,
+                    status=MergeStatus.MERGED if merge_result.success else MergeStatus.FAILED,
+                    pr_url=merge_result.pr_url,
+                    error=None if merge_result.success else merge_result.message,
+                    merged_at=datetime.now() if merge_result.success else None,
+                )
+                session.add(merge_record)
+                await session.commit()
+
+        return merge_result
+
+    async def merge_all(
+        self,
+        workspace_id: str,
+        *,
+        strategy: MergeStrategy = MergeStrategy.DIRECT,
+        skip_unchanged: bool = True,
+    ) -> list[MergeResult]:
+        """Merge all repos in a workspace."""
+        repos = await self.workspace_service.get_workspace_repos(workspace_id)
+        results: list[MergeResult] = []
+
+        for repo in repos:
+            if skip_unchanged and not repo["has_changes"]:
+                results.append(
+                    MergeResult(
+                        repo_id=repo["repo_id"],
+                        repo_name=repo["repo_name"],
+                        strategy=strategy,
+                        success=True,
+                        message="Skipped (no changes)",
+                    )
+                )
+                continue
+            results.append(
+                await self.merge_repo(
+                    workspace_id,
+                    repo["repo_id"],
+                    strategy=strategy,
+                )
+            )
+
+        return results
+
+    async def create_pr(
+        self,
+        workspace_id: str,
+        repo_id: str,
+        *,
+        title: str,
+        body: str,
+        draft: bool = False,
+    ) -> str:
+        """Create a pull request for a specific repo."""
+        del draft
+        result = await self.merge_repo(
+            workspace_id,
+            repo_id,
+            strategy=MergeStrategy.PULL_REQUEST,
+            pr_title=title,
+            pr_body=body,
+        )
+        if not result.pr_url:
+            raise RuntimeError("PR creation failed")
+        return result.pr_url
+
+    async def _create_pr(
+        self,
+        repo_path: str,
+        branch: str,
+        target: str,
+        title: str,
+        body: str,
+    ) -> str:
+        """Create PR using gh CLI."""
+        import asyncio
+
+        proc = await asyncio.create_subprocess_exec(
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            repo_path,
+            "--head",
+            branch,
+            "--base",
+            target,
+            "--title",
+            title,
+            "--body",
+            body,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            raise RuntimeError(f"Failed to create PR: {stderr.decode()}")
+
+        return stdout.decode().strip()

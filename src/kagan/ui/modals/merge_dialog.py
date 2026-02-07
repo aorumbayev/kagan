@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
-
+from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Label, Select, Static
 
 from kagan.services.merges import MergeResult, MergeStrategy
-
-if TYPE_CHECKING:
-    from textual.app import ComposeResult
-
-    from kagan.app import KaganApp
 
 
 class RepoMergeRow(Static):
@@ -100,8 +94,7 @@ class MergeDialog(ModalScreen[list[MergeResult] | None]):
     async def _do_merge(self) -> None:
         """Perform the merge operation."""
         strategy_select = self.query_one("#strategy-select", Select)
-        raw_strategy = strategy_select.value
-        strategy = raw_strategy if isinstance(raw_strategy, MergeStrategy) else MergeStrategy.DIRECT
+        strategy = strategy_select.value or MergeStrategy.DIRECT
 
         selected_repos: list[str] = []
         for repo in self.repos:
@@ -113,8 +106,7 @@ class MergeDialog(ModalScreen[list[MergeResult] | None]):
             self.notify("No repos selected", severity="warning")
             return
 
-        app = cast("KaganApp", self.app)
-        merge_service = app.ctx.merge_service
+        merge_service = self.app.ctx.merge_service
         results: list[MergeResult] = []
         for repo_id in selected_repos:
             results.append(

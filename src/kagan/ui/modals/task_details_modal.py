@@ -26,6 +26,7 @@ from kagan.ui.widgets.base import (
     TaskTypeSelect,
     TitleInput,
 )
+from kagan.ui.widgets.workspace_repos import WorkspaceReposWidget
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -83,6 +84,8 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
                 title_input.focus()
         if self._task_model and self._task_model.status == TaskStatus.REVIEW:
             self.run_worker(self._load_review_data())
+        if self._task_model and not self.is_create:
+            self.run_worker(self._load_workspace_repos(), exclusive=True)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="task-details-container"):
@@ -117,6 +120,9 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
 
             # Acceptance criteria
             yield from self._compose_acceptance_criteria()
+
+            # Workspace repos (view mode)
+            yield from self._compose_workspace_repos_section()
 
             # Review results (view mode)
             yield from self._compose_review_section()
@@ -233,6 +239,35 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
             yield Label("Acceptance Criteria (one per line):", classes="form-label")
             criteria = self._task_model.acceptance_criteria if self._task_model else []
             yield AcceptanceCriteriaArea(criteria=criteria)
+
+    def _compose_workspace_repos_section(self) -> ComposeResult:
+        if self.is_create or not self._task_model:
+            return
+        with Vertical(classes="workspace-repos-section view-only", id="workspace-repos-section"):
+            yield Label("Workspace Repos", classes="section-title")
+            yield Static("Loading workspace repos...", id="workspace-repos-loading")
+        yield Rule()
+
+    async def _load_workspace_repos(self) -> None:
+        if not self._task_model:
+            return
+        try:
+            workspace_service = self.kagan_app.ctx.workspace_service
+            workspaces = await workspace_service.list_workspaces(task_id=self._task_model.id)
+        except Exception:
+            return
+
+        container = safe_query_one(self, "#workspace-repos-section", Vertical)
+        loading = safe_query_one(self, "#workspace-repos-loading", Static)
+        if not container or not loading:
+            return
+
+        if not workspaces:
+            loading.update("No workspace yet")
+            return
+
+        loading.display = False
+        await container.mount(WorkspaceReposWidget(workspaces[0].id))
 
     def _compose_review_section(self) -> ComposeResult:
         """Compose the review results section (view mode only)."""
@@ -452,7 +487,7 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
         session_manager = self.kagan_app.ctx.session_service
         worktree = self.kagan_app.ctx.workspace_service
         base = self.kagan_app.config.general.default_base_branch
-        workdir = await worktree.get_merge_worktree_path(base)
+        workdir = await worktree.get_merge_worktree_path(self._task_model.id, base)
 
         try:
             prepared, prep_message = await worktree.prepare_merge_conflicts(

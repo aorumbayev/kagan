@@ -1480,6 +1480,62 @@ WelcomeScreen Footer {
     display: none;
 }
 
+/* === Welcome Screen Project Picker === */
+#recent-header {
+    padding: 1 0;
+    text-style: bold;
+    color: $text-muted;
+}
+
+#project-list {
+    height: auto;
+    max-height: 60%;
+    margin-bottom: 1;
+}
+
+#empty-state {
+    text-align: center;
+    color: $text-muted;
+    padding: 2;
+}
+
+.project-item {
+    padding: 1;
+    height: auto;
+}
+
+.project-info {
+    width: 1fr;
+}
+
+.project-name {
+    text-style: bold;
+    color: $text;
+}
+
+.project-repos {
+    color: $text-muted;
+}
+
+.project-tasks {
+    color: $text-muted;
+}
+
+.project-time {
+    width: auto;
+    color: $text-muted;
+}
+
+#actions {
+    padding: 1 0;
+    height: auto;
+    align: center middle;
+}
+
+#actions Button {
+    margin: 0 1;
+}
+
 /* =============================================================================
    REVIEW MODAL
    ============================================================================= */
@@ -2505,4 +2561,264 @@ KeybindingHint {
 
 KeybindingHint:empty {
     display: none;
+}
+
+/* =============================================================================
+   NEW PROJECT MODAL
+   ============================================================================= */
+
+NewProjectModal {
+    align: center middle;
+}
+
+NewProjectModal #dialog {
+    width: 60;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+NewProjectModal .dialog-title {
+    text-align: center;
+    text-style: bold;
+    color: $secondary;
+    padding-bottom: 1;
+}
+
+NewProjectModal .field {
+    margin: 1 0;
+}
+
+NewProjectModal .field-label {
+    margin-bottom: 0;
+    color: $text-muted;
+}
+
+NewProjectModal .hint {
+    color: $text-muted;
+    text-style: italic;
+}
+
+NewProjectModal #dialog-actions {
+    margin-top: 2;
+    align: right middle;
+}
+
+NewProjectModal #dialog-actions Button {
+    margin-left: 1;
+}
+
+/* =============================================================================
+   FOLDER PICKER MODAL
+   ============================================================================= */
+
+FolderPickerModal {
+    align: center middle;
+}
+
+FolderPickerModal #dialog {
+    width: 60;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+FolderPickerModal .dialog-title {
+    text-align: center;
+    text-style: bold;
+    color: $secondary;
+    padding-bottom: 1;
+}
+
+FolderPickerModal .field {
+    margin: 1 0;
+}
+
+FolderPickerModal .field-label {
+    margin-bottom: 0;
+    color: $text-muted;
+}
+
+FolderPickerModal .hint {
+    color: $text-muted;
+    text-style: italic;
+}
+
+FolderPickerModal #dialog-actions {
+    margin-top: 2;
+    align: right middle;
+}
+
+FolderPickerModal #dialog-actions Button {
+    margin-left: 1;
+}
+
+/* === Start Workspace Modal === */
+StartWorkspaceModal {
+    align: center middle;
+}
+
+StartWorkspaceModal #dialog {
+    width: 70;
+    height: auto;
+    max-height: 80%;
+    border: thick $primary;
+    padding: 1 2;
+}
+
+StartWorkspaceModal .dialog-title {
+    text-style: bold;
+    padding-bottom: 1;
+}
+
+StartWorkspaceModal .task-name {
+    color: $text;
+    padding-bottom: 1;
+}
+
+StartWorkspaceModal .section-header {
+    text-style: bold;
+    padding: 1 0 0 0;
+}
+
+StartWorkspaceModal .section-hint {
+    color: $text-muted;
+    padding-bottom: 1;
+}
+
+StartWorkspaceModal #repo-list {
+    height: auto;
+    max-height: 20;
+    border: solid $surface;
+    padding: 1;
+}
+
+StartWorkspaceModal .repo-row {
+    height: 3;
+}
+
+StartWorkspaceModal .repo-path {
+    color: $text-muted;
+    padding-left: 2;
+}
+
+StartWorkspaceModal .repo-branch {
+    dock: right;
+    color: $text-muted;
+}
+
+StartWorkspaceModal #executor-section {
+    padding-top: 1;
+}
+
+StartWorkspaceModal #actions {
+    margin-top: 2;
+    align: right middle;
+}
+
+StartWorkspaceModal #actions Button {
+    margin-left: 1;
+}
+
+StartWorkspaceModal .error {
+    color: $error;
+    padding-top: 1;
+}
+
+/* === Workspace Repos Widget === */
+WorkspaceReposWidget {
+    height: auto;
+    border: solid $primary;
+    padding: 1;
+}
+
+WorkspaceReposWidget .repo-item {
+    height: 3;
+    padding: 0 1;
+}
+
+WorkspaceReposWidget .repo-name {
+    width: 20;
+}
+
+WorkspaceReposWidget .has-changes {
+    color: $warning;
+}
+
+WorkspaceReposWidget .no-changes {
+    color: $text-muted;
+}
+
+WorkspaceReposWidget .target-branch {
+    width: 15;
+    color: $text-muted;
+}
+
+WorkspaceReposWidget .diff-stats {
+    width: 12;
+}
+
+WorkspaceReposWidget .btn-diff, WorkspaceReposWidget .btn-merge {
+    margin-left: 1;
+}
+
+/* === Merge Dialog === */
+MergeDialog {
+    align: center middle;
+}
+
+#merge-container {
+    width: 70;
+    height: auto;
+    max-height: 80%;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+MergeDialog .merge-row {
+    height: 3;
+    padding: 0 1;
+}
+
+MergeDialog .target-branch {
+    color: $text-muted;
+    margin-left: 2;
+}
+
+MergeDialog .diff-stats {
+    margin-left: auto;
+}
+
+#strategy-select {
+    margin: 1 0;
+}
+
+#button-row {
+    margin-top: 1;
+    align: right middle;
+}
+
+/* === Diff Modal === */
+DiffModal {
+    align: center middle;
+}
+
+#diff-container {
+    width: 90%;
+    height: 90%;
+    background: $surface;
+    border: solid $primary;
+}
+
+DiffModal .diff-content {
+    background: $background;
+    padding: 1;
+}
+
+DiffModal .diff-header {
+    background: $primary-darken-2;
+    padding: 0 1;
 }

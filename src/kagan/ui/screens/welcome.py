@@ -1,269 +1,336 @@
-"""Welcome screen for first-boot setup."""
+"""Welcome screen with project picker for multi-repo support."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from textual.containers import Center, Horizontal, Vertical
-from textual.css.query import NoMatches
-from textual.screen import Screen
-from textual.widgets import Button, Footer, Label, Select, Switch
+from textual.containers import Container, Horizontal, Vertical
+from textual.widgets import Button, Footer, Label, ListItem, ListView, Static
 
 from kagan.constants import KAGAN_LOGO
-from kagan.data.builtin_agents import (
-    BUILTIN_AGENTS,
-    get_all_agent_availability,
-    list_builtin_agents,
-)
-from kagan.git_utils import get_current_branch, has_git_repo, list_local_branches
 from kagan.keybindings import WELCOME_BINDINGS
-from kagan.paths import ensure_directories, get_config_path
+from kagan.ui.screens.base import KaganScreen
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
     from kagan.app import KaganApp
 
-DEFAULT_BASE_BRANCHES = ("main", "master", "develop", "trunk")
+
+class ProjectListItem(ListItem):
+    """A project item in the recent projects list."""
+
+    def __init__(
+        self,
+        project_id: str,
+        name: str,
+        repo_paths: list[str],
+        last_opened: datetime | None,
+        task_summary: str,
+    ) -> None:
+        super().__init__()
+        self.project_id = project_id
+        self.project_name = name
+        self.repo_paths = repo_paths
+        self.last_opened = last_opened
+        self.task_summary = task_summary
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(classes="project-item"):
+            with Vertical(classes="project-info"):
+                yield Label(self.project_name, classes="project-name")
+                yield Label(
+                    self._format_repos(),
+                    classes="project-repos",
+                )
+                yield Label(
+                    self.task_summary,
+                    classes="project-tasks",
+                )
+            yield Label(
+                self._format_time(),
+                classes="project-time",
+            )
+
+    def _format_repos(self) -> str:
+        """Format repository paths for display."""
+        if not self.repo_paths:
+            return "No repositories"
+        if len(self.repo_paths) == 1:
+            return f"-> {self.repo_paths[0]}"
+        return f"-> {', '.join(Path(p).name for p in self.repo_paths)}"
+
+    def _format_time(self) -> str:
+        """Format last opened time as relative time (e.g., '2h ago', '3d ago')."""
+        if not self.last_opened:
+            return "Never opened"
+
+        # Handle timezone-naive datetimes
+        now = datetime.now(UTC)
+        last_opened = self.last_opened
+        if last_opened.tzinfo is None:
+            last_opened = last_opened.replace(tzinfo=UTC)
+
+        delta = now - last_opened
+        if delta.days > 7:
+            return last_opened.strftime("%b %d")
+        if delta.days > 0:
+            return f"{delta.days}d ago"
+        if delta.seconds > 3600:
+            return f"{delta.seconds // 3600}h ago"
+        if delta.seconds > 60:
+            return f"{delta.seconds // 60}m ago"
+        return "Just now"
 
 
-class WelcomeScreen(Screen):
-    """First-boot welcome and configuration screen."""
+class WelcomeScreen(KaganScreen):
+    """Welcome screen shown on startup for project selection.
+
+    Displays a list of recent projects and allows creating new projects
+    or opening folders as projects.
+    """
 
     BINDINGS = WELCOME_BINDINGS
 
     def __init__(self) -> None:
         super().__init__()
-        self._agents = list_builtin_agents()
-        self._agent_availability = get_all_agent_availability()
-        self._repo_root = Path.cwd()
-        # Git state - populated in on_mount
-        self._has_git_repo: bool = False
-        self._branches: list[str] = []
-        self._default_base_branch: str = "main"
-        self._branch_options: list[str] = list(DEFAULT_BASE_BRANCHES)
+        self._ctx_available: bool = False
 
-    def _build_branch_options(self, branches: list[str], default_branch: str) -> list[str]:
-        options: list[str] = []
-        for name in (default_branch, *branches, *DEFAULT_BASE_BRANCHES):
-            if name not in options:
-                options.append(name)
-        return options
+    @property
+    def kagan_app(self) -> KaganApp:
+        """Get the typed KaganApp instance."""
+        return cast("KaganApp", self.app)
 
-    async def _get_default_base_branch(self, branches: list[str]) -> str:
-        if self._has_git_repo:
-            current = await get_current_branch(self._repo_root)
-            if current:
-                return current
-            for candidate in DEFAULT_BASE_BRANCHES:
-                if candidate in branches:
-                    return candidate
-            if branches:
-                return branches[0]
-        return "main"
+    def _has_ctx(self) -> bool:
+        """Check if ctx is available (not first-boot)."""
+        app = self.kagan_app
+        return hasattr(app, "_ctx") and app._ctx is not None
 
     def compose(self) -> ComposeResult:
-        """Compose the welcome screen layout."""
-        # Build Select options from agents with availability status
-        # Pre-select first available agent (priority: claude > opencode)
-        agent_options: list[tuple[str, str]] = []
-        default_agent: str | None = None
-
-        for avail in self._agent_availability:
-            agent = avail.agent
-            if avail.is_available:
-                label = f"{agent.config.name} ({agent.author})"
-                if default_agent is None:
-                    default_agent = agent.config.short_name
-            else:
-                label = f"{agent.config.name} [Not Installed]"
-            agent_options.append((label, agent.config.short_name))
-
-        # Fallback to first agent if none available (shouldn't happen in normal flow)
-        if default_agent is None and agent_options:
-            default_agent = agent_options[0][1]
-
-        # Final fallback to "claude" if somehow no options exist
-        if default_agent is None:
-            default_agent = "claude"
-
-        # Initial branch options - will be updated in on_mount with git data
-        base_branch_options = [(name, name) for name in self._branch_options]
-
-        with Vertical(id="welcome-container"):
+        with Container(id="welcome-container"):
             # Large ASCII art logo
-            yield Label(KAGAN_LOGO, id="logo")
+            yield Static(KAGAN_LOGO, id="logo")
             yield Label("Your Development Cockpit", id="subtitle")
 
-            # First-run setup intro text
+            # Recent projects header
+            yield Label("RECENT PROJECTS", id="recent-header")
+
+            # Project list
+            yield ListView(id="project-list")
+
+            # Empty state message
             yield Label(
-                "Welcome! This is the first-time setup for Kagan.\n"
-                "Configure your AI assistant, base branch, and auto-mode preferences below.\n"
-                f"This only needs to be done once - settings are saved to {get_config_path()}",
-                id="intro-text",
-                classes="info-label",
+                "No recent projects. Create a new project or open a folder.",
+                id="empty-state",
             )
 
-            # AI Assistant selection
-            yield Label(
-                "AI Assistant:",
-                classes="section-label",
-            )
-            yield Select(agent_options, value=default_agent, id="agent-select")
+            # Action buttons
+            with Horizontal(id="actions"):
+                yield Button("[N] New Project", id="btn-new", variant="primary")
+                yield Button("[O] Open Folder", id="btn-open")
+                yield Button("[S] Settings", id="btn-settings")
 
-            # Base branch selection
-            yield Label(
-                "Base branch for worktrees:",
-                classes="section-label",
-            )
-            yield Select(
-                base_branch_options,
-                value=self._default_base_branch,
-                id="base-branch-select",
-            )
-
-            # Git init hint - hidden by default, shown in on_mount if no git repo
-            yield Label(
-                "No git repo detected. A fresh git repo will be initialized\n"
-                "because Kagan requires git worktrees.",
-                id="git-init-hint",
-                classes="info-label hidden",
-            )
-
-            # AUTO Mode Settings section
-            yield Label("Agent Settings:", classes="section-label settings-header")
-            with Horizontal(classes="toggle-row"):
-                yield Switch(value=False, id="auto-mode-switch")
-                yield Label("Would you like to enable auto mode for agents?", classes="toggle-text")
-
-            # Continue button
-            with Center(id="buttons"):
-                yield Button("Start Using Kagan", variant="primary", id="continue-btn")
-
-            # Footer with key bindings
-            yield Footer()
+        yield Footer()
 
     async def on_mount(self) -> None:
-        """Load git info and update UI after mount."""
-        # Fetch git state asynchronously
-        self._has_git_repo = await has_git_repo(self._repo_root)
-        if self._has_git_repo:
-            self._branches = await list_local_branches(self._repo_root)
+        """Load recent projects on mount."""
+        # Check if ctx is available (only for project picker mode)
+        self._ctx_available = self._has_ctx()
+
+        if self._ctx_available:
+            self.run_worker(self._load_recent_projects(), exclusive=True)
         else:
-            self._branches = []
+            # First-boot mode - show empty state
+            self._show_empty_state("Welcome! Configure settings to get started.")
 
-        self._default_base_branch = await self._get_default_base_branch(self._branches)
-        self._branch_options = self._build_branch_options(
-            self._branches,
-            self._default_base_branch,
+    async def _load_recent_projects(self) -> None:
+        """Load and display recent projects from project service."""
+        if not self._ctx_available:
+            self._show_empty_state("Welcome! Configure settings to get started.")
+            return
+
+        try:
+            project_service = self.ctx.project_service
+            projects = await project_service.list_recent_projects(limit=10)
+        except (AttributeError, RuntimeError):
+            # project_service not available - show empty state
+            self._show_empty_state("No recent projects found.")
+            return
+
+        list_view = self.query_one("#project-list", ListView)
+        empty_state = self.query_one("#empty-state", Label)
+
+        if not projects:
+            list_view.display = False
+            empty_state.update("No recent projects. Create a new project or open a folder.")
+            empty_state.display = True
+            return
+
+        empty_state.display = False
+        list_view.display = True
+
+        for project in projects:
+            try:
+                repos = await project_service.get_project_repos(project.id)
+                repo_paths = [r.path for r in repos]
+            except (AttributeError, RuntimeError):
+                repo_paths = []
+
+            # Get task summary
+            task_summary = await self._get_task_summary(project.id)
+
+            item = ProjectListItem(
+                project_id=project.id,
+                name=project.name,
+                repo_paths=repo_paths,
+                last_opened=project.last_opened_at,
+                task_summary=task_summary,
+            )
+            await list_view.append(item)
+
+    async def _get_task_summary(self, project_id: str) -> str:
+        """Get a task summary for the project (e.g., '3 in progress, 2 in review')."""
+        try:
+            task_service = self.ctx.task_service
+            tasks = await task_service.list_tasks(project_id=project_id)
+
+            from kagan.core.models.enums import TaskStatus
+
+            in_progress = sum(1 for t in tasks if t.status == TaskStatus.IN_PROGRESS)
+            in_review = sum(1 for t in tasks if t.status == TaskStatus.REVIEW)
+
+            if in_progress or in_review:
+                return f"{in_progress} in progress, {in_review} in review"
+            elif tasks:
+                return f"{len(tasks)} tasks"
+            else:
+                return "No tasks"
+        except (AttributeError, RuntimeError, TypeError):
+            return "No tasks"
+
+    def _show_empty_state(self, message: str) -> None:
+        """Show the empty state with a custom message."""
+        try:
+            list_view = self.query_one("#project-list", ListView)
+            empty_state = self.query_one("#empty-state", Label)
+            list_view.display = False
+            empty_state.update(message)
+            empty_state.display = True
+        except Exception:
+            pass  # Widget not yet mounted
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:
+        """Enable actions only when valid."""
+        if action == "open_selected":
+            try:
+                list_view = self.query_one("#project-list", ListView)
+                return list_view.highlighted_child is not None
+            except Exception:
+                return False
+        return True
+
+    async def action_new_project(self) -> None:
+        """Create a new project via NewProjectModal."""
+        if not self._ctx_available:
+            self.app.notify("Cannot create project during first boot", severity="warning")
+            return
+
+        from kagan.ui.modals.new_project import NewProjectModal
+
+        result = await self.app.push_screen_wait(NewProjectModal())
+        if result and "project_id" in result:
+            await self._open_project(result["project_id"])
+
+    async def action_open_folder(self) -> None:
+        """Open a folder as a new project or find existing project."""
+        if not self._ctx_available:
+            self.app.notify("Cannot open folder during first boot", severity="warning")
+            return
+
+        from kagan.ui.modals.folder_picker import FolderPickerModal
+
+        folder_path = await self.app.push_screen_wait(FolderPickerModal())
+        if not folder_path:
+            return
+
+        project_service = self.ctx.project_service
+
+        # Check if this folder is already in a project
+        existing = await project_service.find_project_by_repo_path(folder_path)
+        if existing:
+            await self._open_project(existing.id)
+            return
+
+        # Create a new project with this folder
+        project_name = Path(folder_path).name
+        project_id = await project_service.create_project(
+            name=project_name,
+            repo_paths=[folder_path],
         )
+        await self._open_project(project_id)
 
-        # Update branch select with loaded options
-        self._update_branch_select()
-
-        # Show git init hint if no git repo
-        if not self._has_git_repo:
-            self._show_git_init_hint()
-
-    def _update_branch_select(self) -> None:
-        """Update branch select with loaded options."""
+    async def action_open_selected(self) -> None:
+        """Open the currently selected project."""
         try:
-            select = self.query_one("#base-branch-select", Select)
-            options = [(name, name) for name in self._branch_options]
-            select.set_options(options)
-            select.value = self._default_base_branch
-        except NoMatches:
+            list_view = self.query_one("#project-list", ListView)
+            if list_view.highlighted_child:
+                item = list_view.highlighted_child
+                if isinstance(item, ProjectListItem):
+                    await self._open_project(item.project_id)
+        except Exception:
             pass
 
-    def _show_git_init_hint(self) -> None:
-        """Show the git init hint label."""
+    async def action_settings(self) -> None:
+        """Open settings modal."""
+        if self._ctx_available:
+            from kagan.ui.modals.settings import SettingsModal
+
+            await self.app.push_screen(
+                SettingsModal(
+                    config=self.ctx.config,
+                    config_path=self.ctx.config_path,
+                )
+            )
+        else:
+            self.app.notify("Settings not available during first boot", severity="warning")
+
+    async def action_quit(self) -> None:
+        """Quit the application."""
+        self.app.exit()
+
+    async def _open_project(self, project_id: str) -> None:
+        """Open a project and switch to Kanban screen."""
+        if not self._ctx_available:
+            return
+
         try:
-            hint = self.query_one("#git-init-hint", Label)
-            hint.remove_class("hidden")
-        except NoMatches:
-            pass
+            project_service = self.ctx.project_service
+            await project_service.open_project(project_id)
+
+            # Store active project in app context
+            # Note: This requires active_project_id to be added to AppContext
+            if hasattr(self.ctx, "active_project_id"):
+                self.ctx.active_project_id = project_id
+
+            # Switch to Kanban screen
+            from kagan.ui.screens.kanban import KanbanScreen
+
+            await self.app.switch_screen(KanbanScreen())
+        except Exception as e:
+            self.app.notify(f"Failed to open project: {e}", severity="error")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
-        if event.button.id == "continue-btn":
-            self._save_and_continue()
+        if event.button.id == "btn-new":
+            self.run_worker(self.action_new_project())
+        elif event.button.id == "btn-open":
+            self.run_worker(self.action_open_folder())
+        elif event.button.id == "btn-settings":
+            self.run_worker(self.action_settings())
 
-    def action_skip(self) -> None:
-        """Skip setup, use defaults (escape key)."""
-        self._save_and_continue()
-
-    def _save_and_continue(self) -> None:
-        """Save configuration and continue."""
-        base_branch_select = self.query_one("#base-branch-select", Select)
-        base_branch = str(base_branch_select.value) if base_branch_select.value else "main"
-
-        select = self.query_one("#agent-select", Select)
-        agent = str(select.value) if select.value else "claude"
-        worker = agent
-
-        # Read toggle value
-        auto_mode_switch = self.query_one("#auto-mode-switch", Switch)
-        auto_mode = auto_mode_switch.value
-        # Set all automation flags based on single toggle
-        auto_start = auto_mode
-        auto_approve = auto_mode
-        auto_merge = auto_mode
-
-        self._write_config(worker, auto_start, auto_approve, auto_merge, base_branch)
-        self.app.pop_screen()
-        self.app.call_later(self._notify_setup_complete)
-
-    def _notify_setup_complete(self) -> None:
-        """Notify app that setup is complete and it should continue mounting."""
-        app = cast("KaganApp", self.app)
-        app._continue_after_welcome()
-
-    def _write_config(
-        self,
-        worker: str,
-        auto_start: bool,
-        auto_approve: bool,
-        auto_merge: bool,
-        base_branch: str,
-    ) -> None:
-        """Write config.toml file with correct ACP run commands."""
-        ensure_directories()
-        config_path = get_config_path()
-
-        # Note: .gitignore handling is done in git_utils.init_git_repo()
-        # which is called from app.py after welcome screen completes
-
-        # Build agent sections from BUILTIN_AGENTS with correct ACP commands
-        agent_sections = []
-        for key, agent in BUILTIN_AGENTS.items():
-            cfg = agent.config
-            run_cmd = cfg.run_command.get("*", key)
-            agent_sections.append(f'''[agents.{key}]
-identity = "{cfg.identity}"
-name = "{cfg.name}"
-short_name = "{cfg.short_name}"
-run_command."*" = "{run_cmd}"
-active = true''')
-
-        # Build general section
-        general_lines = [
-            f"auto_start = {str(auto_start).lower()}",
-            f"auto_approve = {str(auto_approve).lower()}",
-            f"auto_merge = {str(auto_merge).lower()}",
-            "require_review_approval = false",
-            "serialize_merges = false",
-            f'default_base_branch = "{base_branch}"',
-            f'default_worker_agent = "{worker}"',
-        ]
-
-        config_content = f"""# Kagan Configuration
-# Generated by first-boot setup
-
-[general]
-{chr(10).join(general_lines)}
-
-{chr(10).join(agent_sections)}
-"""
-
-        config_path.write_text(config_content)
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Handle project selection from list."""
+        if isinstance(event.item, ProjectListItem):
+            self.run_worker(self._open_project(event.item.project_id))

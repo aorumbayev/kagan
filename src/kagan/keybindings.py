@@ -194,7 +194,11 @@ TROUBLESHOOTING_BINDINGS: list[BindingType] = [
 ]
 
 WELCOME_BINDINGS: list[BindingType] = [
-    Binding("escape", "skip", "Continue"),
+    Binding("n", "new_project", "New Project"),
+    Binding("o", "open_folder", "Open Folder"),
+    Binding("s", "settings", "Settings"),
+    Binding("enter", "open_selected", "Open"),
+    Binding("escape", "quit", "Quit"),
 ]
 
 # =============================================================================

@@ -1,7 +1,7 @@
 ---
 name: install-kagan
 description: Securely guide users through installing Kagan with transparent, consent-first steps, uv-first flow, verification, and first-run setup.
-version: 1.0.0
+version: 0.1.0
 homepage: https://docs.kagan.sh
 repo: https://github.com/aorumbayev/kagan
 ---

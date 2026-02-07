@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from kagan.adapters.db.schema import Repo
     from kagan.core.events import EventBus
+    from kagan.adapters.db.schema import Repo
     from kagan.services.workspaces import WorkspaceService
 
 
@@ -47,23 +47,18 @@ class RepoScriptService(Protocol):
         script_type: ScriptType,
     ) -> ScriptResult:
         """Run a script for a specific repo."""
-        ...
 
     async def run_all_setup(self, workspace_id: str) -> list[ScriptResult]:
         """Run setup scripts for all repos."""
-        ...
 
     async def run_all_cleanup(self, workspace_id: str) -> list[ScriptResult]:
         """Run cleanup scripts for all repos."""
-        ...
 
     async def start_dev_servers(self, workspace_id: str) -> list[asyncio.subprocess.Process]:
         """Start dev servers for all repos that have them."""
-        ...
 
     async def stop_dev_servers(self, workspace_id: str) -> None:
         """Stop dev servers for a workspace."""
-        ...
 
 
 class RepoScriptServiceImpl:
@@ -201,7 +196,7 @@ class RepoScriptServiceImpl:
                 proc.terminate()
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=5.0)
-                except TimeoutError:
+                except asyncio.TimeoutError:
                     proc.kill()
         self._dev_server_processes.pop(workspace_id, None)
 

@@ -920,10 +920,22 @@ class KanbanScreen(KaganScreen):
         # Ensure worktree exists
         wt_path = await self.ctx.workspace_service.get_path(task.id)
         if wt_path is None:
-            self.notify("Creating worktree...", severity="information")
-            base = self.kagan_app.config.general.default_base_branch
-            wt_path = await self.ctx.workspace_service.create(task.id, task.title, base)
-            self.notify("Worktree created", severity="information")
+            from kagan.ui.modals.start_workspace import StartWorkspaceModal
+
+            workspace_id = await self.app.push_screen_wait(
+                StartWorkspaceModal(
+                    task_id=task.id,
+                    task_title=task.title,
+                    project_id=task.project_id,
+                    suggested_repos=None,
+                )
+            )
+            if not workspace_id:
+                return
+            wt_path = await self.ctx.workspace_service.get_path(task.id)
+            if wt_path is None:
+                self.notify("Failed to provision workspace", severity="error")
+                return
 
         # Create session if doesn't exist
         if not await self.ctx.session_service.session_exists(task.id):
@@ -1107,10 +1119,25 @@ class KanbanScreen(KaganScreen):
             )
             return
 
+        # Ensure workspace exists (repo selection)
+        wt_path = await self.ctx.workspace_service.get_path(task.id)
+        if wt_path is None:
+            from kagan.ui.modals.start_workspace import StartWorkspaceModal
+
+            workspace_id = await self.app.push_screen_wait(
+                StartWorkspaceModal(
+                    task_id=task.id,
+                    task_title=task.title,
+                    project_id=task.project_id,
+                    suggested_repos=None,
+                )
+            )
+            if not workspace_id:
+                return
+
         # Move BACKLOG tasks to IN_PROGRESS first
         if task.status == TaskStatus.BACKLOG:
             await self.ctx.task_service.move(task.id, TaskStatus.IN_PROGRESS)
-            # Refresh task to get updated status
             refreshed = await self.ctx.task_service.get_task(task.id)
             if refreshed:
                 task = refreshed
@@ -1208,13 +1235,22 @@ class KanbanScreen(KaganScreen):
         task = self._get_review_task(focus.get_focused_card(self))
         if not task:
             return
-        worktree = self.ctx.workspace_service
-        base = self.kagan_app.config.general.default_base_branch
-        diff_text = await worktree.get_diff(task.id, base_branch=base)  # type: ignore[misc]
         title = f"Diff: {task.short_id} {task.title[:NOTIFICATION_TITLE_MAX_LENGTH]}"
+        workspace_service = self.ctx.workspace_service
+        workspaces = await workspace_service.list_workspaces(task_id=task.id)
 
+        if not workspaces or self.ctx.diff_service is None:
+            base = self.kagan_app.config.general.default_base_branch
+            diff_text = await workspace_service.get_diff(task.id, base_branch=base)  # type: ignore[misc]
+            await self.app.push_screen(
+                DiffModal(title=title, diff_text=diff_text, task=task),
+                callback=lambda result: self._on_diff_result(task, result),
+            )
+            return
+
+        diffs = await self.ctx.diff_service.get_all_diffs(workspaces[0].id)
         await self.app.push_screen(
-            DiffModal(title=title, diff_text=diff_text, task=task),
+            DiffModal(title=title, diffs=diffs, task=task),
             callback=lambda result: self._on_diff_result(task, result),
         )
 

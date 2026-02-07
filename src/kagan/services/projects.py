@@ -23,23 +23,16 @@ class ProjectService(Protocol):
     async def create_project(
         self,
         name: str,
-        repo_paths: list[str | Path] | None = None,
+        repo_paths: list[str | Path],
         description: str | None = None,
     ) -> str:
         """Create a project with repos, return project_id."""
-        ...
 
     async def open_project(self, project_id: ProjectId) -> Project:
         """Open project (update last_opened_at, publish ProjectOpened event)."""
-        ...
-
-    async def get_project(self, project_id: ProjectId) -> Project | None:
-        """Return a project by ID."""
-        ...
 
     async def list_recent_projects(self, limit: int = 10) -> list[Project]:
         """Get recently opened projects sorted by last_opened_at desc."""
-        ...
 
     async def add_repo_to_project(
         self,
@@ -48,7 +41,6 @@ class ProjectService(Protocol):
         is_primary: bool = False,
     ) -> str:
         """Add repo to project, return repo_id."""
-        ...
 
     async def remove_repo_from_project(
         self,
@@ -56,19 +48,15 @@ class ProjectService(Protocol):
         repo_id: RepoId,
     ) -> None:
         """Remove repo from project."""
-        ...
 
     async def get_project_repos(self, project_id: ProjectId) -> list[Repo]:
         """Get all repos for a project."""
-        ...
 
     async def get_project_repo_details(self, project_id: ProjectId) -> list[dict]:
         """Get all repos for a project with junction metadata."""
-        ...
 
     async def find_project_by_repo_path(self, repo_path: str | Path) -> Project | None:
         """Find project containing the repo."""
-        ...
 
 
 class ProjectServiceImpl:
@@ -91,14 +79,12 @@ class ProjectServiceImpl:
     async def create_project(
         self,
         name: str,
-        repo_paths: list[str | Path] | None = None,
+        repo_paths: list[str | Path],
         description: str | None = None,
     ) -> str:
         """Create a project with repos, return project_id."""
         from kagan.adapters.db.schema import Project as DbProject
         from kagan.core.events import ProjectCreated
-
-        repo_paths = repo_paths or []
 
         async with self._get_session() as session:
             project = DbProject(
@@ -112,6 +98,7 @@ class ProjectServiceImpl:
 
             project_id = project.id
 
+        # Add repos to project
         for i, repo_path in enumerate(repo_paths):
             is_primary = i == 0
             await self.add_repo_to_project(project_id, repo_path, is_primary=is_primary)
@@ -146,13 +133,6 @@ class ProjectServiceImpl:
 
             return project
 
-    async def get_project(self, project_id: ProjectId) -> Project | None:
-        """Return a project by ID."""
-        from kagan.adapters.db.schema import Project as DbProject
-
-        async with self._get_session() as session:
-            return await session.get(DbProject, project_id)
-
     async def list_recent_projects(self, limit: int = 10) -> list[Project]:
         """Get recently opened projects sorted by last_opened_at desc."""
         from kagan.adapters.db.schema import Project as DbProject
@@ -173,11 +153,17 @@ class ProjectServiceImpl:
         is_primary: bool = False,
     ) -> str:
         """Add repo to project, return repo_id."""
-        repo, _ = await self._repo_repository.get_or_create(path=repo_path)
+        # Get or create repo
+        repo, _ = await self._repo_repository.get_or_create(
+            path=repo_path,
+            project_id=project_id,
+        )
 
+        # Get current repo count for display_order
         existing_repos = await self._repo_repository.list_for_project(project_id)
         display_order = len(existing_repos)
 
+        # Add to project via junction table
         await self._repo_repository.add_to_project(
             project_id=project_id,
             repo_id=repo.id,
@@ -208,7 +194,7 @@ class ProjectServiceImpl:
                 select(ProjectRepo, Repo)
                 .join(Repo)
                 .where(ProjectRepo.project_id == project_id)
-                .order_by(col(ProjectRepo.display_order))
+                .order_by(ProjectRepo.display_order)
             )
             return [
                 {
@@ -230,12 +216,14 @@ class ProjectServiceImpl:
         resolved_path = str(Path(repo_path).resolve())
 
         async with self._get_session() as session:
+            # Find repo by path
             result = await session.execute(select(Repo).where(Repo.path == resolved_path))
             repo = result.scalars().first()
 
             if repo is None:
                 return None
 
+            # Find project via junction table
             result = await session.execute(
                 select(ProjectRepo).where(ProjectRepo.repo_id == repo.id)
             )

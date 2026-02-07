@@ -40,15 +40,12 @@ class DiffService(Protocol):
 
     async def get_repo_diff(self, workspace_id: str, repo_id: str) -> RepoDiff:
         """Get diff for a single repo."""
-        ...
 
     async def get_all_diffs(self, workspace_id: str) -> list[RepoDiff]:
         """Get diffs for all repos in a workspace."""
-        ...
 
     async def get_unified_diff(self, workspace_id: str) -> str:
         """Get unified diff across all repos."""
-        ...
 
 
 class DiffServiceImpl:
@@ -109,9 +106,9 @@ class DiffServiceImpl:
         diffs: list[RepoDiff] = []
 
         for repo in repos:
-            diff = await self.get_repo_diff(workspace_id, repo["repo_id"])
-            if diff.files or diff.total_additions or diff.total_deletions:
-                diffs.append(diff)
+            if not repo["has_changes"]:
+                continue
+            diffs.append(await self.get_repo_diff(workspace_id, repo["repo_id"]))
 
         return diffs
 

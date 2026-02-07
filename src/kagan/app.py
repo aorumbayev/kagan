@@ -163,17 +163,8 @@ class KaganApp(App):
             await ctx.automation_service.initialize_existing_tasks()
             self.log("Automation service initialized (reactive mode)")
 
-        # Chat-first boot: show PlannerScreen if board is empty, else KanbanScreen
-        ctx = self.ctx
-        tasks = await ctx.task_service.list_tasks()
-        if len(tasks) == 0:
-            from kagan.ui.screens.planner import PlannerScreen
-
-            await self.push_screen(PlannerScreen(agent_factory=self._agent_factory))
-            self.log("PlannerScreen pushed (empty board)")
-        else:
-            await self.push_screen(KanbanScreen())
-            self.log("KanbanScreen pushed, app ready")
+        # Determine startup screen based on project context
+        await self._startup_screen_decision()
 
     def _continue_after_welcome(self) -> None:
         """Called when welcome screen completes to continue app initialization."""
@@ -182,6 +173,80 @@ class KaganApp(App):
     async def _run_init_after_welcome(self) -> None:
         """Run initialization after welcome screen."""
         await self._initialize_app()
+
+    async def _startup_screen_decision(self) -> None:
+        """Decide which screen to show on startup based on project context.
+
+        Flow:
+        1. If CWD is in an existing project → open that project
+        2. If CWD is a git repo not in any project → auto-create single-repo project
+        3. Otherwise → show welcome screen for project selection
+        """
+        ctx = self.ctx
+
+        # Try to detect project from current working directory
+        project_id = await self._get_startup_project()
+
+        if project_id:
+            # Found a project - open it and go to Kanban/Planner
+            ctx.active_project_id = project_id
+            await ctx.project_service.open_project(project_id)
+            await self._push_main_screen()
+        else:
+            # No project found - show welcome screen for project selection
+            from kagan.ui.screens.welcome import WelcomeScreen
+
+            await self.push_screen(WelcomeScreen())
+            self.log("WelcomeScreen pushed (project picker mode)")
+
+    async def _get_startup_project(self) -> str | None:
+        """Get the project to open on startup.
+
+        Priority:
+        1. Detect from current working directory
+        2. Auto-create if CWD is a git repo
+        3. Most recently opened project
+        """
+        ctx = self.ctx
+        cwd = self.project_root
+
+        # Try to find existing project containing this path
+        project = await ctx.project_service.find_project_by_repo_path(str(cwd))
+        if project:
+            self.log("Detected project from CWD", project_id=project.id)
+            return project.id
+
+        # If CWD is a git repo, auto-create a project for it
+        if await has_git_repo(cwd):
+            project_name = cwd.name or "Default Project"
+            project_id = await ctx.project_service.create_project(
+                name=project_name,
+                repo_paths=[str(cwd)],
+            )
+            self.log("Auto-created project for git repo", project_id=project_id)
+            return project_id
+
+        # Fall back to most recently opened project
+        recent = await ctx.project_service.list_recent_projects(limit=1)
+        if recent:
+            self.log("Using most recent project", project_id=recent[0].id)
+            return recent[0].id
+
+        return None
+
+    async def _push_main_screen(self) -> None:
+        """Push the main screen (Planner if empty, Kanban otherwise)."""
+        ctx = self.ctx
+        tasks = await ctx.task_service.list_tasks()
+
+        if len(tasks) == 0:
+            from kagan.ui.screens.planner import PlannerScreen
+
+            await self.push_screen(PlannerScreen(agent_factory=self._agent_factory))
+            self.log("PlannerScreen pushed (empty board)")
+        else:
+            await self.push_screen(KanbanScreen())
+            self.log("KanbanScreen pushed, app ready")
 
     async def on_unmount(self) -> None:
         """Clean up on unmount."""

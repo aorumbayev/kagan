@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from kagan.core.models.enums import (
@@ -40,6 +40,7 @@ class Project(SQLModel, table=True):
     name: str = Field(index=True)
     description: str = Field(default="")
     default_repo_id: str | None = Field(default=None, foreign_key="repos.id")
+    last_opened_at: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -49,6 +50,7 @@ class Project(SQLModel, table=True):
     )
     tasks: list["Task"] = Relationship(back_populates="project")
     workspaces: list["Workspace"] = Relationship(back_populates="project")
+    project_repos: list["ProjectRepo"] = Relationship(back_populates="project")
 
 
 class Repo(SQLModel, table=True):
@@ -59,7 +61,9 @@ class Repo(SQLModel, table=True):
     id: str = Field(default_factory=_new_id, primary_key=True)
     project_id: str = Field(foreign_key="projects.id", index=True)
     name: str = Field(index=True)
-    path: str
+    path: str = Field(unique=True, index=True)
+    display_name: str | None = Field(default=None)
+    default_working_dir: str | None = Field(default=None)
     default_branch: str = Field(default="main")
     scripts: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.now)
@@ -71,6 +75,8 @@ class Repo(SQLModel, table=True):
     )
     tasks: list["Task"] = Relationship(back_populates="repo")
     workspaces: list["Workspace"] = Relationship(back_populates="repo")
+    project_repos: list["ProjectRepo"] = Relationship(back_populates="repo")
+    workspace_repos: list["WorkspaceRepo"] = Relationship(back_populates="repo")
 
 
 class TaskTag(SQLModel, table=True):
@@ -228,6 +234,7 @@ class Workspace(SQLModel, table=True):
     sessions: list["Session"] = Relationship(back_populates="workspace")
     executions: list["ExecutionProcess"] = Relationship(back_populates="workspace")
     merges: list["Merge"] = Relationship(back_populates="workspace")
+    workspace_repos: list["WorkspaceRepo"] = Relationship(back_populates="workspace")
 
 
 class Session(SQLModel, table=True):
@@ -295,6 +302,7 @@ class Merge(SQLModel, table=True):
     id: str = Field(default_factory=_new_id, primary_key=True)
     task_id: str = Field(foreign_key="tasks.id", index=True)
     workspace_id: str | None = Field(default=None, foreign_key="workspaces.id", index=True)
+    repo_id: str | None = Field(default=None, foreign_key="repos.id")
     status: MergeStatus = Field(default=MergeStatus.PENDING, index=True)
     readiness: MergeReadiness = Field(default=MergeReadiness.RISK, index=True)
     pr_url: str | None = Field(default=None)
@@ -345,3 +353,38 @@ class Image(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.now)
 
     task: Task = Relationship(back_populates="images")
+
+
+class ProjectRepo(SQLModel, table=True):
+    """Junction table linking projects to repos."""
+
+    __tablename__ = "project_repos"  # type: ignore[bad-override]
+    __table_args__ = (UniqueConstraint("project_id", "repo_id"),)
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    project_id: str = Field(foreign_key="projects.id", index=True)
+    repo_id: str = Field(foreign_key="repos.id", index=True)
+    is_primary: bool = Field(default=False)
+    display_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.now)
+
+    project: "Project" = Relationship(back_populates="project_repos")
+    repo: "Repo" = Relationship(back_populates="project_repos")
+
+
+class WorkspaceRepo(SQLModel, table=True):
+    """Junction table linking workspaces to repos with target branch."""
+
+    __tablename__ = "workspace_repos"  # type: ignore[bad-override]
+    __table_args__ = (UniqueConstraint("workspace_id", "repo_id"),)
+
+    id: str = Field(default_factory=_new_id, primary_key=True)
+    workspace_id: str = Field(foreign_key="workspaces.id", index=True)
+    repo_id: str = Field(foreign_key="repos.id", index=True)
+    target_branch: str
+    worktree_path: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+    workspace: "Workspace" = Relationship(back_populates="workspace_repos")
+    repo: "Repo" = Relationship(back_populates="workspace_repos")

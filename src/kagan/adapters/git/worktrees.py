@@ -46,6 +46,138 @@ class WorktreeAdapter(Protocol):
         """Remove worktrees not in the valid workspace list."""
 
 
+class GitWorktreeAdapter:
+    """Adapter for git worktree operations across multiple repositories."""
+
+    async def create_worktree(
+        self,
+        repo_path: str,
+        worktree_path: str,
+        branch_name: str,
+        base_branch: str = "main",
+    ) -> None:
+        """Create a new git worktree."""
+        repo_path_obj = Path(repo_path)
+        worktree_path_obj = Path(worktree_path)
+
+        await self._run_git(repo_path_obj, ["fetch", "origin", base_branch])
+
+        await self._run_git(
+            repo_path_obj,
+            [
+                "worktree",
+                "add",
+                "-b",
+                branch_name,
+                str(worktree_path_obj),
+                f"origin/{base_branch}",
+            ],
+        )
+
+    async def delete_worktree(self, worktree_path: str) -> None:
+        """Delete a git worktree."""
+        worktree_path_obj = Path(worktree_path)
+
+        if not worktree_path_obj.exists():
+            return
+
+        git_file = worktree_path_obj / ".git"
+        if not git_file.exists():
+            return
+
+        content = git_file.read_text().strip()
+        if not content.startswith("gitdir:"):
+            return
+
+        git_dir = content.split(":", 1)[1].strip()
+        main_repo = Path(git_dir).parent.parent.parent
+
+        await self._run_git(
+            main_repo,
+            ["worktree", "remove", str(worktree_path_obj), "--force"],
+        )
+
+    async def has_uncommitted_changes(self, worktree_path: str) -> bool:
+        """Check if worktree has uncommitted changes."""
+        stdout = await self._run_git(
+            Path(worktree_path),
+            ["status", "--porcelain"],
+        )
+        return bool(stdout.strip())
+
+    async def get_diff(
+        self,
+        worktree_path: str,
+        target_branch: str,
+    ) -> str:
+        """Get diff between worktree and target branch."""
+        return await self._run_git(
+            Path(worktree_path),
+            ["diff", f"{target_branch}..HEAD"],
+        )
+
+    async def get_diff_stats(
+        self,
+        worktree_path: str,
+        target_branch: str,
+    ) -> dict:
+        """Get diff statistics."""
+        stat_output = await self._run_git(
+            Path(worktree_path),
+            ["diff", "--stat", f"{target_branch}..HEAD"],
+        )
+
+        lines = stat_output.strip().split("\n")
+        if not lines:
+            return {"files": 0, "insertions": 0, "deletions": 0}
+
+        summary = lines[-1] if lines else ""
+
+        return {
+            "files": self._extract_number(summary, "file"),
+            "insertions": self._extract_number(summary, "insertion"),
+            "deletions": self._extract_number(summary, "deletion"),
+            "stat_lines": lines[:-1],
+        }
+
+    async def get_commit_log(self, worktree_path: str, base_branch: str) -> list[str]:
+        """Get commit log for the worktree."""
+        stdout = await self._run_git(
+            Path(worktree_path),
+            ["log", "--oneline", f"{base_branch}..HEAD"],
+        )
+        return [line.strip() for line in stdout.split("\n") if line.strip()]
+
+    async def get_files_changed(self, worktree_path: str, base_branch: str) -> list[str]:
+        """Get file list changed in a worktree compared to base branch."""
+        stdout = await self._run_git(
+            Path(worktree_path),
+            ["diff", "--name-only", f"{base_branch}..HEAD"],
+        )
+        return [line.strip() for line in stdout.split("\n") if line.strip()]
+
+    async def _run_git(self, cwd: Path, args: list[str]) -> str:
+        """Run a git command."""
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)} failed: {stderr.decode()}")
+
+        return stdout.decode()
+
+    def _extract_number(self, text: str, word: str) -> int:
+        """Extract number before a word in text."""
+        match = re.search(rf"(\\d+)\\s+{word}", text)
+        return int(match.group(1)) if match else 0
+
+
 class WorktreeError(Exception):
     """Raised when git worktree operations fail."""
 

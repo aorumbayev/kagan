@@ -27,6 +27,7 @@ from kagan.ui.widgets.slash_complete import SlashComplete
 from kagan.ui.widgets.status_bar import StatusBar
 from kagan.ui.widgets.streaming_output import StreamingOutput
 from kagan.ui.widgets.tool_call import ToolCall
+from kagan.ui.widgets.workspace_repos import WorkspaceReposWidget
 
 __all__ = [
     "AcceptanceCriteriaArea",
@@ -52,4 +53,5 @@ __all__ = [
     "TitleInput",
     "ToolCall",
     "UserInput",
+    "WorkspaceReposWidget",
 ]

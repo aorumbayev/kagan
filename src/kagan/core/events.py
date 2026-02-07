@@ -89,6 +89,7 @@ class WorkspaceProvisioned:
     task_id: str | None
     branch: str
     path: str
+    repo_count: int
     event_id: str = field(default_factory=_new_event_id)
     occurred_at: datetime = field(default_factory=_now)
 
@@ -185,17 +186,78 @@ class MergeRequested:
 
 @dataclass(frozen=True)
 class MergeCompleted:
-    merge_id: str
-    task_id: str
-    result: str
+    """Emitted when a repo merge completes."""
+
+    workspace_id: str
+    repo_id: str
+    target_branch: str
+    commit_sha: str
     event_id: str = field(default_factory=_new_event_id)
     occurred_at: datetime = field(default_factory=_now)
 
 
 @dataclass(frozen=True)
 class MergeFailed:
-    merge_id: str
-    task_id: str
+    """Emitted when a repo merge fails."""
+
+    workspace_id: str
+    repo_id: str
     error: str
+    event_id: str = field(default_factory=_new_event_id)
+    occurred_at: datetime = field(default_factory=_now)
+
+
+@dataclass(frozen=True)
+class WorkspaceRepoStatus:
+    """Emitted when a workspace repo's status changes."""
+
+    workspace_id: str
+    repo_id: str
+    has_changes: bool
+    diff_stats: dict | None = None
+    event_id: str = field(default_factory=_new_event_id)
+    occurred_at: datetime = field(default_factory=_now)
+
+
+@dataclass(frozen=True)
+class ProjectOpened:
+    """Emitted when a project is opened."""
+
+    project_id: str
+    event_id: str = field(default_factory=_new_event_id)
+    occurred_at: datetime = field(default_factory=_now)
+
+
+@dataclass(frozen=True)
+class ProjectCreated:
+    """Emitted when a new project is created."""
+
+    project_id: str
+    name: str
+    repo_count: int
+    event_id: str = field(default_factory=_new_event_id)
+    occurred_at: datetime = field(default_factory=_now)
+
+
+@dataclass(frozen=True)
+class PRCreated:
+    """Emitted when a PR is created for a repo."""
+
+    workspace_id: str
+    repo_id: str
+    pr_url: str
+    event_id: str = field(default_factory=_new_event_id)
+    occurred_at: datetime = field(default_factory=_now)
+
+
+@dataclass(frozen=True)
+class ScriptCompleted:
+    """Emitted when a repo script completes."""
+
+    workspace_id: str
+    repo_id: str
+    script_type: str
+    success: bool
+    exit_code: int
     event_id: str = field(default_factory=_new_event_id)
     occurred_at: datetime = field(default_factory=_now)
