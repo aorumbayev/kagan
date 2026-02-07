@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import re
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
+from acp.schema import PlanEntry
+from acp.schema import ToolCall as AcpToolCall
+from acp.schema import ToolCallUpdate as AcpToolCallUpdate
+from pydantic import ValidationError
 from textual.containers import VerticalScroll
 from textual.widgets import Rule, Static
 
+from kagan.limits import MAX_TOOL_CALLS
 from kagan.ui.utils.animation import WAVE_FRAMES, WAVE_INTERVAL_MS
-from kagan.ui.widgets.agent_content import AgentResponse, AgentThought, UserInput
+from kagan.ui.widgets.agent_content import StreamingMarkdown, UserInput
 from kagan.ui.widgets.permission_prompt import PermissionPrompt
 from kagan.ui.widgets.plan_approval import PlanApprovalWidget
 from kagan.ui.widgets.plan_display import PlanDisplay
@@ -19,10 +25,10 @@ from kagan.ui.widgets.tool_call import ToolCall
 if TYPE_CHECKING:
     import asyncio
 
+    from acp.schema import PermissionOption
     from textual.app import ComposeResult
     from textual.widget import Widget
 
-    from kagan.acp import protocol
     from kagan.acp.messages import Answer
     from kagan.database.models import Ticket
 
@@ -63,9 +69,9 @@ class StreamingOutput(VerticalScroll):
 
     def __init__(self, *, id: str | None = None, classes: str | None = None) -> None:
         super().__init__(id=id, classes=classes)
-        self._agent_response: AgentResponse | None = None
-        self._agent_thought: AgentThought | None = None
-        self._tool_calls: dict[str, ToolCall] = {}
+        self._agent_response: StreamingMarkdown | None = None
+        self._agent_thought: StreamingMarkdown | None = None
+        self._tool_calls: OrderedDict[str, ToolCall] = OrderedDict()
         self._plan_display: PlanDisplay | None = None
         self._thinking_indicator: ThinkingIndicator | None = None
         self._phase: StreamPhase = "idle"
@@ -103,7 +109,7 @@ class StreamingOutput(VerticalScroll):
             await self._thinking_indicator.remove()
             self._thinking_indicator = None
 
-    async def post_response(self, fragment: str = "") -> AgentResponse:
+    async def post_response(self, fragment: str = "") -> StreamingMarkdown:
         """Get or create agent response widget. Resets thought state."""
         await self._remove_thinking_indicator()
         self._agent_thought = None
@@ -114,10 +120,12 @@ class StreamingOutput(VerticalScroll):
             fragment = self._filter_xml_content(fragment)
 
         if self._agent_response is None:
-            self._agent_response = AgentResponse(fragment)
+            self._agent_response = StreamingMarkdown(role="response")
             await self.mount(self._agent_response)
+            if fragment:
+                await self._agent_response.append_content(fragment)
         elif fragment:
-            await self._agent_response.append_fragment(fragment)
+            await self._agent_response.append_content(fragment)
         self._scroll_to_end()
         return self._agent_response
 
@@ -169,14 +177,15 @@ class StreamingOutput(VerticalScroll):
 
         return content
 
-    async def post_thought(self, fragment: str) -> AgentThought:
+    async def post_thought(self, fragment: str) -> StreamingMarkdown:
         """Get or create agent thought widget."""
         await self._remove_thinking_indicator()
         if self._agent_thought is None:
-            self._agent_thought = AgentThought(fragment)
+            self._agent_thought = StreamingMarkdown(role="thought")
             await self.mount(self._agent_thought)
+            await self._agent_thought.append_content(fragment)
         else:
-            await self._agent_thought.append_fragment(fragment)
+            await self._agent_thought.append_content(fragment)
         self._scroll_to_end()
         return self._agent_thought
 
@@ -190,9 +199,20 @@ class StreamingOutput(VerticalScroll):
         if not tool_id or tool_id == "unknown":
             tool_id = f"auto-{uuid4().hex[:8]}"
 
-        tool_data = {"id": tool_id, "title": title, "kind": kind, "status": "pending"}
+        tool_data = AcpToolCall(
+            tool_call_id=tool_id,
+            title=title,
+            kind=kind or None,
+            status="pending",
+        )
         widget = ToolCall(tool_data, id=f"tool-{tool_id}")
         self._tool_calls[tool_id] = widget
+
+        # Evict oldest entries if over limit
+        while len(self._tool_calls) > MAX_TOOL_CALLS:
+            _old_id, old_widget = self._tool_calls.popitem(last=False)
+            old_widget.remove()  # Remove from DOM (sync remove is fine)
+
         await self.mount(widget)
         self._scroll_to_end()
         return widget
@@ -209,16 +229,17 @@ class StreamingOutput(VerticalScroll):
         self._scroll_to_end()
         return widget
 
-    async def post_plan(self, entries: list[protocol.PlanEntry]) -> PlanDisplay:
+    async def post_plan(self, entries: list[PlanEntry] | list[dict[str, object]]) -> PlanDisplay:
         """Display agent plan entries. Updates existing if present."""
         self._agent_thought = None
         # Do NOT reset _agent_response here - causes line overwriting bug
+        normalized = _coerce_plan_entries(entries)
 
         if self._plan_display is not None:
             # Update existing plan display in-place
-            self._plan_display.update_entries(entries)
+            self._plan_display.update_entries(normalized)
         else:
-            self._plan_display = PlanDisplay(entries, classes="plan-display")
+            self._plan_display = PlanDisplay(normalized, classes="plan-display")
             await self.mount(self._plan_display)
 
         self._scroll_to_end()
@@ -226,8 +247,8 @@ class StreamingOutput(VerticalScroll):
 
     async def post_permission_request(
         self,
-        options: list[protocol.PermissionOption],
-        tool_call: protocol.ToolCall | protocol.ToolCallUpdatePermissionRequest,
+        options: list[PermissionOption],
+        tool_call: AcpToolCall | AcpToolCallUpdate,
         result_future: asyncio.Future[Answer],
         timeout: float = 300.0,
     ) -> PermissionPrompt:
@@ -273,7 +294,11 @@ class StreamingOutput(VerticalScroll):
         return rule
 
     def reset_turn(self) -> None:
-        """Reset state for a new conversation turn."""
+        """Reset state for a new conversation turn.
+
+        Note: Does NOT clear tool_calls - use clear() for full reset.
+        Tool calls from previous turns remain visible in the conversation.
+        """
         self._agent_response = None
         self._agent_thought = None
         self._plan_display = None
@@ -304,20 +329,19 @@ class StreamingOutput(VerticalScroll):
         parts: list[str] = []
 
         for child in self.children:
-            if isinstance(child, (AgentResponse, AgentThought)):
-                # Markdown widgets - get the markdown source
-                if child._markdown:
-                    parts.append(child._markdown)
+            if isinstance(child, StreamingMarkdown):
+                # StreamingMarkdown widgets - get content property
+                parts.append(child.content)
             elif isinstance(child, UserInput):
                 # User input has stored content
                 parts.append(f"> {child._content}")
             elif isinstance(child, ToolCall):
                 # Tool calls have title/status
-                title = child._tool_call.get("title", "Tool Call")
+                title = child._tool_call.title
                 parts.append(f"[Tool: {title}]")
             elif isinstance(child, PlanDisplay):
                 # Plan display - extract entries
-                entries = [f"- {e.get('content', '')}" for e in child._entries]
+                entries = [f"- {e.content}" for e in child._entries]
                 if entries:
                     parts.append("Plan:\n" + "\n".join(entries))
             elif isinstance(child, Static) and not isinstance(child, ThinkingIndicator):
@@ -327,3 +351,25 @@ class StreamingOutput(VerticalScroll):
                     parts.append(text)
 
         return "\n\n".join(parts)
+
+
+def _coerce_plan_entries(entries: list[PlanEntry] | list[dict[str, object]]) -> list[PlanEntry]:
+    normalized: list[PlanEntry] = []
+    for entry in entries:
+        if isinstance(entry, PlanEntry):
+            normalized.append(entry)
+            continue
+        if not isinstance(entry, dict):
+            continue
+        data = dict(entry)
+        data.setdefault("priority", "medium")
+        status = data.get("status")
+        if status == "failed":
+            data["status"] = "completed"
+        elif status is None or status not in ("pending", "in_progress", "completed"):
+            data["status"] = "pending"
+        try:
+            normalized.append(PlanEntry.model_validate(data))
+        except ValidationError:
+            continue
+    return normalized

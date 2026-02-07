@@ -91,9 +91,8 @@ src/kagan/
 ├── ansi/               # ANSI escape code handling
 │   └── cleaner.py      # ANSI code cleaning utilities
 ├── database/
-│   ├── models.py       # Pydantic models: Ticket, TicketCreate, TicketUpdate
-│   ├── manager.py      # StateManager async database operations
-│   └── queries.py      # SQL query helpers
+│   ├── models.py       # SQLModel models: Ticket, TicketCreate, TicketUpdate
+│   └── repository.py   # TicketRepository async database operations
 ├── mcp/                # Model Context Protocol server
 │   ├── server.py       # FastMCP server setup
 │   └── tools.py        # MCP tool implementations
@@ -236,7 +235,7 @@ git config commit.gpgsign false
 ## Key Rules
 
 1. **CSS in `.tcss` only** - All styles in `kagan.tcss`, never use `DEFAULT_CSS`
-1. **Async database** - All DB operations via aiosqlite StateManager
+1. **Async database** - All DB operations via SQLModel TicketRepository
 1. **Constants module** - Use `kagan.constants` for shared values
 1. **Property assertions** - Use `@property` with `assert` for required state
 1. **Module size limits** - Keep modules ~150-250 LOC; test files < 200 LOC

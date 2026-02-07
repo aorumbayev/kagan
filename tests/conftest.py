@@ -13,12 +13,13 @@ import pytest
 from hypothesis import Phase, Verbosity, settings
 
 from kagan.app import KaganApp
-from kagan.database.manager import StateManager
+from kagan.database import TicketRepository
 from kagan.database.models import Ticket, TicketPriority, TicketStatus, TicketType
 from tests.helpers.git import init_git_repo_with_commit
 from tests.helpers.mocks import (
     create_mock_agent,
     create_mock_process,
+    create_mock_scheduler,
     create_mock_session_manager,
     create_mock_worktree_manager,
     create_test_agent_config,
@@ -61,7 +62,7 @@ async def state_manager():
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        manager = StateManager(db_path)
+        manager = TicketRepository(db_path)
         await manager.initialize()
         yield manager
         await manager.close()
@@ -121,6 +122,12 @@ def mock_session_manager():
 
 
 @pytest.fixture
+def mock_scheduler():
+    """Create a mock Scheduler."""
+    return create_mock_scheduler()
+
+
+@pytest.fixture
 def config():
     """Create a test KaganConfig."""
     return create_test_config()
@@ -145,10 +152,10 @@ def mock_process():
 
 async def _create_e2e_app_with_tickets(e2e_project, tickets: list[Ticket]) -> KaganApp:
     """Helper to create a KaganApp with pre-populated tickets."""
-    manager = StateManager(e2e_project.db)
+    manager = TicketRepository(e2e_project.db)
     await manager.initialize()
     for ticket in tickets:
-        await manager.create_ticket(ticket)
+        await manager.create(ticket)
     await manager.close()
     return KaganApp(db_path=e2e_project.db, config_path=e2e_project.config, lock_path=None)
 
@@ -227,6 +234,42 @@ def mock_agent_spawn(monkeypatch):
         return mock_process
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", selective_mock)
+
+
+@pytest.fixture
+def mock_agent_factory():
+    """Factory that returns a mock Agent for testing.
+
+    Usage in tests:
+        async def test_something(state_manager, mock_agent_factory):
+            runner = TicketRunner(
+                state_manager=state_manager,
+                config=config,
+                agent_factory=mock_agent_factory,
+            )
+    """
+    from kagan.acp.agent import Agent
+    from kagan.acp.buffers import AgentBuffers
+
+    def factory(project_root, agent_config, *, read_only=False):
+        mock_agent = MagicMock(spec=Agent)
+        buffers = AgentBuffers()
+        buffers.append_response("Done. <complete/>")
+
+        mock_agent.set_auto_approve = MagicMock()
+        mock_agent.set_model_override = MagicMock()
+        mock_agent.start = MagicMock()
+        mock_agent.wait_ready = AsyncMock()
+        mock_agent.send_prompt = AsyncMock()
+        mock_agent.get_response_text = MagicMock(side_effect=buffers.get_response_text)
+        mock_agent.get_tool_calls = MagicMock(return_value=[])
+        mock_agent.get_thinking_text = MagicMock(return_value="")
+        mock_agent.clear_tool_calls = MagicMock()
+        mock_agent.stop = AsyncMock()
+        mock_agent._buffers = buffers
+        return mock_agent
+
+    return factory
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from textual import containers, events, on
 from textual.content import Content
@@ -14,9 +14,12 @@ from textual.widgets import Static
 from kagan.ui.utils.clipboard import copy_with_notification
 
 if TYPE_CHECKING:
+    from acp.schema import ToolCall as AcpToolCall
     from textual.app import ComposeResult
 
-ToolCallData = dict[str, Any]  # Contains: id, title, kind, status, content
+    ToolCallData = AcpToolCall
+else:
+    ToolCallData = object
 
 
 class ToolCallHeader(Static):
@@ -51,25 +54,25 @@ class ToolCall(containers.VerticalGroup):
 
     def update_status(self, status: str) -> None:
         """Update tool call status and refresh display."""
-        self._tool_call["status"] = status
+        self._tool_call.status = status
         with suppress(NoMatches):
             self.query_one(ToolCallHeader).update(self._header_content)
 
     def compose(self) -> ComposeResult:
-        content_list: list[dict[str, Any]] = self._tool_call.get("content") or []
+        content_list = self._tool_call.content or []
         self.has_content = False
         content_widgets = list(self._compose_content(content_list))
 
         header = ToolCallHeader(self._header_content, markup=False)
-        header.tooltip = self._tool_call.get("title", "Tool Call")
+        header.tooltip = self._tool_call.title
         yield header
         with containers.VerticalGroup(id="tool-content"):
             yield from content_widgets
 
     @property
     def _header_content(self) -> Content:
-        title = self._tool_call.get("title", "Tool Call")
-        status = self._tool_call.get("status", "pending")
+        title = self._tool_call.title
+        status = self._tool_call.status or "pending"
 
         expand_icon = (
             Content("▼ " if self.expanded else "▶ ")
@@ -102,20 +105,22 @@ class ToolCall(containers.VerticalGroup):
         else:
             self.app.bell()
 
-    def _compose_content(self, content_list: list[dict[str, Any]]) -> ComposeResult:
+    def _compose_content(self, content_list) -> ComposeResult:
         for item in content_list:
-            if item.get("type") == "content":
-                sub_content = item.get("content", {})
-                if sub_content.get("type") == "text" and (text := sub_content.get("text", "")):
-                    yield TextContent(text, markup=False)
-                    self.has_content = True
+            if getattr(item, "type", None) == "content":
+                sub_content = item.content
+                if getattr(sub_content, "type", None) == "text":
+                    text = sub_content.text
+                    if text:
+                        yield TextContent(text, markup=False)
+                        self.has_content = True
 
     async def _on_click(self, event: events.Click) -> None:
         """Handle click events - copy on double-click."""
         if event.chain == 2:
-            title = self._tool_call.get("title", "Tool Call")
-            kind = self._tool_call.get("kind")
-            status = self._tool_call.get("status")
+            title = self._tool_call.title
+            kind = self._tool_call.kind
+            status = self._tool_call.status
 
             content = f"Tool: {title}"
             if kind:
