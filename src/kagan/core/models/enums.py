@@ -57,6 +57,15 @@ class TaskType(StrEnum):
     PAIR = "PAIR"
 
 
+class PairTerminalBackend(StrEnum):
+    """Launcher/backend options for PAIR task sessions."""
+
+    WEZTERM = "wezterm"
+    TMUX = "tmux"
+    VSCODE = "vscode"
+    CURSOR = "cursor"
+
+
 class WorkspaceStatus(StrEnum):
     """Workspace lifecycle status."""
 
@@ -68,6 +77,7 @@ class SessionType(StrEnum):
     """Session backend types."""
 
     TMUX = "TMUX"
+    WEZTERM = "WEZTERM"
     ACP = "ACP"
     SCRIPT = "SCRIPT"
 

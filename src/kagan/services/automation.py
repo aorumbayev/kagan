@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from kagan.config import AgentConfig, KaganConfig
     from kagan.services.executions import ExecutionService
     from kagan.services.merges import MergeService
-    from kagan.services.queued_messages import QueuedMessageService
+    from kagan.services.queued_messages import QueuedMessage, QueuedMessageService
     from kagan.services.sessions import SessionService
     from kagan.services.tasks import TaskService
     from kagan.services.types import TaskLike
@@ -483,25 +483,25 @@ class AutomationService:
             log.debug(f"Task {task.id} run {run_count} signal: {signal}")
 
             if signal.signal == Signal.COMPLETE:
-                log.info(f"Task {task.id} completed, moving to REVIEW")
-                await self._handle_complete(task)
                 final_status = ExecutionStatus.COMPLETED
 
                 state = self._running.get(task.id)
-                if self._queued and state and state.session_id:
-                    queue_status = await self._queued.get_status(state.session_id)
-                    if queue_status.has_queued:
-                        queued = await self._queued.take_queued(state.session_id)
-                        if queued:
-                            scratchpad = await self._tasks.get_scratchpad(task.id)
-                            user_note = f"\n\n--- USER MESSAGE ---\n{queued.content}"
-                            await self._tasks.update_scratchpad(task.id, scratchpad + user_note)
-                            await self._update_task_status(task.id, TaskStatus.IN_PROGRESS)
-                            self._notify_task_changed()
-                            log.info(f"Task {task.id} has queued messages, re-spawning")
-                            await self._event_queue.put(
-                                AutomationEvent(kind=ExecutionKind.SPAWN, task_id=task.id)
-                            )
+                queued = await self._take_implementation_queue(
+                    task.id,
+                    state.session_id if state else None,
+                )
+                if queued is not None:
+                    await self._append_queued_message_to_scratchpad(task.id, queued.content)
+                    await self._update_task_status(task.id, TaskStatus.IN_PROGRESS)
+                    self._notify_task_changed()
+                    log.info(f"Task {task.id} has queued messages, re-spawning")
+                    await self._event_queue.put(
+                        AutomationEvent(kind=ExecutionKind.SPAWN, task_id=task.id)
+                    )
+                    return
+
+                log.info(f"Task {task.id} completed, moving to REVIEW")
+                await self._handle_complete(task)
                 return
             if signal.signal == Signal.BLOCKED:
                 log.warning(f"Task {task.id} blocked: {signal.reason}")
@@ -579,6 +579,25 @@ class AutomationService:
     async def _update_task_status(self, task_id: str, status: TaskStatus) -> None:
         """Update task status."""
         await self._tasks.update_fields(task_id, status=status)
+
+    async def _take_implementation_queue(
+        self,
+        task_id: str,
+        session_id: str | None,
+    ) -> QueuedMessage | None:
+        if self._queued is None:
+            return None
+        queued = await self._queued.take_queued(task_id, lane="implementation")
+        if queued is not None:
+            return queued
+        if session_id is None:
+            return None
+        return await self._queued.take_queued(session_id, lane="implementation")
+
+    async def _append_queued_message_to_scratchpad(self, task_id: str, content: str) -> None:
+        scratchpad = await self._tasks.get_scratchpad(task_id)
+        user_note = f"\n\n--- USER MESSAGE ---\n{_truncate_queue_payload(content)}"
+        await self._tasks.update_scratchpad(task_id, scratchpad + user_note)
 
     async def run_review(
         self, task: TaskLike, wt_path: Path, execution_id: str
@@ -799,3 +818,11 @@ class AutomationService:
             commits="\n".join(f"- {c}" for c in commits) if commits else "No commits",
             diff_summary=diff_summary or "No changes",
         )
+
+
+def _truncate_queue_payload(content: str, max_chars: int = 8000) -> str:
+    """Trim queued messages to preserve prompt budget."""
+    if len(content) <= max_chars:
+        return content
+    prefix = "[queued context truncated]\n"
+    return f"{prefix}{content[-(max_chars - len(prefix)) :]}"

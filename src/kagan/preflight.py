@@ -7,11 +7,12 @@ entry point (__main__.py) and the ACP agent (acp/kagan_agent.py).
 from __future__ import annotations
 
 import platform
-import shlex
 import shutil
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
+
+from kagan.command_utils import split_command_string
 
 if TYPE_CHECKING:
     from kagan.config import AgentConfig
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 class IssueType(Enum):
     WINDOWS_OS = "windows_os"
     TMUX_MISSING = "tmux_missing"
+    WEZTERM_MISSING = "wezterm_missing"
     AGENT_MISSING = "agent_missing"
     NPX_MISSING = "npx_missing"
     ACP_AGENT_MISSING = "acp_agent_missing"
@@ -49,14 +51,14 @@ class IssuePreset:
 ISSUE_PRESETS: dict[IssueType, IssuePreset] = {
     IssueType.WINDOWS_OS: IssuePreset(
         type=IssueType.WINDOWS_OS,
-        severity=IssueSeverity.BLOCKING,
-        icon="[!]",
-        title="Windows Not Supported",
+        severity=IssueSeverity.WARNING,
+        icon="[~]",
+        title="Windows Compatibility Notes",
         message=(
-            "Kagan does not currently support Windows.\n"
-            "We recommend using WSL2 (Windows Subsystem for Linux)."
+            "Kagan runs on Windows, but PAIR mode relies on tmux.\n"
+            "Use AUTO mode for a no-tmux workflow, or run via WSL2 for full PAIR support."
         ),
-        hint="Install WSL2 and run Kagan from there",
+        hint="Recommended: start with AUTO tickets on Windows. Use WSL2 for tmux PAIR sessions.",
         url="https://github.com/aorumbayev/kagan",
     ),
     IssueType.TMUX_MISSING: IssuePreset(
@@ -65,11 +67,22 @@ ISSUE_PRESETS: dict[IssueType, IssuePreset] = {
         icon="[~]",
         title="tmux Not Installed",
         message=(
-            "tmux is not installed.\n\n"
-            "PAIR mode (collaborative sessions) requires tmux.\n"
-            "AUTO mode will work normally without it."
+            "PAIR terminal backend is set to tmux, but tmux was not found in PATH.\n"
+            "PAIR sessions will not open until tmux is installed."
         ),
-        hint="To install: brew install tmux (macOS) or apt install tmux (Linux)",
+        hint="Install tmux or switch PAIR terminal backend to WezTerm",
+    ),
+    IssueType.WEZTERM_MISSING: IssuePreset(
+        type=IssueType.WEZTERM_MISSING,
+        severity=IssueSeverity.WARNING,
+        icon="[~]",
+        title="WezTerm Not Installed",
+        message=(
+            "PAIR terminal backend is set to WezTerm, but wezterm was not found in PATH.\n"
+            "PAIR sessions will not open until WezTerm is installed."
+        ),
+        hint="Install WezTerm or switch PAIR terminal backend to tmux",
+        url="https://wezterm.org/install/",
     ),
     IssueType.AGENT_MISSING: IssuePreset(
         type=IssueType.AGENT_MISSING,
@@ -196,7 +209,7 @@ class ACPCommandResolution:
 
 def _is_npx_command(command: str) -> bool:
     try:
-        parts = shlex.split(command)
+        parts = split_command_string(command)
         return len(parts) > 0 and parts[0] == "npx"
     except ValueError:
         return command.startswith("npx ")
@@ -209,7 +222,7 @@ def _get_npx_package_binary(command: str) -> str | None:
     For "npx @anthropic-ai/claude-code-acp", returns "claude-code-acp".
     """
     try:
-        parts = shlex.split(command)
+        parts = split_command_string(command)
         if len(parts) < 2:
             return None
         package = parts[1]
@@ -260,7 +273,7 @@ def resolve_acp_command(
         binary_path = shutil.which(binary_name)
         if binary_path is not None:
             try:
-                parts = shlex.split(run_command)
+                parts = split_command_string(run_command)
                 resolved = [binary_path, *parts[2:]]
             except ValueError:
                 resolved = [binary_path]
@@ -276,7 +289,7 @@ def resolve_acp_command(
 
             ensure_windows_npm_dir()
             try:
-                parts = shlex.split(run_command)
+                parts = split_command_string(run_command)
                 resolved = [npx_resolved, *parts[1:]]
             except ValueError:
                 resolved = [npx_resolved]
@@ -307,14 +320,14 @@ def resolve_acp_command(
         )
 
     try:
-        parts = shlex.split(run_command)
+        parts = split_command_string(run_command)
         executable = parts[0] if parts else run_command
     except ValueError:
         executable = run_command
 
     if shutil.which(executable) is not None:
         return ACPCommandResolution(
-            resolved_command=shlex.split(run_command),
+            resolved_command=split_command_string(run_command),
             issue=None,
             used_fallback=False,
         )
@@ -333,15 +346,118 @@ def resolve_acp_command(
     )
 
 
-def _check_windows() -> DetectedIssue | None:
+def _command_exists(command: str) -> bool:
+    candidates = [command]
+
     if platform.system() == "Windows":
-        return DetectedIssue(preset=ISSUE_PRESETS[IssueType.WINDOWS_OS])
-    return None
+        command_lower = command.lower()
+        if not command_lower.endswith((".exe", ".cmd", ".bat")):
+            candidates.extend([f"{command}.exe", f"{command}.cmd", f"{command}.bat"])
+
+    return any(shutil.which(candidate) is not None for candidate in candidates)
+
+
+def _resolve_pair_terminal_backend(
+    pair_terminal_backend: str | None,
+    default_pair_terminal_backend: str | None,
+) -> str:
+    backend = (pair_terminal_backend or default_pair_terminal_backend or "tmux").strip().lower()
+    if backend in {"tmux", "vscode", "cursor"}:
+        if backend == "tmux" and platform.system() == "Windows":
+            for candidate, command in (
+                ("vscode", "code"),
+                ("cursor", "cursor"),
+            ):
+                if _command_exists(command):
+                    return candidate
+            return "vscode"
+        return backend
+    return "tmux"
+
+
+def _tmux_install_hint() -> tuple[str, str | None]:
+    system = platform.system()
+    if system == "Darwin":
+        return "Install tmux: brew install tmux", "https://github.com/tmux/tmux/wiki/Installing"
+    if system == "Windows":
+        return (
+            "tmux is typically used via WSL2 on Windows. "
+            "Install WSL2, then install tmux inside WSL, "
+            "or switch PAIR terminal backend to VS Code/Cursor.",
+            "https://learn.microsoft.com/windows/wsl/install",
+        )
+    return (
+        "Install tmux (for example: sudo apt install tmux), "
+        "or switch PAIR terminal backend to VS Code/Cursor.",
+        "https://github.com/tmux/tmux/wiki/Installing",
+    )
+
+
+def _wezterm_install_hint() -> tuple[str, str | None]:
+    system = platform.system()
+    if system == "Darwin":
+        return (
+            "Install WezTerm: brew install --cask wezterm",
+            "https://wezterm.org/install/macos.html",
+        )
+    if system == "Windows":
+        return (
+            "Install WezTerm: winget install --id Wez.WezTerm -e",
+            "https://wezterm.org/install/windows.html",
+        )
+    return (
+        "Install WezTerm from your package manager or https://wezterm.org/install/ "
+        "(for example: sudo apt install wezterm).",
+        "https://wezterm.org/install/",
+    )
 
 
 def _check_tmux() -> DetectedIssue | None:
-    if shutil.which("tmux") is None:
-        return DetectedIssue(preset=ISSUE_PRESETS[IssueType.TMUX_MISSING])
+    if not _command_exists("tmux"):
+        hint, url = _tmux_install_hint()
+        preset = IssuePreset(
+            type=IssueType.TMUX_MISSING,
+            severity=IssueSeverity.WARNING,
+            icon="[~]",
+            title="tmux Not Installed",
+            message=(
+                "PAIR terminal backend is set to tmux, but tmux was not found in PATH.\n"
+                "PAIR sessions will not open until tmux is installed."
+            ),
+            hint=hint,
+            url=url,
+        )
+        return DetectedIssue(preset=preset, details="tmux")
+    return None
+
+
+def _check_wezterm() -> DetectedIssue | None:
+    if not _command_exists("wezterm"):
+        hint, url = _wezterm_install_hint()
+        preset = IssuePreset(
+            type=IssueType.WEZTERM_MISSING,
+            severity=IssueSeverity.WARNING,
+            icon="[~]",
+            title="WezTerm Not Installed",
+            message=(
+                "PAIR terminal backend is set to WezTerm, but wezterm was not found in PATH.\n"
+                "PAIR sessions will not open until WezTerm is installed."
+            ),
+            hint=hint,
+            url=url,
+        )
+        return DetectedIssue(preset=preset, details="wezterm")
+    return None
+
+
+def _check_pair_terminal_backend(
+    *,
+    pair_terminal_backend: str | None,
+    default_pair_terminal_backend: str | None,
+) -> DetectedIssue | None:
+    backend = _resolve_pair_terminal_backend(pair_terminal_backend, default_pair_terminal_backend)
+    if backend == "tmux":
+        return _check_tmux()
     return None
 
 
@@ -351,7 +467,7 @@ def _check_agent(
     install_command: str | None,
 ) -> DetectedIssue | None:
     try:
-        parts = shlex.split(agent_command)
+        parts = split_command_string(agent_command)
         executable = parts[0] if parts else agent_command
     except ValueError:
         executable = agent_command
@@ -451,6 +567,8 @@ async def detect_issues(
     agent_config: AgentConfig | None = None,
     agent_name: str = "Claude Code",
     agent_install_command: str | None = None,
+    pair_terminal_backend: str | None = None,
+    default_pair_terminal_backend: str | None = "tmux",
     check_git: bool = True,
     check_terminal: bool = True,
 ) -> PreflightResult:
@@ -460,6 +578,8 @@ async def detect_issues(
         agent_config: Optional agent configuration to check.
         agent_name: Display name of the agent to check.
         agent_install_command: Installation command for the agent.
+        pair_terminal_backend: Explicit PAIR terminal backend to validate for the current context.
+        default_pair_terminal_backend: Configured default PAIR backend when no task override exists.
         check_git: Whether to check git version and configuration.
         check_terminal: Whether to check terminal truecolor support.
 
@@ -467,10 +587,6 @@ async def detect_issues(
         PreflightResult containing all detected issues.
     """
     issues: list[DetectedIssue] = []
-
-    windows_issue = _check_windows()
-    if windows_issue:
-        return PreflightResult(issues=[windows_issue])
 
     if check_git:
         git_version_issue = await _check_git_version()
@@ -481,9 +597,12 @@ async def detect_issues(
             if git_user_issue:
                 issues.append(git_user_issue)
 
-    tmux_issue = _check_tmux()
-    if tmux_issue:
-        issues.append(tmux_issue)
+    pair_terminal_issue = _check_pair_terminal_backend(
+        pair_terminal_backend=pair_terminal_backend,
+        default_pair_terminal_backend=default_pair_terminal_backend,
+    )
+    if pair_terminal_issue:
+        issues.append(pair_terminal_issue)
 
     # 4. Terminal truecolor check (warning only)
     if check_terminal:

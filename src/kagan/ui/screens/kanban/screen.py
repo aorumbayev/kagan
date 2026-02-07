@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import platform
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -69,6 +70,7 @@ SIZE_WARNING_MESSAGE = (
     f"Minimum size: {MIN_SCREEN_WIDTH}x{MIN_SCREEN_HEIGHT}\n"
     f"Please resize your terminal"
 )
+VALID_PAIR_LAUNCHERS = {"tmux", "vscode", "cursor"}
 
 
 class KanbanScreen(KaganScreen):
@@ -359,7 +361,8 @@ class KanbanScreen(KaganScreen):
                 column = self.query_one(f"#column-{status.value.lower()}", KanbanColumn)
                 column.update_tasks([t for t in display_tasks if t.status == status])
 
-            self.header.update_count(len(self._tasks))
+            with suppress(NoMatches):
+                self.header.update_count(len(self._tasks))
             self._update_review_queue_hint()
             self._update_keybinding_hints()
             self.refresh_bindings()
@@ -1110,6 +1113,11 @@ class KanbanScreen(KaganScreen):
             if wt_path is None:
                 return
 
+        if not await self._ensure_pair_terminal_backend_ready(task):
+            return
+
+        terminal_backend = self._resolve_pair_terminal_backend(task)
+
         if not await self.ctx.session_service.session_exists(task.id):
             self.notify("Creating session...", severity="information")
             await self.ctx.session_service.create_session(task, wt_path)
@@ -1119,34 +1127,145 @@ class KanbanScreen(KaganScreen):
         ):
             return
 
-        if not self.kagan_app.config.ui.skip_tmux_gateway:
-            from kagan.ui.modals.tmux_gateway import TmuxGatewayModal
+        if not self.kagan_app.config.ui.skip_pair_instructions:
+            from kagan.ui.modals.tmux_gateway import PairInstructionsModal
 
             def on_gateway_result(result: str | None) -> None:
                 if result is None:
                     return
                 if result == "skip_future":
-                    self.kagan_app.config.ui.skip_tmux_gateway = True
-                    cb_result = self._save_tmux_gateway_preference(skip=True)
+                    self.kagan_app.config.ui.skip_pair_instructions = True
+                    cb_result = self._save_pair_instructions_preference(skip=True)
                     if asyncio.iscoroutine(cb_result):
                         asyncio.create_task(cb_result)
 
-                self.app.call_later(self._do_open_pair_session, task)
+                self.app.call_later(self._do_open_pair_session, task, wt_path, terminal_backend)
 
-            self.app.push_screen(TmuxGatewayModal(task.id, task.title), on_gateway_result)
+            self.app.push_screen(
+                PairInstructionsModal(
+                    task.id,
+                    task.title,
+                    terminal_backend,
+                    self._startup_prompt_path_hint(wt_path),
+                ),
+                on_gateway_result,
+            )
             return
 
-        await self._do_open_pair_session(task)
+        await self._do_open_pair_session(task, wt_path, terminal_backend)
 
-    async def _do_open_pair_session(self, task: Task) -> None:
-        """Open the tmux session after modal confirmation."""
+    def _resolve_pair_terminal_backend(self, task: Task) -> str:
+        task_backend = getattr(task, "terminal_backend", None)
+        if isinstance(task_backend, str):
+            normalized = task_backend.strip().lower()
+            if normalized in VALID_PAIR_LAUNCHERS:
+                return normalized
+
+        configured = getattr(
+            self.kagan_app.config.general,
+            "default_pair_terminal_backend",
+            "tmux",
+        )
+        if isinstance(configured, str):
+            normalized = configured.strip().lower()
+            if normalized in VALID_PAIR_LAUNCHERS:
+                return normalized
+
+        return "tmux"
+
+    async def _ensure_pair_terminal_backend_ready(self, task: Task) -> bool:
+        from kagan.terminals.installer import check_terminal_installed, first_available_pair_backend
+        from kagan.ui.modals.terminal_install import TerminalInstallModal
+
+        backend = self._resolve_pair_terminal_backend(task)
+        is_windows = platform.system() == "Windows"
+
+        if backend in {"vscode", "cursor"}:
+            if check_terminal_installed(backend):
+                return True
+            self.notify(
+                f"{backend} is not installed. Install it and retry.",
+                severity="warning",
+            )
+            return False
+
+        if backend == "tmux":
+            if check_terminal_installed("tmux"):
+                return True
+            if is_windows:
+                fallback = first_available_pair_backend(windows=True)
+                if fallback is not None:
+                    await self.ctx.task_service.update_fields(task.id, terminal_backend=fallback)
+                    self.notify(
+                        f"tmux not found on Windows. Using {fallback} for this task.",
+                        severity="information",
+                    )
+                    return True
+                self.notify(
+                    "PAIR cancelled: install VS Code or Cursor to continue on Windows.",
+                    severity="warning",
+                )
+                return False
+
+            installed_tmux = await self.app.push_screen(TerminalInstallModal("tmux"))
+            if installed_tmux and check_terminal_installed("tmux"):
+                return True
+
+            fallback = first_available_pair_backend(windows=False)
+            if fallback is not None:
+                await self.ctx.task_service.update_fields(task.id, terminal_backend=fallback)
+                self.notify(
+                    "tmux not installed. Using fallback launcher "
+                    f"{fallback}. VS Code: https://code.visualstudio.com/download "
+                    "Cursor: https://cursor.com/downloads",
+                    severity="information",
+                )
+                return True
+            self.notify(
+                "PAIR cancelled: install tmux (recommended), or install VS Code/Cursor "
+                "for external development.",
+                severity="warning",
+            )
+            return False
+
+        self.notify(f"Unsupported PAIR launcher: {backend}", severity="warning")
+        return False
+
+    @staticmethod
+    def _startup_prompt_path_hint(workspace_path: Path) -> Path:
+        return workspace_path / ".kagan" / "start_prompt.md"
+
+    async def _do_open_pair_session(
+        self,
+        task: Task,
+        workspace_path: Path | None = None,
+        terminal_backend: str | None = None,
+    ) -> None:
+        """Open the pair session after modal confirmation."""
         try:
             if task.status == TaskStatus.BACKLOG:
                 await self.ctx.task_service.update_fields(task.id, status=TaskStatus.IN_PROGRESS)
                 await self._refresh_board()
 
             with self.app.suspend():
-                await self.ctx.session_service.attach_session(task.id)
+                attached = await self.ctx.session_service.attach_session(task.id)
+
+            backend = terminal_backend or self._resolve_pair_terminal_backend(task)
+            if not attached:
+                self.notify("Failed to open PAIR session", severity="warning")
+                return
+
+            if backend != "tmux":
+                prompt_path = (
+                    self._startup_prompt_path_hint(workspace_path)
+                    if workspace_path is not None
+                    else Path(".kagan/start_prompt.md")
+                )
+                self.notify(
+                    f"Workspace opened externally. Use startup prompt: {prompt_path}",
+                    severity="information",
+                )
+                return
 
             session_still_exists = await self.ctx.session_service.session_exists(task.id)
             if session_still_exists:
@@ -1502,12 +1621,12 @@ class KanbanScreen(KaganScreen):
         else:
             self.notify(f"Returned to IN_PROGRESS: {task.title}")
 
-    async def _save_tmux_gateway_preference(self, skip: bool = True) -> None:
-        """Save tmux gateway preference to config."""
+    async def _save_pair_instructions_preference(self, skip: bool = True) -> None:
+        """Save pair instructions preference to config."""
         try:
             await self.kagan_app.config.update_ui_preferences(
                 self.kagan_app.config_path,
-                skip_tmux_gateway=skip,
+                skip_pair_instructions=skip,
             )
         except Exception as e:
             self.notify(f"Failed to save preference: {e}", severity="error")

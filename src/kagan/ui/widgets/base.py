@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from textual.widgets import Input, Select, TextArea
 
 from kagan.constants import PRIORITY_LABELS
-from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
+from kagan.core.models.enums import PairTerminalBackend, TaskPriority, TaskStatus, TaskType
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -108,7 +108,7 @@ class TaskTypeSelect(Select[str]):
     """Task type dropdown (Pair/Auto)."""
 
     OPTIONS: Sequence[tuple[str, str]] = [
-        ("Pair (tmux)", TaskType.PAIR.value),
+        ("Pair (interactive)", TaskType.PAIR.value),
         ("Auto (ACP)", TaskType.AUTO.value),
     ]
 
@@ -173,6 +173,35 @@ class AgentBackendSelect(Select[str]):
             options=opts,
             value=value,
             allow_blank=allow_blank,
+            id=widget_id,
+            **kwargs,
+        )
+
+
+class PairTerminalBackendSelect(Select[str]):
+    """PAIR terminal backend dropdown."""
+
+    OPTIONS: Sequence[tuple[str, str]] = [
+        ("tmux", "tmux"),
+        ("VS Code", "vscode"),
+        ("Cursor", "cursor"),
+    ]
+
+    def __init__(
+        self,
+        value: str = "tmux",
+        *,
+        disabled: bool = False,
+        widget_id: str = "pair-terminal-backend-select",
+        **kwargs,
+    ) -> None:
+        valid_values = {backend.value for backend in PairTerminalBackend}
+        initial_value = value if value in valid_values else "tmux"
+        super().__init__(
+            options=self.OPTIONS,
+            value=initial_value,
+            disabled=disabled,
+            allow_blank=False,
             id=widget_id,
             **kwargs,
         )

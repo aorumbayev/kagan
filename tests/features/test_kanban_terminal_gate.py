@@ -204,4 +204,4 @@ async def test_external_launcher_attach_does_not_prompt_session_complete(
         push_screen.assert_not_called()
         notify.assert_called_once()
         assert "Workspace opened externally." in notify.call_args.args[0]
-        assert ".kagan/start_prompt.md" in notify.call_args.args[0]
+        assert "start_prompt.md" in notify.call_args.args[0]

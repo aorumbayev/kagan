@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -10,6 +11,13 @@ if TYPE_CHECKING:
     from kagan.app import KaganApp
     from kagan.core.models.enums import TaskStatus
 
+# CI runners are significantly slower; scale timeouts accordingly.
+_CI_MULTIPLIER: float = 3.0 if os.environ.get("CI") else 1.0
+
+
+def _ci_timeout(timeout: float) -> float:
+    return timeout * _CI_MULTIPLIER
+
 
 async def wait_for_screen(
     pilot: Pilot,
@@ -17,6 +25,7 @@ async def wait_for_screen(
     timeout: float = 10.0,
     check_interval: float = 0.1,
 ) -> Screen:
+    timeout = _ci_timeout(timeout)
     elapsed = 0.0
     while elapsed < timeout:
         await pilot.pause()
@@ -41,6 +50,7 @@ async def wait_for_widget(
 ) -> None:
     from textual.css.query import NoMatches
 
+    timeout = _ci_timeout(timeout)
     await pilot.pause()
     await pilot.pause()
 
@@ -65,6 +75,7 @@ async def wait_for_planner_ready(
 ) -> None:
     from kagan.ui.screens.planner import PlannerScreen
 
+    timeout = _ci_timeout(timeout)
     elapsed = 0.0
     while elapsed < timeout:
         await pilot.pause()
@@ -84,6 +95,7 @@ async def wait_for_workers(
 ) -> None:
     from textual.worker import WorkerState
 
+    timeout = _ci_timeout(timeout)
     elapsed = 0.0
     while elapsed < timeout:
         await pilot.pause()
@@ -106,6 +118,7 @@ async def wait_for_text(
     timeout: float = 5.0,
     check_interval: float = 0.1,
 ) -> None:
+    timeout = _ci_timeout(timeout)
     elapsed = 0.0
     while elapsed < timeout:
         await pilot.pause()
@@ -124,6 +137,7 @@ async def wait_for_modal(
     timeout: float = 5.0,
     check_interval: float = 0.1,
 ) -> Screen:
+    timeout = _ci_timeout(timeout)
     await pilot.pause()
     await pilot.pause()
 
@@ -153,6 +167,7 @@ async def wait_for_task_status(
     If *pilot* is provided, pumps Textual's message queue each iteration
     so that screen callbacks (e.g. merge after ReviewModal dismiss) execute.
     """
+    timeout = _ci_timeout(timeout)
     elapsed = 0.0
     last_status = None
     while elapsed < timeout:

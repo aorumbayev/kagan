@@ -71,6 +71,7 @@ class TaskRepository:
             self._engine, class_=AsyncSession, expire_on_commit=False
         )
         await create_db_tables(self._engine)
+        await self._ensure_schema_compatibility()
         await self._ensure_defaults()
 
     async def close(self) -> None:
@@ -84,6 +85,16 @@ class TaskRepository:
         """Get a new async session."""
         assert self._session_factory, "Repository not initialized"
         return self._session_factory()
+
+    async def _ensure_schema_compatibility(self) -> None:
+        """Apply lightweight compatibility shims for legacy databases."""
+        assert self._engine is not None, "Repository not initialized"
+        async with self._engine.begin() as conn:
+            result = await conn.exec_driver_sql("PRAGMA table_info(tasks)")
+            column_names = {str(row[1]) for row in result.fetchall()}
+            if "terminal_backend" in column_names:
+                return
+            await conn.exec_driver_sql("ALTER TABLE tasks ADD COLUMN terminal_backend VARCHAR")
 
     async def _ensure_defaults(self) -> None:
         """Initialize database - no auto-creation of projects or repos.

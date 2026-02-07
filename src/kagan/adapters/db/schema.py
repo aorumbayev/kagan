@@ -15,6 +15,7 @@ from kagan.core.models.enums import (
     ExecutionStatus,
     MergeStatus,
     MergeType,
+    PairTerminalBackend,
     ScratchType,
     SessionStatus,
     SessionType,
@@ -100,6 +101,7 @@ class Task(SQLModel, table=True):
     status: TaskStatus = Field(default=TaskStatus.BACKLOG, index=True)
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM, index=True)
     task_type: TaskType = Field(default=TaskType.PAIR)
+    terminal_backend: PairTerminalBackend | None = Field(default=None)
     assigned_hat: str | None = Field(default=None)
     agent_backend: str | None = Field(default=None)
     base_branch: str | None = Field(default=None)
@@ -134,6 +136,7 @@ class Task(SQLModel, table=True):
         description: str = "",
         priority: TaskPriority = TaskPriority.MEDIUM,
         task_type: TaskType = TaskType.PAIR,
+        terminal_backend: PairTerminalBackend | None = None,
         status: TaskStatus = TaskStatus.BACKLOG,
         assigned_hat: str | None = None,
         parent_id: str | None = None,
@@ -150,6 +153,7 @@ class Task(SQLModel, table=True):
             description=description,
             priority=priority,
             task_type=task_type,
+            terminal_backend=terminal_backend,
             status=status,
             assigned_hat=assigned_hat,
             parent_id=parent_id,

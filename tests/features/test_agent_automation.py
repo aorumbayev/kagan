@@ -22,10 +22,11 @@ from tests.helpers.mocks import create_mock_workspace_service, create_test_confi
 
 from kagan.agents.signals import Signal, parse_signal
 from kagan.bootstrap import InMemoryEventBus
-from kagan.core.models.enums import TaskStatus, TaskType
+from kagan.core.models.enums import ExecutionKind, TaskStatus, TaskType
 from kagan.paths import get_worktree_base_dir
 from kagan.services.automation import AutomationService, RunningTaskState
 from kagan.services.executions import ExecutionServiceImpl
+from kagan.services.queued_messages import QueuedMessageServiceImpl
 from kagan.services.tasks import TaskService
 
 if TYPE_CHECKING:
@@ -41,6 +42,7 @@ def build_automation(
     *,
     agent_factory=None,
     session_service=None,
+    queued_message_service=None,
 ) -> AutomationService:
     """Helper to build AutomationService with a fresh event bus."""
     event_bus = InMemoryEventBus()
@@ -54,6 +56,7 @@ def build_automation(
             session_service=session_service,
             execution_service=execution_service,
             event_bus=event_bus,
+            queued_message_service=queued_message_service,
         )
     return AutomationService(
         task_service,
@@ -63,6 +66,7 @@ def build_automation(
         execution_service=execution_service,
         agent_factory=agent_factory,
         event_bus=event_bus,
+        queued_message_service=queued_message_service,
     )
 
 
@@ -91,6 +95,31 @@ class TestSignalParsing:
         result = parse_signal(output)
 
         assert result.signal == Signal.CONTINUE
+
+
+class TestQueueLanes:
+    """Queue lanes remain isolated per task."""
+
+    async def test_implementation_review_and_planner_queues_are_independent(self) -> None:
+        queue = QueuedMessageServiceImpl()
+        await queue.queue_message("task-1", "impl-msg", lane="implementation")
+        await queue.queue_message("task-1", "review-msg", lane="review")
+        await queue.queue_message("task-1", "planner-msg", lane="planner")
+
+        impl = await queue.take_queued("task-1", lane="implementation")
+        assert impl is not None
+        assert impl.content == "impl-msg"
+
+        review_status = await queue.get_status("task-1", lane="review")
+        assert review_status.has_queued is True
+
+        review = await queue.take_queued("task-1", lane="review")
+        assert review is not None
+        assert review.content == "review-msg"
+
+        planner = await queue.take_queued("task-1", lane="planner")
+        assert planner is not None
+        assert planner.content == "planner-msg"
 
 
 class TestAgentSpawning:
@@ -298,6 +327,70 @@ class TestExecutionRuns:
         assert logs.logs
         turns = await state_manager.list_agent_turns(execution.id)
         assert turns
+
+    async def test_queued_messages_restart_before_review_transition(
+        self, state_manager: TaskRepository, task_factory, git_repo: Path, mock_agent_factory
+    ) -> None:
+        """Queued implementation follow-ups re-spawn without transitioning to REVIEW."""
+        task = await state_manager.create(
+            task_factory(
+                title="Queue follow-up",
+                status=TaskStatus.IN_PROGRESS,
+                task_type=TaskType.AUTO,
+            )
+        )
+
+        config = create_test_config()
+        worktrees = create_mock_workspace_service()
+        await worktrees.create(task.id)
+        assert state_manager._session_factory is not None
+        from kagan.adapters.db.schema import Workspace
+        from kagan.core.models.enums import WorkspaceStatus
+
+        async with state_manager._session_factory() as session:
+            workspace = Workspace(
+                project_id=task.project_id,
+                task_id=task.id,
+                branch_name="automation/test",
+                path="/tmp/worktree",
+                status=WorkspaceStatus.ACTIVE,
+            )
+            session.add(workspace)
+            await session.commit()
+            await session.refresh(workspace)
+        worktrees.list_workspaces.return_value = [workspace]
+
+        queued = QueuedMessageServiceImpl()
+        await queued.queue_message(
+            task.id,
+            "Continue with queue feedback",
+            lane="implementation",
+        )
+
+        scheduler = build_automation(
+            state_manager,
+            worktrees,
+            config,
+            agent_factory=mock_agent_factory,
+            queued_message_service=queued,
+        )
+        handle_complete = AsyncMock()
+        scheduler._handle_complete = handle_complete  # type: ignore[method-assign]
+
+        await scheduler._run_task_loop(task)
+
+        handle_complete.assert_not_awaited()
+        fetched = await state_manager.get(task.id)
+        assert fetched is not None
+        assert fetched.status == TaskStatus.IN_PROGRESS
+        scratchpad = await state_manager.get_scratchpad(task.id)
+        assert "Continue with queue feedback" in scratchpad
+        assert not scheduler._event_queue.empty()
+        queued_event = scheduler._event_queue.get_nowait()
+        assert queued_event.kind == ExecutionKind.SPAWN
+
+        status = await queued.get_status(task.id, lane="implementation")
+        assert status.has_queued is False
 
 
 class TestSessionManagement:

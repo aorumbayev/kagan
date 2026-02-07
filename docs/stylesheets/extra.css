@@ -1,31 +1,35 @@
+/* Space Grotesk for headings — matches landing page --font-display */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
 /* ===== KAGAN MKDOCS THEME ===== */
+/* Aligned with landing page (kagan-landing) Khagan Night Palette */
 :root,
 [data-md-color-scheme="slate"] {
-  /* Backgrounds */
+  /* Backgrounds — matches landing --bg, --surface, --panel, --border */
   --md-default-bg-color: #0f1419;
   --md-default-bg-color--light: #171c24;
   --md-default-bg-color--lighter: #1e2530;
   --md-default-bg-color--lightest: #2a3342;
 
-  /* Text */
+  /* Text — matches landing --fg, --fg-muted */
   --md-default-fg-color: #c5cdd9;
   --md-default-fg-color--light: #8b949e;
   --md-default-fg-color--lighter: #8b949e80;
   --md-default-fg-color--lightest: #2a3342;
 
-  /* Primary - Jade Green (not default blue!) */
+  /* Primary — Jade Green (matches landing --primary) */
   --md-primary-fg-color: #3fb58e;
   --md-primary-fg-color--light: #4ec9b0;
   --md-primary-fg-color--dark: #2d8a6a;
   --md-primary-bg-color: #0f1419;
   --md-primary-bg-color--light: #171c24;
 
-  /* Accent - Override to Jade Green for nav active states */
+  /* Accent — Jade Green for nav active states */
   --md-accent-fg-color: #3fb58e;
   --md-accent-fg-color--transparent: #3fb58e20;
   --md-accent-bg-color: #0f1419;
 
-  /* Code */
+  /* Code — matches landing --bg-darker for code bg */
   --md-code-fg-color: #c5cdd9;
   --md-code-bg-color: #0a0d11;
   --md-code-hl-color: #3fb58e30;
@@ -39,7 +43,7 @@
   /* Links */
   --md-typeset-a-color: #3fb58e;
 
-  /* Admonitions - override default colors */
+  /* Admonitions */
   --md-admonition-fg-color: #c5cdd9;
   --md-admonition-bg-color: #171c24;
 
@@ -97,11 +101,20 @@
 }
 
 /* ===== CONTENT ===== */
-/* Headings with gold accent */
-.md-typeset h1 {
-  color: #c5cdd9 !important;
+/* Headings — Space Grotesk matches landing page display font */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6 {
+  font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
   font-weight: 600;
   letter-spacing: 0.05em;
+}
+
+.md-typeset h1 {
+  color: #c5cdd9 !important;
 }
 
 .md-typeset h2 {
@@ -229,20 +242,20 @@
   background-color: #6fa3d4 !important;
 }
 
-/* Warning admonition - Khan Gold */
+/* Warning admonition - Pale Amber (matches landing --warning: #e6c07b) */
 .md-typeset .admonition.warning,
 .md-typeset details.warning {
-  border-color: #d4a84b !important;
+  border-color: #e6c07b !important;
 }
 
 .md-typeset .warning > .admonition-title,
 .md-typeset .warning > summary {
-  background-color: rgba(212, 168, 75, 0.1) !important;
+  background-color: rgba(230, 192, 123, 0.1) !important;
 }
 
 .md-typeset .warning > .admonition-title::before,
 .md-typeset .warning > summary::before {
-  background-color: #d4a84b !important;
+  background-color: #e6c07b !important;
 }
 
 /* Tip admonition - Turquoise */
@@ -365,7 +378,7 @@
 
 ::-webkit-scrollbar-thumb {
   background: #2a3342;
-  border-radius: 4px;
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -374,7 +387,7 @@
 
 /* ===== SELECTION ===== */
 ::selection {
-  background: rgba(63, 181, 142, 0.5);
+  background: rgba(63, 181, 142, 0.65);
   color: #0f1419;
 }
 
@@ -402,4 +415,38 @@
 .md-button--primary:hover {
   background-color: #4ec9b0;
   border-color: #4ec9b0;
+}
+
+/* ===== TABBED CONTENT ===== */
+/* Matches landing page install tab aesthetics */
+.md-typeset .tabbed-labels {
+  border-bottom-color: #2a3342;
+}
+
+.md-typeset .tabbed-labels > label {
+  color: #8b949e;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom-color: transparent;
+}
+
+.md-typeset .tabbed-labels > label:hover {
+  color: #c5cdd9;
+}
+
+.md-typeset .tabbed-labels > .tabbed-labels__active,
+.md-typeset .tabbed-labels > label.active {
+  color: #c5cdd9;
+  border-bottom-color: #3fb58e;
+}
+
+/* Tab indicator line */
+.md-typeset .tabbed-labels .tabbed-labels__active {
+  color: #c5cdd9;
+}
+
+/* ===== HORIZONTAL RULES ===== */
+.md-typeset hr {
+  border-color: #2a3342;
 }

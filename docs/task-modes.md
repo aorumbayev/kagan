@@ -4,13 +4,13 @@ Kagan offers two distinct ways to work with AI on your tasks: **AUTO** mode for 
 
 ## Quick Comparison
 
-| Aspect             | AUTO Mode           | PAIR Mode            |
-| ------------------ | ------------------- | -------------------- |
-| **AI involvement** | Works independently | Works alongside you  |
-| **Your role**      | Review results      | Active collaboration |
-| **Best for**       | Well-defined tasks  | Complex problems     |
-| **Session**        | Background process  | Interactive tmux     |
-| **Start with**     | Press `a`           | Press `Enter`        |
+| Aspect             | AUTO Mode           | PAIR Mode                                             |
+| ------------------ | ------------------- | ----------------------------------------------------- |
+| **AI involvement** | Works independently | Works alongside you                                   |
+| **Your role**      | Review results      | Active collaboration                                  |
+| **Best for**       | Well-defined tasks  | Complex problems                                      |
+| **Session**        | Background process  | Interactive tmux session or VS Code/Cursor launch      |
+| **Start with**     | Press `a`           | Press `Enter`                                         |
 
 ## AUTO Mode: Let AI Work Independently
 
@@ -138,7 +138,7 @@ PAIR mode opens an interactive terminal session where you and the AI collaborate
 
 1. **Open the session** (press `Enter`)
 
-   - A tmux terminal opens
+   - A session opens in your configured backend (`tmux`, `vscode`, or `cursor`)
    - AI agent is ready to chat
    - You're both looking at the same workspace
 
@@ -204,18 +204,21 @@ max_concurrent_agents = 1
 
 # Default base branch for new repos
 default_base_branch = "main"
+
+# Default terminal backend for PAIR tasks (options: "tmux", "vscode", "cursor")
+default_pair_terminal_backend = "tmux"
 ```
 
 ## Keyboard Reference
 
 Mode-specific shortcuts at a glance:
 
-| Key       | AUTO Mode              | PAIR Mode     |
-| --------- | ---------------------- | ------------- |
-| `a`       | Start agent            | -             |
-| `s`       | Stop agent             | -             |
+| Key       | AUTO Mode              | PAIR Mode           |
+| --------- | ---------------------- | ------------------- |
+| `a`       | Start agent            | -                   |
+| `s`       | Stop agent             | -                   |
 | `Enter`   | Open task workspace    | Open/attach session |
-| `Shift+L` | Move right (to REVIEW) | Move right    |
+| `Shift+L` | Move right (to REVIEW) | Move right          |
 
 > **[Full Keyboard Reference ->](keybindings.md)** - Complete list of all shortcuts including the rejection modal options.
 
@@ -236,11 +239,12 @@ Mode-specific shortcuts at a glance:
 
 ### PAIR session won't open
 
-- Make sure tmux is installed: `brew install tmux` or `apt install tmux`
+- If using tmux backend, install tmux: `brew install tmux` or `apt install tmux`
+- If using IDE backend, install VS Code or Cursor and ensure `code`/`cursor` is in PATH
 - Check if another session is already open for this task
 
 ### Merge fails in REVIEW
 
 - Kagan shows merge readiness in REVIEW before you merge
 - If a merge fails, the task stays in REVIEW with the error
-- Use the primary resolve action in task details to open tmux in the merge worktree
+- Use the primary resolve action in task details to open a terminal session in the merge worktree

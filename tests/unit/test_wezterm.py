@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
 
 from kagan.wezterm import WeztermError, create_workspace_session, kill_workspace, workspace_exists
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 async def test_workspace_exists_filters_by_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,13 +58,14 @@ async def test_kill_workspace_kills_only_target_workspace_panes(
 
 async def test_create_workspace_session_passes_command_and_env(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     run_mock = AsyncMock(return_value="")
     monkeypatch.setattr("kagan.wezterm.run_wezterm", run_mock)
 
     await create_workspace_session(
         "kagan-task-1",
-        Path("/tmp"),
+        tmp_path,
         env={"KAGAN_TASK_ID": "task-1"},
         command="echo hello",
     )
@@ -76,7 +80,7 @@ async def test_create_workspace_session_passes_command_and_env(
         "--workspace",
         "kagan-task-1",
         "--cwd",
-        "/tmp",
+        str(tmp_path),
     )
     assert "--" in args
     assert kwargs["env"] == {"KAGAN_TASK_ID": "task-1"}

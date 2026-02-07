@@ -40,6 +40,9 @@ KAGAN_GENERATED_PATTERNS = (
     "opencode.json",
     "kagan*.mcp.json",
     "*kagan.json",
+    ".vscode/mcp.json",
+    ".cursor/mcp.json",
+    ".kagan/",
     ".gitignore",
 )
 

@@ -59,7 +59,7 @@ extra:
 
   generator: false
 
-copyright: Copyright 2026 Altynbek Orumbayev (<a href="https://makerx.com.au/" target="_blank">MakerX</a>)
+copyright: Released under the <a href="https://github.com/aorumbayev/kagan/blob/main/LICENSE" target="_blank">MIT License</a>. Copyright 2026 Kagan by <a href="https://makerx.com.au/" target="_blank">MakerX</a>.
 
 markdown_extensions:
   # Python Markdown

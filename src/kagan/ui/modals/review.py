@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
+import contextlib
 import re
 from typing import TYPE_CHECKING, cast
 
 from textual import on
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -29,6 +30,7 @@ from kagan.constants import DIFF_MAX_LENGTH, MODAL_TITLE_MAX_LENGTH
 from kagan.core.models.enums import StreamPhase, TaskStatus, TaskType
 from kagan.keybindings import REVIEW_BINDINGS
 from kagan.limits import AGENT_TIMEOUT
+from kagan.ui.utils.agent_exit import parse_agent_exit_code as parse_agent_exit_code_message
 from kagan.ui.utils.animation import WAVE_FRAMES, WAVE_INTERVAL_MS
 from kagan.ui.utils.clipboard import copy_with_notification
 from kagan.ui.utils.diff import colorize_diff_line
@@ -44,9 +46,44 @@ if TYPE_CHECKING:
     from kagan.core.models.entities import Task
     from kagan.services.diffs import FileDiff, RepoDiff
     from kagan.services.executions import ExecutionService
-    from kagan.services.follow_ups import FollowUpService
     from kagan.services.queued_messages import QueuedMessageService
     from kagan.services.workspaces import WorkspaceService
+
+
+DECISION_PATTERN = re.compile(
+    r"^\s*Decision\s*:\s*(?P<decision>approve|approved|reject|rejected)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+APPROVE_SIGNAL_PATTERN = re.compile(r"<\s*approve\b", re.IGNORECASE)
+REJECT_SIGNAL_PATTERN = re.compile(r"<\s*reject\b", re.IGNORECASE)
+
+
+def parse_agent_exit_code(message: str) -> int | None:
+    """Compatibility wrapper around shared agent-exit parser."""
+    return parse_agent_exit_code_message(message)
+
+
+def extract_review_decision(text: str) -> str | None:
+    """Extract terminal review decision from streamed content."""
+    if not text:
+        return None
+
+    # Parse recent output only to avoid stale decisions in long histories.
+    tail = text[-8000:]
+    events: list[tuple[int, str]] = []
+    for match in DECISION_PATTERN.finditer(tail):
+        token = match.group("decision").lower()
+        decision = "approved" if token.startswith("approve") else "rejected"
+        events.append((match.start(), decision))
+    for match in APPROVE_SIGNAL_PATTERN.finditer(tail):
+        events.append((match.start(), "approved"))
+    for match in REJECT_SIGNAL_PATTERN.finditer(tail):
+        events.append((match.start(), "rejected"))
+
+    if not events:
+        return None
+
+    return max(events, key=lambda item: item[0])[1]
 
 
 class ReviewModal(ModalScreen[str | None]):
@@ -99,7 +136,9 @@ class ReviewModal(ModalScreen[str | None]):
         self._anim_timer: Timer | None = None
         self._anim_frame: int = 0
         self._prompt_task: asyncio.Task[None] | None = None
-        self._session_id: str | None = None
+        self._review_queue_pending = False
+        self._implementation_queue_pending = False
+        self._hydrated = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="review-modal-container"):
@@ -142,7 +181,7 @@ class ReviewModal(ModalScreen[str | None]):
                 with TabPane("Diff", id="review-diff"):
                     with Horizontal(id="diff-pane"):
                         yield DataTable(id="diff-files", classes="hidden")
-                        yield RichLog(id="diff-log", wrap=False, markup=True)
+                        yield RichLog(id="diff-log", wrap=False, markup=True, auto_scroll=False)
 
                 with TabPane("AI Review", id="review-ai"):
                     with Vertical(id="ai-review-section", classes="hidden"):
@@ -150,20 +189,12 @@ class ReviewModal(ModalScreen[str | None]):
                             yield Label("AI Review", classes="section-title")
                             yield Static("", classes="spacer")
                             yield Static(
+                                "Decision: Pending",
+                                id="decision-badge",
+                                classes="decision-badge decision-pending",
+                            )
+                            yield Static(
                                 "○ Ready", id="phase-badge", classes="phase-badge phase-idle"
-                            )
-                            yield Button(
-                                "↻ Regenerate",
-                                id="regenerate-btn",
-                                variant="default",
-                                classes="hidden",
-                            )
-                        with Horizontal(id="ai-review-controls"):
-                            yield Button(
-                                "Generate Review (g)", id="generate-btn", variant="primary"
-                            )
-                            yield Button(
-                                "Cancel", id="cancel-btn", variant="warning", classes="hidden"
                             )
                         yield ChatPanel(
                             None,
@@ -176,7 +207,8 @@ class ReviewModal(ModalScreen[str | None]):
                 with TabPane("Agent Output", id="review-agent-output"):
                     yield ChatPanel(
                         self._execution_id,
-                        allow_input=False,
+                        allow_input=True,
+                        input_placeholder="Queue implementation follow-up...",
                         output_id="review-agent-output",
                         id="review-agent-output-chat",
                     )
@@ -184,67 +216,93 @@ class ReviewModal(ModalScreen[str | None]):
             yield Rule()
 
             with Horizontal(classes="button-row hidden"):
-                if self._task_model.task_type == TaskType.PAIR:
-                    yield Button("Attach", variant="default", id="attach-btn")
-                yield Button("Rebase (R)", variant="default", id="rebase-btn")
-                yield Button("Approve (Enter)", variant="success", id="approve-btn")
-                yield Button("Reject (r)", variant="error", id="reject-btn")
+                with Horizontal(classes="button-group button-group-start"):
+                    if self._task_model.task_type == TaskType.PAIR:
+                        yield Button("Attach", variant="default", id="attach-btn")
+                    yield Button("Rebase (R)", variant="default", id="rebase-btn")
+                    yield Button("Review (g)", id="generate-btn", variant="primary")
+                    yield Button("Cancel", id="cancel-btn", variant="warning", classes="hidden")
+                yield Static("", classes="spacer")
+                with Horizontal(classes="button-group button-group-end"):
+                    yield Button("Approve (Enter)", variant="success", id="approve-btn")
+                    yield Button("Reject (r)", variant="error", id="reject-btn")
 
         yield Footer(show_command_palette=False)
 
     async def on_mount(self) -> None:
-        """Load commits and diff immediately."""
-        from kagan.debug_log import log
+        """Render shell immediately, then hydrate heavy content in background."""
+        self._show_shell()
+        self._bind_task_updates()
+        self.run_worker(self._hydrate_content, exclusive=True, exit_on_error=False)
 
-        branch_info = self.query_one("#branch-info", Label)
-        workspaces = await self._worktree.list_workspaces(task_id=self._task_model.id)
-        if workspaces:
-            actual_branch = workspaces[0].branch_name
-            branch_info.update(f"Branch: {actual_branch} → {self._base_branch}")
-
-        log.info(f"[ReviewModal] Opening for task {self._task_model.id[:8]}")
-        commits = await self._worktree.get_commit_log(self._task_model.id, self._base_branch)
-
-        diff_stats = await self._worktree.get_diff_stats(self._task_model.id, self._base_branch)
-        self._diff_text = await self._worktree.get_diff(self._task_model.id, self._base_branch)
-
-        await self.query_one("#review-loading", LoadingIndicator).remove()
+    def _show_shell(self) -> None:
+        """Make modal interactive before loading expensive data."""
+        with contextlib.suppress(NoMatches):
+            self.query_one("#review-loading", LoadingIndicator).remove()
         self.query_one("#review-tabs").remove_class("hidden")
         self.query_one("#ai-review-section").remove_class("hidden")
         if not self._read_only:
             self.query_one(".button-row").remove_class("hidden")
+        self._set_active_tab(self._initial_tab)
+        self._sync_agent_output_queue_visibility()
+        self._sync_review_queue_visibility()
+
+    def _bind_task_updates(self) -> None:
+        app = cast("KaganApp", self.app)
+        app.task_changed_signal.subscribe(self, self._on_task_changed)
+
+    async def _hydrate_content(self) -> None:
+        """Load commits, diffs and history without blocking initial paint."""
+        from kagan.debug_log import log
+
+        log.info(f"[ReviewModal] Hydrating content for task {self._task_model.id[:8]}")
+
+        workspaces = await self._worktree.list_workspaces(task_id=self._task_model.id)
+        if workspaces:
+            actual_branch = workspaces[0].branch_name
+            branch_info = self.query_one("#branch-info", Label)
+            branch_info.update(f"Branch: {actual_branch} → {self._base_branch}")
+
+        commits_task = self._worktree.get_commit_log(self._task_model.id, self._base_branch)
+        diff_stats_task = self._worktree.get_diff_stats(self._task_model.id, self._base_branch)
+        diff_task = self._worktree.get_diff(self._task_model.id, self._base_branch)
+        commits, diff_stats, self._diff_text = await asyncio.gather(
+            commits_task,
+            diff_stats_task,
+            diff_task,
+        )
 
         self._populate_commits(commits)
-
         self.query_one("#diff-stats", Static).update(diff_stats or "[dim](No changes)[/dim]")
         self._diff_stats = diff_stats or ""
         self._no_changes = not commits and not self._diff_stats
-
         await self._populate_diff_pane(workspaces)
 
-        from kagan.debug_log import log as debug_log
+        if self._no_changes:
+            self.query_one("#approve-btn", Button).label = "Close exploratory"
 
-        debug_log.info(
-            f"[ReviewModal] Loaded {len(commits or [])} commits, "
-            f"diff_length={len(self._diff_stats)}"
+        await asyncio.gather(
+            self._load_agent_output_history(),
+            self._configure_follow_up_chat(),
+            self._configure_agent_output_chat(),
+        )
+        await asyncio.gather(
+            self._refresh_review_queue_state(),
+            self._refresh_implementation_queue_state(),
         )
 
-        if self._no_changes:
-            approve_btn = self.query_one("#approve-btn", Button)
-            approve_btn.label = "Close as Exploratory"
-
-        await self._load_agent_output_history()
-        await self._configure_follow_up_chat()
         if self._read_only:
-            self.query_one("#ai-review-controls", Horizontal).add_class("hidden")
-            self.query_one("#regenerate-btn", Button).add_class("hidden")
+            self.query_one("#generate-btn", Button).add_class("hidden")
+            self.query_one("#cancel-btn", Button).add_class("hidden")
 
         if self._execution_service is not None:
             await self._load_prior_review()
         await self._attach_live_output_stream_if_available()
         await self._attach_live_review_stream_if_available()
         auto_started = await self._maybe_auto_start_pair_review()
-        self._set_active_tab("review-ai" if auto_started else self._initial_tab)
+        self._hydrated = True
+        if auto_started:
+            self._set_active_tab("review-ai")
 
     def _populate_commits(self, commits: list[str]) -> None:
         table = self.query_one("#commits-table", DataTable)
@@ -317,6 +375,7 @@ class ReviewModal(ModalScreen[str | None]):
         diff_log.clear()
         for line in diff_text.splitlines() or ["(No diff available)"]:
             diff_log.write(colorize_diff_line(line))
+        diff_log.scroll_home(animate=False)
 
     def _set_stats(self, additions: int, deletions: int, files: int) -> None:
         self.query_one("#review-stats", Horizontal).remove_class("hidden")
@@ -373,6 +432,24 @@ class ReviewModal(ModalScreen[str | None]):
     def _get_agent_output_panel(self) -> ChatPanel:
         return self.query_one("#review-agent-output-chat", ChatPanel)
 
+    async def _configure_agent_output_chat(self) -> None:
+        panel = self._get_agent_output_panel()
+        panel.set_send_handler(self._send_implementation_follow_up)
+        panel.set_get_queued_handler(self._get_implementation_queued_messages)
+        panel.set_remove_handler(self._remove_implementation_queued_message)
+        await panel.refresh_queued_messages()
+        self._sync_agent_output_queue_visibility()
+
+    def _sync_agent_output_queue_visibility(self) -> None:
+        enabled = self._task_model.task_type == TaskType.AUTO and (
+            self._task_model.status == TaskStatus.IN_PROGRESS
+        )
+        panel = self._get_agent_output_panel()
+        if enabled:
+            panel.remove_class("queue-disabled")
+        else:
+            panel.add_class("queue-disabled")
+
     async def _load_agent_output_history(self) -> None:
         execution_id = await self._resolve_execution_id()
         panel = self._get_agent_output_panel()
@@ -409,6 +486,7 @@ class ReviewModal(ModalScreen[str | None]):
                 for line in entry.logs.splitlines():
                     await chat_panel._render_log_line(line)
             self._review_log_loaded = True
+            self._sync_decision_from_output()
             self._set_phase(StreamPhase.COMPLETE)
 
     async def _attach_live_review_stream_if_available(self) -> None:
@@ -475,6 +553,11 @@ class ReviewModal(ModalScreen[str | None]):
         if summary:
             await output.post_response(summary)
 
+        if status == "approved":
+            self._set_decision("approved")
+        elif status == "rejected":
+            self._set_decision("rejected")
+
         self._set_phase(StreamPhase.COMPLETE)
 
     def _set_phase(self, phase: StreamPhase) -> None:
@@ -486,24 +569,49 @@ class ReviewModal(ModalScreen[str | None]):
 
         gen_btn = self.query_one("#generate-btn", Button)
         cancel_btn = self.query_one("#cancel-btn", Button)
-        regen_btn = self.query_one("#regenerate-btn", Button)
+        if self._read_only:
+            gen_btn.add_class("hidden")
+            cancel_btn.add_class("hidden")
+            self._sync_review_action_state()
+            return
 
         if phase == StreamPhase.IDLE:
             self._stop_animation()
+            gen_btn.label = "Review (g)"
+            gen_btn.variant = "primary"
             gen_btn.remove_class("hidden")
             gen_btn.disabled = False
             cancel_btn.add_class("hidden")
-            regen_btn.add_class("hidden")
         elif phase in (StreamPhase.THINKING, StreamPhase.STREAMING):
             self._start_animation()
             gen_btn.add_class("hidden")
             cancel_btn.remove_class("hidden")
-            regen_btn.add_class("hidden")
         else:
             self._stop_animation()
-            gen_btn.add_class("hidden")
+            gen_btn.label = "Regenerate (g)"
+            gen_btn.variant = "default"
+            gen_btn.remove_class("hidden")
+            gen_btn.disabled = False
             cancel_btn.add_class("hidden")
-            regen_btn.remove_class("hidden")
+        self._sync_review_action_state()
+
+    def _set_decision(self, decision: str | None) -> None:
+        badge = self.query_one("#decision-badge", Static)
+        if decision == "approved":
+            badge.update("Decision: Approve")
+            badge.set_classes("decision-badge decision-approved")
+            return
+        if decision == "rejected":
+            badge.update("Decision: Reject")
+            badge.set_classes("decision-badge decision-rejected")
+            return
+        badge.update("Decision: Pending")
+        badge.set_classes("decision-badge decision-pending")
+
+    def _sync_decision_from_output(self) -> None:
+        output = self._get_chat_panel().output
+        decision = extract_review_decision(output.get_text_content())
+        self._set_decision(decision)
 
     def _get_chat_panel(self) -> ChatPanel:
         return self.query_one("#ai-review-chat", ChatPanel)
@@ -518,6 +626,64 @@ class ReviewModal(ModalScreen[str | None]):
     async def _configure_follow_up_chat(self) -> None:
         panel = self._get_chat_panel()
         panel.set_send_handler(self._send_follow_up)
+        panel.set_get_queued_handler(self._get_review_queued_messages)
+        panel.set_remove_handler(self._remove_review_queued_message)
+        await panel.refresh_queued_messages()
+        self._sync_review_queue_visibility()
+
+    def _sync_review_queue_visibility(self) -> None:
+        enabled = self._task_model.status == TaskStatus.REVIEW and not self._read_only
+        panel = self._get_chat_panel()
+        if enabled:
+            panel.remove_class("queue-disabled")
+        else:
+            panel.add_class("queue-disabled")
+
+    async def _refresh_review_queue_state(self) -> None:
+        self._sync_review_queue_visibility()
+        await self._get_chat_panel().refresh_queued_messages()
+        if self._task_model.status != TaskStatus.REVIEW:
+            self._review_queue_pending = False
+            self._sync_review_action_state()
+            return
+        service = self._get_queue_service()
+        if service is None:
+            self._review_queue_pending = False
+            self._sync_review_action_state()
+            return
+        status = await service.get_status(self._task_model.id, lane="review")
+        self._review_queue_pending = status.has_queued
+        self._sync_review_action_state()
+
+    async def _refresh_implementation_queue_state(self) -> None:
+        self._sync_agent_output_queue_visibility()
+        await self._get_agent_output_panel().refresh_queued_messages()
+        if self._task_model.status != TaskStatus.IN_PROGRESS:
+            self._implementation_queue_pending = False
+            return
+        service = self._get_queue_service()
+        if service is None:
+            self._implementation_queue_pending = False
+            return
+        status = await service.get_status(self._task_model.id, lane="implementation")
+        self._implementation_queue_pending = status.has_queued
+
+    def _sync_review_action_state(self) -> None:
+        if self._read_only:
+            return
+        try:
+            approve_btn = self.query_one("#approve-btn", Button)
+        except NoMatches:
+            return
+        queue_pending = self._review_queue_pending
+        review_running = self._phase in (StreamPhase.THINKING, StreamPhase.STREAMING)
+        approve_btn.disabled = queue_pending or review_running
+        if queue_pending:
+            approve_btn.tooltip = "Process queued review messages before approval."
+        elif review_running:
+            approve_btn.tooltip = "Wait for review to complete before approval."
+        else:
+            approve_btn.tooltip = ""
 
     def _get_queue_service(self) -> QueuedMessageService | None:
         app = cast("KaganApp", self.app)
@@ -526,46 +692,124 @@ class ReviewModal(ModalScreen[str | None]):
             return None
         return cast("QueuedMessageService", service)
 
-    def _get_follow_up_service(self) -> FollowUpService | None:
-        app = cast("KaganApp", self.app)
-        service = getattr(app.ctx, "follow_up_service", None)
+    async def _send_follow_up(self, content: str) -> None:
+        if self._task_model.status != TaskStatus.REVIEW:
+            raise RuntimeError("Review queue only available in REVIEW status")
+        service = self._get_queue_service()
+        if service is None:
+            raise RuntimeError("Follow-up queue unavailable")
+        await service.queue_message(self._task_model.id, content, lane="review")
+        await self._refresh_review_queue_state()
+        if self._phase == StreamPhase.IDLE and not self._live_review_attached:
+            await self._start_review_follow_up_if_needed()
+
+    async def _get_review_queued_messages(self) -> list:
+        service = self._get_queue_service()
+        if service is None:
+            return []
+        return await service.get_queued(self._task_model.id, lane="review")
+
+    async def _remove_review_queued_message(self, index: int) -> bool:
+        service = self._get_queue_service()
+        if service is None:
+            return False
+        removed = await service.remove_message(self._task_model.id, index, lane="review")
+        await self._refresh_review_queue_state()
+        return removed
+
+    async def _take_review_queue(self) -> str | None:
+        service = self._get_queue_service()
         if service is None:
             return None
-        return cast("FollowUpService", service)
-
-    async def _resolve_session_id(self) -> str | None:
-        if self._session_id is not None:
-            return self._session_id
-        app = cast("KaganApp", self.app)
-        latest = await app.ctx.execution_service.get_latest_execution_for_task(self._task_model.id)
-        if latest is None:
+        queued = await service.take_queued(self._task_model.id, lane="review")
+        await self._refresh_review_queue_state()
+        if queued is None:
             return None
-        self._session_id = latest.session_id
-        return self._session_id
+        return _truncate_queue_payload(queued.content)
 
-    async def _send_follow_up(self, content: str) -> None:
+    async def _send_implementation_follow_up(self, content: str) -> None:
+        if self._task_model.status != TaskStatus.IN_PROGRESS:
+            raise RuntimeError("Implementation queue only available in IN_PROGRESS")
         service = self._get_queue_service()
-        session_id = await self._resolve_session_id()
-        if service is None or session_id is None:
-            raise RuntimeError("Follow-up queue unavailable")
-        result = service.queue_message(session_id, content)
-        if inspect.isawaitable(result):
-            await result
+        if service is None:
+            raise RuntimeError("Implementation queue unavailable")
+        await service.queue_message(self._task_model.id, content, lane="implementation")
+        await self._refresh_implementation_queue_state()
 
-        follow_up = self._get_follow_up_service()
-        if follow_up is None or session_id is None:
+        app = cast("KaganApp", self.app)
+        automation = app.ctx.automation_service
+        if not automation.is_running(self._task_model.id):
+            await automation.spawn_for_task(self._task_model)
+            await self._get_agent_output_panel().output.post_note(
+                "Queued follow-up accepted. Starting next implementation run...",
+                classes="info",
+            )
+            await self._refresh_runtime_state()
+
+    async def _get_implementation_queued_messages(self) -> list:
+        service = self._get_queue_service()
+        if service is None:
+            return []
+        return await service.get_queued(self._task_model.id, lane="implementation")
+
+    async def _remove_implementation_queued_message(self, index: int) -> bool:
+        service = self._get_queue_service()
+        if service is None:
+            return False
+        removed = await service.remove_message(self._task_model.id, index, lane="implementation")
+        await self._refresh_implementation_queue_state()
+        return removed
+
+    async def _on_task_changed(self, task_id: str) -> None:
+        if task_id != self._task_model.id:
             return
-        try:
-            if hasattr(follow_up, "resume_follow_up"):
-                result = follow_up.resume_follow_up(session_id)
-            elif hasattr(follow_up, "start_follow_up"):
-                result = follow_up.start_follow_up(session_id)
-            else:
-                return
-            if inspect.isawaitable(result):
-                await result
-        except Exception as exc:
-            self.notify(f"Follow-up start failed: {exc}", severity="warning")
+        self.run_worker(self._refresh_runtime_state, exclusive=True, exit_on_error=False)
+
+    async def _refresh_runtime_state(self) -> None:
+        app = cast("KaganApp", self.app)
+        latest = await app.ctx.task_service.get_task(self._task_model.id)
+        if latest is not None:
+            previous_status = self._task_model.status
+            self._task_model = latest
+            if previous_status == TaskStatus.IN_PROGRESS and latest.status == TaskStatus.REVIEW:
+                self._read_only = False
+                self.query_one(".button-row").remove_class("hidden")
+                self.query_one("#generate-btn", Button).remove_class("hidden")
+                self.query_one("#cancel-btn", Button).add_class("hidden")
+                self._set_phase(StreamPhase.IDLE)
+                self._set_active_tab("review-ai")
+
+        scheduler = app.ctx.automation_service
+        self._is_running = scheduler.is_running(self._task_model.id)
+        self._is_reviewing = scheduler.is_reviewing(self._task_model.id)
+        self._execution_id = scheduler.get_execution_id(self._task_model.id) or self._execution_id
+        self._live_output_agent = scheduler.get_running_agent(self._task_model.id)
+        self._live_review_agent = scheduler.get_review_agent(self._task_model.id)
+
+        await self._attach_live_output_stream_if_available()
+        await self._attach_live_review_stream_if_available()
+        await asyncio.gather(
+            self._refresh_review_queue_state(),
+            self._refresh_implementation_queue_state(),
+        )
+        if self._hydrated and self._task_model.status == TaskStatus.REVIEW:
+            await self._load_prior_review()
+
+    async def _start_review_follow_up_if_needed(self) -> None:
+        if self._phase not in (StreamPhase.IDLE, StreamPhase.COMPLETE):
+            return
+        service = self._get_queue_service()
+        if service is None:
+            return
+        status = await service.get_status(self._task_model.id, lane="review")
+        if not status.has_queued:
+            return
+        chat_panel = self._get_chat_panel()
+        chat_panel.remove_class("hidden")
+        await chat_panel.output.post_note("Starting queued review follow-up...", classes="info")
+        self._set_decision(None)
+        self._set_phase(StreamPhase.THINKING)
+        await self._generate_ai_review(chat_panel.output)
 
     def _start_animation(self) -> None:
         """Start wave animation for thinking/streaming state."""
@@ -592,10 +836,6 @@ class ReviewModal(ModalScreen[str | None]):
     @on(Button.Pressed, "#generate-btn")
     async def on_generate_btn(self) -> None:
         await self.action_generate_review()
-
-    @on(Button.Pressed, "#regenerate-btn")
-    async def on_regenerate_btn(self) -> None:
-        await self.action_regenerate_review()
 
     @on(Button.Pressed, "#cancel-btn")
     async def on_cancel_btn(self) -> None:
@@ -662,6 +902,7 @@ class ReviewModal(ModalScreen[str | None]):
         if self._phase != StreamPhase.IDLE:
             return
 
+        self._set_decision(None)
         self._set_phase(StreamPhase.THINKING)
         chat_panel = self._get_chat_panel()
         chat_panel.remove_class("hidden")
@@ -679,6 +920,7 @@ class ReviewModal(ModalScreen[str | None]):
 
         output = self._get_chat_panel().output
         await output.clear()
+        self._set_decision(None)
         self._set_phase(StreamPhase.THINKING)
         await self._generate_ai_review(output)
 
@@ -754,6 +996,8 @@ class ReviewModal(ModalScreen[str | None]):
             self._set_phase(StreamPhase.IDLE)
             return
 
+        queued_follow_up = await self._take_review_queue()
+
         self._agent = self._agent_factory(wt_path, self._agent_config, read_only=True)
         self._agent.start(self)
 
@@ -766,6 +1010,14 @@ class ReviewModal(ModalScreen[str | None]):
             await output.post_note(f"Review failed: {e}", classes="error")
             self._set_phase(StreamPhase.IDLE)
             return
+
+        follow_up_context = ""
+        if queued_follow_up:
+            follow_up_context = (
+                "\n\n## Queued User Follow-up\n"
+                "Apply this additional context while reviewing:\n"
+                f"{queued_follow_up}\n"
+            )
 
         review_prompt = f"""You are a Code Review Specialist providing feedback on changes.
 
@@ -831,6 +1083,7 @@ Summary:
 - Add tests to cover new logic.
 
 Keep your review brief and actionable."""
+        review_prompt = f"{review_prompt}{follow_up_context}"
 
         self._prompt_task = asyncio.create_task(self._run_prompt(review_prompt, output))
 
@@ -860,17 +1113,11 @@ Keep your review brief and actionable."""
 
     @on(messages.ToolCall)
     async def on_tool_call(self, message: messages.ToolCall) -> None:
-        tool_id = message.tool_call.tool_call_id
-        title = message.tool_call.title
-        kind = message.tool_call.kind or ""
-        await self._get_stream_output().post_tool_call(tool_id, title, kind)
+        await self._get_stream_output().upsert_tool_call(message.tool_call)
 
     @on(messages.ToolCallUpdate)
     async def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
-        tool_id = message.update.tool_call_id
-        status = message.update.status or ""
-        if status:
-            self._get_stream_output().update_tool_status(tool_id, status)
+        await self._get_stream_output().apply_tool_call_update(message.update, message.tool_call)
 
     @on(messages.AgentReady)
     async def on_agent_ready(self, _: messages.AgentReady) -> None:
@@ -883,22 +1130,63 @@ Keep your review brief and actionable."""
     @on(messages.AgentComplete)
     async def on_agent_complete(self, _: messages.AgentComplete) -> None:
         """Handle agent completion."""
+        if self._agent is not None:
+            self._agent = None
         if self._live_output_attached and self._agent is None:
             self._live_output_attached = False
         if self._live_review_attached and self._agent is None:
             self._live_review_attached = False
+        self._sync_decision_from_output()
         self._set_phase(StreamPhase.COMPLETE)
+        await asyncio.gather(
+            self._refresh_review_queue_state(),
+            self._refresh_implementation_queue_state(),
+        )
+        await self._refresh_runtime_state()
+        if not self._read_only and self._review_queue_pending:
+            await self._start_review_follow_up_if_needed()
 
     @on(messages.AgentFail)
     async def on_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""
         output = self._get_stream_output()
+        exit_code = parse_agent_exit_code(message.message)
+        if exit_code == -15:
+            await output.post_note(
+                "Agent stream ended by cancellation (SIGTERM).",
+                classes="dismissed",
+            )
+            self._sync_decision_from_output()
+            if extract_review_decision(output.get_text_content()):
+                self._set_phase(StreamPhase.COMPLETE)
+            else:
+                self._set_phase(StreamPhase.IDLE)
+            if self._agent is not None:
+                self._agent = None
+            if self._live_output_attached and self._agent is None:
+                self._live_output_attached = False
+            if self._live_review_attached and self._agent is None:
+                self._live_review_attached = False
+            await asyncio.gather(
+                self._refresh_review_queue_state(),
+                self._refresh_implementation_queue_state(),
+            )
+            await self._refresh_runtime_state()
+            return
+
         await output.post_note(f"Error: {message.message}", classes="error")
+        if self._agent is not None:
+            self._agent = None
         if self._live_output_attached and self._agent is None:
             self._live_output_attached = False
         if self._live_review_attached and self._agent is None:
             self._live_review_attached = False
         self._set_phase(StreamPhase.IDLE)
+        await asyncio.gather(
+            self._refresh_review_queue_state(),
+            self._refresh_implementation_queue_state(),
+        )
+        await self._refresh_runtime_state()
 
     async def action_rebase(self) -> None:
         """Rebase the task branch onto the base branch."""
@@ -925,6 +1213,12 @@ Keep your review brief and actionable."""
         """Approve the review."""
         if self._read_only:
             self.notify("Read-only history view", severity="warning")
+            return
+        if self._phase in (StreamPhase.THINKING, StreamPhase.STREAMING):
+            self.notify("Wait for review to complete before approval", severity="warning")
+            return
+        if self._review_queue_pending:
+            self.notify("Process queued review messages before approval", severity="warning")
             return
         if self._no_changes:
             self.dismiss("exploratory")
@@ -960,6 +1254,9 @@ Keep your review brief and actionable."""
 
     async def on_unmount(self) -> None:
         """Cleanup agent and animation on close."""
+        app = cast("KaganApp", self.app)
+        with contextlib.suppress(Exception):
+            app.task_changed_signal.unsubscribe(self)
         self._stop_animation()
         if self._prompt_task and not self._prompt_task.done():
             self._prompt_task.cancel()
@@ -969,3 +1266,12 @@ Keep your review brief and actionable."""
             self._live_output_agent.set_message_target(None)
         if self._live_review_agent:
             self._live_review_agent.set_message_target(None)
+
+
+def _truncate_queue_payload(content: str, max_chars: int = 8000) -> str:
+    """Keep newest queued context when follow-ups exceed prompt budget."""
+    if len(content) <= max_chars:
+        return content
+    head = "[queued context truncated]\n"
+    tail = content[-(max_chars - len(head)) :]
+    return f"{head}{tail}"

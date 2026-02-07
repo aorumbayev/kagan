@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from textual import events, getters, on
 from textual.binding import Binding, BindingType
@@ -37,6 +37,7 @@ from kagan.ui.screens.planner.state import (
 )
 from kagan.ui.screens.task_editor import TaskEditorScreen
 from kagan.ui.widgets import StatusBar, StreamingOutput
+from kagan.ui.widgets.chat_panel import QueuedMessageRow, QueuedMessagesContainer
 from kagan.ui.widgets.header import KaganHeader
 from kagan.ui.widgets.offline_banner import OfflineBanner
 from kagan.ui.widgets.plan_approval import PlanApprovalWidget
@@ -46,7 +47,9 @@ if TYPE_CHECKING:
     from acp.schema import AvailableCommand
     from textual.app import ComposeResult
 
+    from kagan.app import KaganApp
     from kagan.core.models.entities import Task
+    from kagan.services.queued_messages import QueuedMessageService
 
 MIN_INPUT_HEIGHT = 1
 MAX_INPUT_HEIGHT = 6
@@ -167,6 +170,7 @@ class PlannerScreen(KaganScreen):
             SlashCommand("clear", "Clear conversation and start fresh"),
             SlashCommand("help", "Show available commands"),
         ]
+        self._planner_queue_pending = False
 
     def compose(self) -> ComposeResult:
         yield KaganHeader()
@@ -176,6 +180,10 @@ class PlannerScreen(KaganScreen):
             yield StreamingOutput(id="planner-output")
             with Vertical(id="planner-bottom"):
                 yield StatusBar()
+                yield QueuedMessagesContainer(
+                    id="planner-queued-messages",
+                    classes="queued-messages-container planner-queued-messages",
+                )
                 yield PlannerInput(
                     "",
                     id="planner-input",
@@ -186,6 +194,8 @@ class PlannerScreen(KaganScreen):
 
     async def on_mount(self) -> None:
         await self.sync_header_context(self.header)
+        with suppress(NoMatches):
+            self.query_one("#planner-queued-messages", QueuedMessagesContainer).display = False
         from kagan.ui.widgets.header import _get_git_branch
 
         if self.ctx.active_repo_id is None:
@@ -220,6 +230,7 @@ class PlannerScreen(KaganScreen):
             await self._start_planner()
 
         self._focus_input()
+        await self._refresh_planner_queue_messages()
 
     @on(OfflineBanner.Reconnect)
     async def on_offline_banner_reconnect(self, event: OfflineBanner.Reconnect) -> None:
@@ -336,6 +347,12 @@ class PlannerScreen(KaganScreen):
 
     @on(PlannerInput.SubmitRequested)
     async def on_submit_requested(self, event: PlannerInput.SubmitRequested) -> None:
+        if self._state.phase == PlannerPhase.PROCESSING:
+            queued_text = event.text.strip()
+            if queued_text:
+                await self._queue_planner_message(queued_text)
+                self.query_one("#planner-input", PlannerInput).clear()
+            return
         if self._state.has_pending_plan:
             self.notify("Please approve or dismiss the pending plan first", severity="warning")
             return
@@ -343,9 +360,9 @@ class PlannerScreen(KaganScreen):
             return
         await self._submit_prompt()
 
-    async def _submit_prompt(self) -> None:
+    async def _submit_prompt(self, prompt_text: str | None = None) -> None:
         planner_input = self.query_one("#planner-input", PlannerInput)
-        text = planner_input.text.strip()
+        text = (prompt_text if prompt_text is not None else planner_input.text).strip()
         if not text:
             return
 
@@ -353,9 +370,13 @@ class PlannerScreen(KaganScreen):
         self._state.todos_displayed = False
         self._state.thinking_shown = False
 
-        self._disable_input()
-        planner_input.clear()
         self._update_status("thinking", "Processing...")
+        if prompt_text is None:
+            planner_input.clear()
+        else:
+            await self._get_output().post_note(
+                "Processing queued planner follow-up...", classes="info"
+            )
 
         self._show_output()
         output = self._get_output()
@@ -427,6 +448,66 @@ class PlannerScreen(KaganScreen):
                 self._enable_input()
 
         self._update_status("ready", "Press ? for help")
+        await self._consume_planner_queue_if_needed()
+
+    def _planner_queue_key(self) -> str:
+        repo_id = self.ctx.active_repo_id or "global"
+        return f"planner:{repo_id}"
+
+    def _get_queue_service(self) -> QueuedMessageService | None:
+        app = cast("KaganApp", self.app)
+        service = getattr(app.ctx, "queued_message_service", None)
+        if service is None:
+            return None
+        return cast("QueuedMessageService", service)
+
+    async def _refresh_planner_queue_messages(self) -> None:
+        with suppress(NoMatches):
+            container = self.query_one("#planner-queued-messages", QueuedMessagesContainer)
+            service = self._get_queue_service()
+            if service is None:
+                container.display = False
+                self._planner_queue_pending = False
+                return
+            messages = await service.get_queued(self._planner_queue_key(), lane="planner")
+            container.update_messages(messages)
+            self._planner_queue_pending = bool(messages)
+
+    async def _queue_planner_message(self, content: str) -> None:
+        service = self._get_queue_service()
+        if service is None:
+            self.notify("Planner queue unavailable", severity="error")
+            return
+        await service.queue_message(self._planner_queue_key(), content, lane="planner")
+        await self._refresh_planner_queue_messages()
+        await self._get_output().post_note("Queued message for next planner turn.", classes="info")
+        self._update_status("queued", "Planner follow-up queued")
+
+    async def _consume_planner_queue_if_needed(self) -> None:
+        if self._state.phase != PlannerPhase.IDLE:
+            return
+        if self._state.has_pending_plan:
+            return
+        service = self._get_queue_service()
+        if service is None:
+            return
+        queued = await service.take_queued(self._planner_queue_key(), lane="planner")
+        await self._refresh_planner_queue_messages()
+        if queued is None:
+            return
+        await self._submit_prompt(prompt_text=_truncate_queue_payload(queued.content))
+
+    @on(QueuedMessageRow.RemoveRequested)
+    async def on_queue_remove_requested(self, event: QueuedMessageRow.RemoveRequested) -> None:
+        service = self._get_queue_service()
+        if service is None:
+            return
+        await service.remove_message(
+            self._planner_queue_key(),
+            event.index,
+            lane="planner",
+        )
+        await self._refresh_planner_queue_messages()
 
     @on(messages.AgentUpdate)
     async def on_agent_update(self, message: messages.AgentUpdate) -> None:
@@ -442,7 +523,7 @@ class PlannerScreen(KaganScreen):
 
     @on(messages.ToolCallUpdate)
     async def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
-        self._message_handler.handle_tool_call_update(message)
+        await self._message_handler.handle_tool_call_update(message)
 
     @on(messages.AgentReady)
     async def on_agent_ready(self, message: messages.AgentReady) -> None:
@@ -820,3 +901,11 @@ class PlannerScreen(KaganScreen):
             is_running=self._state.agent is not None,
             agent_ready=self._state.agent_ready,
         )
+
+
+def _truncate_queue_payload(content: str, max_chars: int = 6000) -> str:
+    """Bound queued planner context so follow-up prompts stay lightweight."""
+    if len(content) <= max_chars:
+        return content
+    prefix = "[queued planner context truncated]\n"
+    return f"{prefix}{content[-(max_chars - len(prefix)) :]}"

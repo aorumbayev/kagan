@@ -49,7 +49,8 @@ curl -fsSL https://uvget.me/install.sh | bash -s -- kagan
 
 - Python 3.12 or higher
 - Git repository (for worktrees)
-- tmux (for PAIR mode collaboration)
+- tmux (recommended on macOS/Linux for native PAIR terminal sessions)
+- VS Code or Cursor (supported PAIR launchers, especially on Windows)
 - Terminal (minimum 80x20 characters)
 
 ## Usage

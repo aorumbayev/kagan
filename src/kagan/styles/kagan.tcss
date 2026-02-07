@@ -1026,12 +1026,13 @@ TmuxGatewayModal {
     align: center middle;
 }
 
-#tmux-gateway-container {
+#pair-instructions-container {
     width: 70;
     height: auto;
+    max-height: 32;
     border: round $primary;
     background: $surface;
-    padding: 2 3;
+    padding: 1 2;
 }
 
 TmuxGatewayModal .modal-title {
@@ -1733,37 +1734,49 @@ ReviewModal TabPane {
 #ai-review-section {
     height: 1fr;
     min-height: 10;
+    padding-top: 1;
 }
 
 #ai-review-header {
     width: 100%;
     height: auto;
     align: left middle;
+    margin-bottom: 1;
 }
 
 #ai-review-header .spacer {
     width: 1fr;
 }
 
-#ai-review-header Button {
-    margin-left: 1;
-}
-
-#ai-review-controls {
-    width: 100%;
-    height: auto;
-    align: left middle;
-    padding: 0 0 1 0;
-}
-
-#ai-review-controls Button {
-    margin-right: 1;
-}
-
 .phase-badge {
     width: auto;
     padding: 0 1;
     text-style: bold;
+    border: round $border;
+    background: $panel;
+    margin-left: 1;
+}
+
+.decision-badge {
+    width: auto;
+    padding: 0 1;
+    text-style: bold;
+    border: round $border;
+    background: $panel;
+}
+
+.decision-pending {
+    color: $text-muted;
+}
+
+.decision-approved {
+    color: $success;
+    border: round $success;
+}
+
+.decision-rejected {
+    color: $error;
+    border: round $error;
 }
 
 .phase-idle {
@@ -1800,11 +1813,6 @@ ReviewModal TabPane {
     border: round $border;
 }
 
-/* Hide input area in review modal - follow-up not primary use case */
-#ai-review-chat .chat-input {
-    display: none;
-}
-
 ReviewModal .hint-label {
     text-align: center;
     color: $text-muted;
@@ -1815,13 +1823,35 @@ ReviewModal .button-row {
     dock: bottom;
     align: center middle;
     border-top: solid $border;
-    padding: 1 0 0 0;
+    padding: 1 0;
     height: auto;
     width: 100%;
+    background: $surface;
 }
 
-ReviewModal .button-row Button {
-    margin: 0 1;
+ReviewModal .button-row .button-group {
+    height: auto;
+    align: center middle;
+}
+
+ReviewModal .button-row .spacer {
+    width: 1fr;
+}
+
+ReviewModal .button-row .button-group-start Button {
+    margin-right: 1;
+}
+
+ReviewModal .button-row .button-group-end Button {
+    margin-left: 1;
+}
+
+#ai-review-chat.queue-disabled .chat-input {
+    display: none;
+}
+
+#review-agent-output-chat.queue-disabled .chat-input {
+    display: none;
 }
 
 /* =============================================================================
@@ -2352,6 +2382,26 @@ TextContent {
     height: auto;
     padding: 0 2;
     color: $text-muted;
+}
+
+MarkdownContent {
+    width: 100%;
+    height: auto;
+    padding: 0 2;
+    margin: 0;
+}
+
+.tool-content-label {
+    width: 100%;
+    height: auto;
+    padding: 0 2;
+    margin-top: 1;
+    color: $text-muted;
+    text-style: bold;
+}
+
+.tool-diff {
+    color: $text;
 }
 
 /* Streaming notes with status classes */

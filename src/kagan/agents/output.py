@@ -9,6 +9,19 @@ if TYPE_CHECKING:
     from kagan.acp.agent import Agent
 
 
+def _json_safe(value: Any) -> Any:
+    """Convert ACP/Pydantic payloads into JSON-serializable primitives."""
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return _json_safe(value.model_dump(by_alias=True, exclude_none=True))
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def serialize_agent_output(agent: Agent, *, include_thinking: bool = False) -> str:
     """Serialize agent output into a compact JSON payload.
 
@@ -34,6 +47,10 @@ def serialize_agent_output(agent: Agent, *, include_thinking: bool = False) -> s
                     "id": message.tool_call.tool_call_id,
                     "title": message.tool_call.title,
                     "kind": message.tool_call.kind or "",
+                    "status": message.tool_call.status or "",
+                    "content": _json_safe(message.tool_call.content) or [],
+                    "raw_input": _json_safe(message.tool_call.raw_input),
+                    "raw_output": _json_safe(message.tool_call.raw_output),
                 }
             )
         elif isinstance(message, msg_types.ToolCallUpdate):
@@ -42,6 +59,11 @@ def serialize_agent_output(agent: Agent, *, include_thinking: bool = False) -> s
                     "type": "tool_call_update",
                     "id": message.update.tool_call_id,
                     "status": message.update.status or "",
+                    "title": message.tool_call.title,
+                    "kind": message.tool_call.kind or "",
+                    "content": _json_safe(message.tool_call.content) or [],
+                    "raw_input": _json_safe(message.tool_call.raw_input),
+                    "raw_output": _json_safe(message.tool_call.raw_output),
                 }
             )
         elif isinstance(message, msg_types.Plan):

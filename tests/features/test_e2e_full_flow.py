@@ -58,6 +58,9 @@ async def _commit_hello_world(agent: SmartMockAgent) -> None:
 async def _wait_for_agent_logs(app: KaganApp, task_id: str, timeout: float = 20.0) -> None:
     import asyncio
 
+    from tests.helpers.wait import _ci_timeout
+
+    timeout = _ci_timeout(timeout)
     elapsed = 0.0
     while elapsed < timeout:
         execution = await app.ctx.execution_service.get_latest_execution_for_task(task_id)
@@ -155,14 +158,6 @@ async def test_full_e2e_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         for _ in range(10):
             await pilot.pause()
 
-        # Debug: check current state
-        print(f"DEBUG: current screen = {type(pilot.app.screen).__name__}")
-        print(f"DEBUG: screen_stack = {[type(s).__name__ for s in pilot.app.screen_stack]}")
-        tasks_before = await app.ctx.task_service.list_tasks()
-        print(f"DEBUG: tasks created = {len(tasks_before)}")
-        for t in tasks_before:
-            print(f"DEBUG:   task: {t.title} ({t.task_type})")
-
         await wait_for_screen(pilot, KanbanScreen, timeout=20.0)
         tasks = await app.ctx.task_service.list_tasks()
         auto_task = next(task for task in tasks if task.task_type == TaskType.AUTO)
@@ -170,11 +165,9 @@ async def test_full_e2e_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         card = pilot.app.screen.query_one(f"#card-{auto_task.id}", TaskCard)
         card.focus()
         await pilot.pause()
-        await pilot.app.screen._start_agent_flow(auto_task)  # type: ignore[attr-defined]
+        await pilot.press("a")
 
-        await wait_for_task_status(app, auto_task.id, TaskStatus.IN_PROGRESS, timeout=30.0)
         await _wait_for_agent_logs(app, auto_task.id, timeout=20.0)
-
         await wait_for_task_status(app, auto_task.id, TaskStatus.REVIEW, timeout=30.0)
 
         final_task = await app.ctx.task_service.get_task(auto_task.id)

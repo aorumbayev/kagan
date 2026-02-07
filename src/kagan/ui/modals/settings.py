@@ -100,6 +100,18 @@ class SettingsModal(ModalScreen[bool]):
                     id="default-agent-select",
                     allow_blank=False,
                 )
+            with Vertical(classes="input-group"):
+                yield Label("Default PAIR Terminal", classes="input-label")
+                yield Select[str](
+                    options=[
+                        ("tmux", "tmux"),
+                        ("VS Code", "vscode"),
+                        ("Cursor", "cursor"),
+                    ],
+                    value=self._config.general.default_pair_terminal_backend,
+                    id="default-pair-terminal-select",
+                    allow_blank=False,
+                )
 
             yield Rule()
 
@@ -124,10 +136,10 @@ class SettingsModal(ModalScreen[bool]):
             yield Label("UI Preferences", classes="section-title")
             with Horizontal(classes="setting-row"):
                 yield Switch(
-                    value=self._config.ui.skip_tmux_gateway,
-                    id="skip-tmux-gateway-switch",
+                    value=self._config.ui.skip_pair_instructions,
+                    id="skip-pair-instructions-switch",
                 )
-                yield Label("Skip tmux info on session start", classes="setting-label")
+                yield Label("Skip PAIR instructions popup", classes="setting-label")
 
             yield Rule()
 
@@ -150,11 +162,17 @@ class SettingsModal(ModalScreen[bool]):
         auto_approve = self.query_one("#auto-approve-switch", Switch).value
         require_review_approval = self.query_one("#require-review-approval-switch", Switch).value
         serialize_merges = self.query_one("#serialize-merges-switch", Switch).value
-        skip_tmux_gateway = self.query_one("#skip-tmux-gateway-switch", Switch).value
+        skip_pair_instructions = self.query_one("#skip-pair-instructions-switch", Switch).value
         base_branch = self.query_one("#base-branch-input", Input).value
         max_agents_str = self.query_one("#max-agents-input", Input).value
         default_agent_select = self.query_one("#default-agent-select", Select)
         default_agent = str(default_agent_select.value) if default_agent_select.value else "claude"
+        pair_terminal_select = self.query_one("#default-pair-terminal-select", Select)
+        pair_terminal_backend = (
+            str(pair_terminal_select.value)
+            if pair_terminal_select.value in {"tmux", "vscode", "cursor"}
+            else "tmux"
+        )
         default_model_claude = self.query_one("#default-model-claude-input", Input).value
         default_model_claude = default_model_claude.strip() or None
         default_model_opencode = self.query_one("#default-model-opencode-input", Input).value
@@ -173,9 +191,10 @@ class SettingsModal(ModalScreen[bool]):
         self._config.general.default_base_branch = base_branch
         self._config.general.max_concurrent_agents = max_agents
         self._config.general.default_worker_agent = default_agent
+        self._config.general.default_pair_terminal_backend = pair_terminal_backend  # type: ignore[assignment]
         self._config.general.default_model_claude = default_model_claude
         self._config.general.default_model_opencode = default_model_opencode
-        self._config.ui.skip_tmux_gateway = skip_tmux_gateway
+        self._config.ui.skip_pair_instructions = skip_pair_instructions
 
         self.run_worker(self._write_config(), exclusive=True, exit_on_error=False)
         self.dismiss(True)
@@ -223,6 +242,7 @@ active = true'''
             f"serialize_merges = {str(general.serialize_merges).lower()}",
             f'default_base_branch = "{general.default_base_branch}"',
             f'default_worker_agent = "{general.default_worker_agent}"',
+            f'default_pair_terminal_backend = "{general.default_pair_terminal_backend}"',
             f"max_concurrent_agents = {general.max_concurrent_agents}",
         ]
         if model_claude_line:
@@ -238,7 +258,7 @@ active = true'''
 {general_section}
 
 [ui]
-skip_tmux_gateway = {str(ui.skip_tmux_gateway).lower()}
+skip_pair_instructions = {str(ui.skip_pair_instructions).lower()}
 
 {chr(10).join(agent_sections)}
 """

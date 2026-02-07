@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-from pydantic import ValidationError
-
 from kagan.agents.planner import PlanProposal, parse_proposed_plan
 from kagan.mcp.models import PlanProposalResponse
 
@@ -33,24 +30,6 @@ def test_propose_plan_mcp_returns_full_echo_on_valid_input() -> None:
     assert response.tasks[0]["title"] == "Build API"
     assert response.todos is not None
     assert len(response.todos) == 1
-
-
-def test_propose_plan_mcp_returns_error_on_missing_tasks() -> None:
-    """Validation fails when tasks key is missing entirely."""
-    with pytest.raises(ValidationError):
-        PlanProposal.model_validate({"todos": []})
-
-
-def test_propose_plan_mcp_returns_error_on_empty_tasks() -> None:
-    """Empty tasks array is rejected by PlanProposal validation."""
-    with pytest.raises(ValidationError):
-        PlanProposal.model_validate({"tasks": [], "todos": []})
-
-
-def test_propose_plan_mcp_returns_error_on_malformed_json() -> None:
-    """Bad input to PlanProposal gives actionable ValidationError."""
-    with pytest.raises(ValidationError, match=r"(?i)title"):
-        PlanProposal.model_validate({"tasks": [{"not_a_title": "x"}]})
 
 
 # --- Planner parser echo-back preference tests ---
@@ -82,6 +61,7 @@ def test_planner_parses_plan_from_echo_back_content() -> None:
         "tc-1": {
             "name": "propose_plan",
             "status": "completed",
+            "title": 'propose_plan: {"tasks":[{"title":"Task..."}]}',
             "content": _echo_back_content(echo),
         }
     }

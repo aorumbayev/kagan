@@ -22,30 +22,32 @@ require_review_approval = false
 serialize_merges = false
 default_base_branch = "main"
 default_worker_agent = "claude"
+default_pair_terminal_backend = "tmux"
 max_concurrent_agents = 1
 mcp_server_name = "kagan"
 # default_model_claude = "claude-3-5-sonnet"  # Optional
 # default_model_opencode = "opencode-default"  # Optional
 ```
 
-| Setting                   | Default    | Purpose                                                                  |
-| ------------------------- | ---------- | ------------------------------------------------------------------------ |
-| `auto_review`             | `true`     | Run AI review on task completion                                         |
-| `auto_approve`            | `false`    | Skip permission prompts in the planner agent (workers always auto-approve) |
-| `require_review_approval` | `false`    | Require approved review before merge actions                             |
-| `serialize_merges`        | `false`    | Serialize manual merges to reduce conflicts                              |
-| `default_base_branch`     | `"main"`   | Base branch for worktrees and merges                                     |
-| `default_worker_agent`    | `"claude"` | Default agent for new tickets                                            |
-| `max_concurrent_agents`   | `1`        | Maximum parallel AUTO agents                                             |
-| `mcp_server_name`         | `"kagan"`  | MCP server name used in tool registration/config                         |
-| `default_model_claude`    | `None`     | Default Claude model alias or full name (optional)                       |
-| `default_model_opencode`  | `None`     | Default OpenCode model (optional)                                        |
+| Setting                         | Default     | Purpose                                                                    |
+| ------------------------------- | ----------- | -------------------------------------------------------------------------- |
+| `auto_review`                   | `true`      | Run AI review on task completion                                           |
+| `auto_approve`                  | `false`     | Skip permission prompts in the planner agent (workers always auto-approve) |
+| `require_review_approval`       | `false`     | Require approved review before merge actions                               |
+| `serialize_merges`              | `false`     | Serialize manual merges to reduce conflicts                                |
+| `default_base_branch`           | `"main"`    | Base branch for worktrees and merges                                       |
+| `default_worker_agent`          | `"claude"`  | Default agent for new tickets                                              |
+| `default_pair_terminal_backend` | `"tmux"`    | Default terminal backend for PAIR tasks (`tmux`, `vscode`, or `cursor`)    |
+| `max_concurrent_agents`         | `1`         | Maximum parallel AUTO agents                                               |
+| `mcp_server_name`               | `"kagan"`   | MCP server name used in tool registration/config                           |
+| `default_model_claude`          | `None`      | Default Claude model alias or full name (optional)                         |
+| `default_model_opencode`        | `None`      | Default OpenCode model (optional)                                          |
 
 !!! note "Permission model"
-    **Worker agents** (AUTO tasks) always auto-approve tool calls because they run in
-    isolated git worktrees with path-confined file access. The `auto_approve` setting
-    only controls the **planner agent**, which is interactive and operates on the main
-    repository. **Reviewer** and **refiner** agents also always auto-approve.
+**Worker agents** (AUTO tasks) always auto-approve tool calls because they run in
+isolated git worktrees with path-confined file access. The `auto_approve` setting
+only controls the **planner agent**, which is interactive and operates on the main
+repository. **Reviewer** and **refiner** agents also always auto-approve.
 
 ## Agent Configuration
 
@@ -106,12 +108,12 @@ active = true
 
 ```toml
 [ui]
-skip_tmux_gateway = false
+skip_pair_instructions = false
 ```
 
-| Setting             | Default | Purpose                                             |
-| ------------------- | ------- | --------------------------------------------------- |
-| `skip_tmux_gateway` | `false` | Skip the tmux info modal when opening PAIR sessions |
+| Setting                  | Default | Purpose                                                 |
+| ------------------------ | ------- | ------------------------------------------------------- |
+| `skip_pair_instructions` | `false` | Skip the PAIR instructions popup before session launch. |
 
 ## Refinement Settings
 
@@ -162,6 +164,8 @@ For MCP server integration, agents look for:
 | ----------- | --------------- |
 | Claude Code | `.mcp.json`     |
 | OpenCode    | `opencode.json` |
+| VS Code     | `.vscode/mcp.json` |
+| Cursor      | `.cursor/mcp.json` |
 
 The MCP server entry name defaults to `kagan` and can be changed via
 `general.mcp_server_name` or `KAGAN_MCP_SERVER_NAME`.

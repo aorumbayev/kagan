@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from kagan.services.workspaces import WorkspaceService
 
 
-class ScriptType(str, Enum):
+class ScriptType(StrEnum):
     """Types of repo scripts."""
 
     SETUP = "setup"

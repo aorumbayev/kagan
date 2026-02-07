@@ -1,17 +1,17 @@
 # Keyboard Shortcuts
 
-This page mirrors the in-app help (press ++?++).
+This page mirrors the in-app help (press ++question++).
 
 ## Global
 
-| Key                | Action           |
-| ------------------ | ---------------- |
-| ++?++ / ++f1++     | Help             |
-| ++.++ / ++ctrl+p++ | Actions palette  |
-| ++ctrl+o++         | Project selector |
-| ++ctrl+r++         | Repo selector    |
-| ++f12++            | Debug log        |
-| ++q++              | Quit             |
+| Key                     | Action           |
+| ----------------------- | ---------------- |
+| ++question++ / ++f1++   | Help             |
+| ++period++ / ++ctrl+p++ | Actions palette  |
+| ++ctrl+o++              | Project selector |
+| ++ctrl+r++              | Repo selector    |
+| ++f12++                 | Debug log        |
+| ++q++                   | Quit             |
 
 ## Board (Kanban)
 
@@ -34,7 +34,7 @@ This page mirrors the in-app help (press ++?++).
 | ++n++       | New task                               |
 | ++shift+n++ | New AUTO task                          |
 | ++enter++   | Open session (PAIR) or review (REVIEW) |
-| ++/++       | Search tasks                           |
+| ++slash++   | Search tasks                           |
 | ++v++       | View details                           |
 | ++e++       | Edit task                              |
 | ++x++       | Delete task                            |
@@ -58,7 +58,7 @@ This page mirrors the in-app help (press ++?++).
 | ++p++       | Plan mode             |
 | ++b++       | Set task branch       |
 | ++shift+b++ | Set default branch    |
-| ++,++       | Settings              |
+| ++comma++   | Settings              |
 | ++ctrl+c++  | Quit                  |
 
 ## Planner
@@ -79,8 +79,8 @@ This page mirrors the in-app help (press ++?++).
 | ---------------------------- | ------------------ |
 | ++enter++                    | Send message       |
 | ++shift+enter++ / ++ctrl+j++ | New line           |
-| ++/help++                    | Show commands      |
-| ++/clear++                   | Clear conversation |
+| `/help`                      | Show commands      |
+| `/clear`                     | Clear conversation |
 
 ### Slash Complete
 

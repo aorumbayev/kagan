@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import platform
 import subprocess
 
 import pytest
 
 from kagan.git_utils import init_git_repo
 
+_IS_WINDOWS = platform.system() == "Windows"
+
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(_IS_WINDOWS, reason="core.excludesfile test relies on Unix path conventions")
 async def test_init_git_repo_forces_stage_when_gitignore_is_globally_ignored(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

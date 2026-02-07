@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+import sys
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -11,8 +13,24 @@ from sqlmodel import SQLModel
 from kagan.paths import ensure_directories, get_database_path
 
 
+def _check_greenlet() -> None:
+    """Verify greenlet is functional (required by SQLAlchemy async)."""
+    try:
+        import greenlet  # noqa: F401
+    except (ImportError, OSError) as exc:
+        py = f"Python {sys.version_info.major}.{sys.version_info.minor}"
+        os_name = platform.system()
+        raise RuntimeError(
+            f"greenlet failed to load on {os_name} ({py}). "
+            f"SQLAlchemy async requires a working greenlet installation.\n"
+            f"Try: pip install --force-reinstall greenlet\n"
+            f"Original error: {exc}"
+        ) from exc
+
+
 async def create_db_engine(db_path: str | Path | None = None) -> AsyncEngine:
     """Create async SQLite engine with WAL mode."""
+    _check_greenlet()
     ensure_directories()
     resolved = Path(db_path) if db_path else get_database_path()
     db_path_str = str(resolved)

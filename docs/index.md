@@ -14,7 +14,7 @@ kagan
 ```
 
 !!! tip "Help is always one key away"
-Press ++?++ or ++f1++ on any screen.
+Press ++question++ or ++f1++ on any screen.
 
 ## Guided Tour (Follow Along)
 
@@ -39,7 +39,7 @@ The Kanban board is keyboard-first.
 
 Use ++h++/++j++/++k++/++l++ or arrow keys to move focus. Use ++tab++ / ++shift+tab++ to jump columns. Press ++esc++ to clear focus, close search, or close the peek overlay.
 
-Press ++/++ to search tasks. Press ++space++ to toggle the peek overlay for the selected task.
+Press ++slash++ to search tasks. Press ++space++ to toggle the peek overlay for the selected task.
 
 Double-click any card to open Task Details.
 
@@ -53,7 +53,7 @@ Use ++y++ to duplicate a task, ++c++ to copy its ID, and ++x++ to delete.
 
 ### Step 5: Use The Actions Palette
 
-Press ++.++ or ++ctrl+p++ to open the Actions palette. Type to filter commands, press ++enter++ to run one.
+Press ++period++ or ++ctrl+p++ to open the Actions palette. Type to filter commands, press ++enter++ to run one.
 
 This is the fastest way to discover context-specific actions.
 
@@ -65,9 +65,9 @@ Select an AUTO task and press ++enter++ to start (with confirmation) and open ou
 
 ### Step 7: Run PAIR Tasks
 
-PAIR tasks open a shared tmux session.
+PAIR tasks open an interactive session using tmux (default on macOS/Linux) or VS Code/Cursor.
 
-Select a PAIR task and press ++enter++ to open the session. If the tmux gateway appears, press ++enter++ to continue, ++esc++ to cancel, or ++s++ to skip this prompt next time.
+Select a PAIR task and press ++enter++ to open the session. If the PAIR instructions popup appears, press ++enter++ to continue, ++esc++ to cancel, or ++s++ to skip this prompt next time.
 
 If a permission prompt appears, use ++enter++ to allow once, ++a++ to allow always, or ++esc++/++n++ to deny.
 
@@ -75,7 +75,7 @@ If a permission prompt appears, use ++enter++ to allow once, ++a++ to allow alwa
 
 Press ++p++ to enter Plan Mode. Describe what you want to build in natural language and press ++enter++ to send. Use ++shift+enter++ or ++ctrl+j++ for a newline.
 
-Use ++/help++ for planner commands and ++/clear++ to reset the conversation. Press ++f2++ to enhance your prompt, ++ctrl+c++ to stop a run, and ++esc++ to return to the board.
+Use `/help` for planner commands and `/clear` to reset the conversation. Press ++f2++ to enhance your prompt, ++ctrl+c++ to stop a run, and ++esc++ to return to the board.
 
 When a plan is generated, the approval panel appears. Use ++up++/++down++ or ++j++/++k++ to select, ++enter++ to preview, ++a++ to approve, ++e++ to edit, and ++d++ or ++esc++ to dismiss.
 
@@ -89,13 +89,13 @@ Press ++m++ on the board to merge approved work. If there are no changes, the re
 
 ### Step 10: Settings, Debug, And Selectors
 
-Press ++,++ for Settings and ++f12++ for the Debug Log. Use ++ctrl+o++ to return to the project selector and ++ctrl+r++ for the repo selector.
+Press ++comma++ for Settings and ++f12++ for the Debug Log. Use ++ctrl+o++ to return to the project selector and ++ctrl+r++ for the repo selector.
 
 ## Visual Indicators
 
 Card borders and badges help you read the board quickly.
 
-Green border means a tmux session is active. A pulsing border means an agent is actively running. A human icon indicates PAIR, and a lightning icon indicates AUTO.
+Green border means a PAIR session is active. A pulsing border means an agent is actively running. A human icon indicates PAIR, and a lightning icon indicates AUTO.
 
 ## Multi-Repo Features
 
@@ -105,7 +105,7 @@ Task Details show a Workspace Repos section for multi-repo workspaces. Use the D
 
 ## Keyboard Reference
 
-Press ++?++ in the app or see the full [Keyboard Shortcuts](keybindings.md) page.
+Press ++question++ in the app or see the full [Keyboard Shortcuts](keybindings.md) page.
 
 ## MCP Integration
 
@@ -134,7 +134,7 @@ User -> Kagan UI -> ACP agent process
                 Agent response stream -> Kagan UI (planner/cards/logs)
 
 PAIR (Interactive CLI + MCP)
-User -> Kagan UI -> tmux session
+User -> Kagan UI -> terminal/IDE session (tmux/VS Code/Cursor)
                    -> Agent CLI uses MCP over stdio
                    -> `kagan mcp` (full tools)
                    -> Kagan DB -> Kagan UI
@@ -162,15 +162,15 @@ kagan tools enhance -f requirements.md -t claude           # Target with file in
 
 Configuration lives in the XDG config `config.toml`. Key settings:
 
-| Setting                   | Purpose                                                                    |
-| ------------------------- | -------------------------------------------------------------------------- |
-| `auto_review`             | Run AI review on task completion                                           |
-| `auto_approve`            | Skip permission prompts in the planner (workers always auto-approve)       |
-| `require_review_approval` | Require review approval before merge                                       |
-| `serialize_merges`        | Serialize manual merges to reduce conflicts                                |
-| `default_worker_agent`    | Default agent (e.g., "claude")                                             |
-| `max_concurrent_agents`   | Parallel agent limit                                                       |
-| `default_base_branch`     | Fallback base branch for new repos                                         |
+| Setting                   | Purpose                                                              |
+| ------------------------- | -------------------------------------------------------------------- |
+| `auto_review`             | Run AI review on task completion                                     |
+| `auto_approve`            | Skip permission prompts in the planner (workers always auto-approve) |
+| `require_review_approval` | Require review approval before merge                                 |
+| `serialize_merges`        | Serialize manual merges to reduce conflicts                          |
+| `default_worker_agent`    | Default agent (e.g., "claude")                                       |
+| `max_concurrent_agents`   | Parallel agent limit                                                 |
+| `default_base_branch`     | Fallback base branch for new repos                                   |
 
 Base branches are stored per repository. On first open, you will be prompted to select one, and
 merges/rebases target that branch.

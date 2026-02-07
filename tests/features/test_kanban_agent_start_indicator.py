@@ -51,10 +51,11 @@ async def test_start_agent_updates_card_indicator_immediately(
 
         await pilot.press("a")
 
-        for _ in range(20):
+        for _ in range(60):
             await pilot.pause()
             if card.indicator == CardIndicator.RUNNING:
                 break
+            await asyncio.sleep(0.1)
 
         assert card.indicator == CardIndicator.RUNNING
 

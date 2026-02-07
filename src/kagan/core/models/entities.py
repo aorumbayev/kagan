@@ -12,6 +12,7 @@ from kagan.core.models.enums import (
     ExecutionStatus,
     MergeStatus,
     MergeType,
+    PairTerminalBackend,
     ScratchType,
     SessionStatus,
     SessionType,
@@ -66,6 +67,7 @@ class Task(DomainModel):
     status: TaskStatus = TaskStatus.BACKLOG
     priority: TaskPriority = TaskPriority.MEDIUM
     task_type: TaskType = TaskType.PAIR
+    terminal_backend: PairTerminalBackend | None = None
     assigned_hat: str | None = None
     agent_backend: str | None = None
     base_branch: str | None = None

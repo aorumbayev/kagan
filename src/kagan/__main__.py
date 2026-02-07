@@ -34,6 +34,7 @@ sys.unraisablehook = _suppress_event_loop_closed
 
 import asyncio  # noqa: E402
 import os  # noqa: E402
+import platform  # noqa: E402
 import shutil  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import TYPE_CHECKING  # noqa: E402
@@ -47,6 +48,7 @@ from kagan.constants import DEFAULT_DB_PATH  # noqa: E402
 from kagan.paths import (  # noqa: E402
     get_cache_dir,
     get_config_dir,
+    get_config_path,
     get_data_dir,
     get_worktree_base_dir,
 )
@@ -316,7 +318,15 @@ def tui(db: str, skip_preflight: bool, skip_update_check: bool) -> None:
 
         # At least one agent is available - use the first available one for pre-flight
         from kagan.builtin_agents import get_first_available_agent
+        from kagan.config import KaganConfig
         from kagan.preflight import IssueSeverity, detect_issues
+
+        default_pair_terminal_backend = "vscode" if platform.system() == "Windows" else "tmux"
+        try:
+            loaded_config = KaganConfig.load(get_config_path())
+            default_pair_terminal_backend = loaded_config.general.default_pair_terminal_backend
+        except Exception:
+            pass
 
         best_agent = get_first_available_agent()
         if best_agent:
@@ -329,6 +339,7 @@ def tui(db: str, skip_preflight: bool, skip_update_check: bool) -> None:
                     agent_config=agent_config,
                     agent_name=agent_name,
                     agent_install_command=agent_install,
+                    default_pair_terminal_backend=default_pair_terminal_backend,
                 )
             )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import tempfile
@@ -334,8 +335,8 @@ async def e2e_app_with_tasks(e2e_project):
 
 
 @pytest.fixture(autouse=True)
-def auto_mock_tmux_for_app_tests(request, monkeypatch):
-    """Auto-mock tmux for tests using KaganApp fixtures (external system boundary)."""
+def auto_mock_terminals_for_app_tests(request, monkeypatch):
+    """Auto-mock terminal backends for app-driven tests (external system boundary)."""
     from tests.helpers.mocks import create_fake_tmux
 
     app_fixture_patterns = ("e2e_app", "app", "welcome_app", "_fresh_app")
@@ -344,9 +345,71 @@ def auto_mock_tmux_for_app_tests(request, monkeypatch):
         for n in request.fixturenames
     ):
         return
+
+    # tmux commands
     fake = create_fake_tmux({})
     monkeypatch.setattr("kagan.tmux.run_tmux", fake)
     monkeypatch.setattr("kagan.services.sessions.run_tmux", fake)
+
+    # wezterm commands
+    wezterm_workspaces: dict[str, set[str]] = {}
+    pane_counter = 0
+
+    async def fake_run_wezterm(*args: str, **_kwargs: object) -> str:
+        nonlocal pane_counter
+        if not args:
+            return ""
+
+        if args[0] == "start":
+            workspace = "default"
+            if "--workspace" in args:
+                idx = args.index("--workspace")
+                if idx + 1 < len(args):
+                    workspace = args[idx + 1]
+            pane_counter += 1
+            wezterm_workspaces.setdefault(workspace, set()).add(str(pane_counter))
+            return ""
+
+        if args[:3] == ("cli", "list", "--format"):
+            payload = [
+                {"workspace": workspace, "pane_id": pane_id}
+                for workspace, pane_ids in wezterm_workspaces.items()
+                for pane_id in sorted(pane_ids)
+            ]
+            return json.dumps(payload)
+
+        if args[:3] == ("cli", "kill-pane", "--pane-id") and len(args) >= 4:
+            pane_id = args[3]
+            for pane_ids in wezterm_workspaces.values():
+                pane_ids.discard(pane_id)
+            empty = [
+                workspace for workspace, pane_ids in wezterm_workspaces.items() if not pane_ids
+            ]
+            for workspace in empty:
+                wezterm_workspaces.pop(workspace, None)
+            return ""
+
+        return ""
+
+    monkeypatch.setattr("kagan.wezterm.run_wezterm", fake_run_wezterm)
+    monkeypatch.setattr("kagan.services.sessions.run_wezterm", fake_run_wezterm)
+
+    # Safety: never spawn real terminal attach/external launcher subprocesses in app tests.
+    monkeypatch.setattr(
+        "kagan.services.sessions.SessionService._attach_tmux_session",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "kagan.services.sessions.SessionService._attach_wezterm_session",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "kagan.services.sessions.SessionService._launch_external_launcher",
+        AsyncMock(return_value=True),
+    )
+
+    # Assume terminals are available in app tests unless a test overrides this explicitly.
+    monkeypatch.setattr("kagan.terminals.installer.check_terminal_installed", lambda _name: True)
 
 
 @pytest.fixture

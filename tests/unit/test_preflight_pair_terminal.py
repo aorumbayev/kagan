@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 import shutil
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,8 @@ from kagan.preflight import IssueType, detect_issues
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 
 def _mock_which(mapping: dict[str, str | None]) -> Callable[[str | None], str | None]:
@@ -21,6 +24,7 @@ def _mock_which(mapping: dict[str, str | None]) -> Callable[[str | None], str | 
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(_IS_WINDOWS, reason="On Windows tmux defaults are overridden to vscode/cursor")
 async def test_detect_issues_defaults_to_tmux_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shutil, "which", _mock_which({}))
 
@@ -32,6 +36,7 @@ async def test_detect_issues_defaults_to_tmux_backend(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(_IS_WINDOWS, reason="On Windows tmux defaults are overridden to vscode/cursor")
 async def test_detect_issues_warns_for_tmux_only_when_tmux_selected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

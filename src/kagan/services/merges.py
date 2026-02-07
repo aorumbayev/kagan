@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from kagan.core.models.enums import MergeStatus, MergeType, RejectionAction, TaskStatus
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class MergeStrategy(str, Enum):
+class MergeStrategy(StrEnum):
     """How to merge changes."""
 
     DIRECT = "direct"

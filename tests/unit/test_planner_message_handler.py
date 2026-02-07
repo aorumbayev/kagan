@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,6 +10,9 @@ from acp.schema import ToolCallUpdate as AcpToolCallUpdate
 from kagan.acp import messages
 from kagan.ui.screens.planner.message_handler import MessageHandler
 from kagan.ui.screens.planner.state import PlannerState
+
+if TYPE_CHECKING:
+    from kagan.ui.screens.planner.screen import PlannerScreen
 
 
 class _OutputStub:
@@ -34,7 +38,7 @@ class _ScreenStub:
 async def test_planner_tool_call_uses_full_payload_upsert() -> None:
     output = _OutputStub()
     screen = _ScreenStub(output)
-    handler = MessageHandler(screen)
+    handler = MessageHandler(cast("PlannerScreen", screen))
 
     tool_call = AcpToolCall(
         toolCallId="tc-read-1",
@@ -53,7 +57,7 @@ async def test_planner_tool_call_uses_full_payload_upsert() -> None:
 async def test_planner_tool_call_update_applies_full_tool_record() -> None:
     output = _OutputStub()
     screen = _ScreenStub(output)
-    handler = MessageHandler(screen)
+    handler = MessageHandler(cast("PlannerScreen", screen))
 
     tool_call = AcpToolCall(
         toolCallId="tc-read-1",

@@ -15,6 +15,7 @@ from kagan.acp.messages import Answer
 from kagan.constants import MODAL_TITLE_MAX_LENGTH
 from kagan.core.models.enums import TaskStatus
 from kagan.keybindings import AGENT_OUTPUT_BINDINGS
+from kagan.ui.utils.agent_exit import is_graceful_agent_termination
 from kagan.ui.utils.clipboard import copy_with_notification
 from kagan.ui.widgets import ChatPanel
 
@@ -62,7 +63,6 @@ class AgentOutputModal(ModalScreen[None]):
         self._current_mode: str = ""
         self._available_modes: dict[str, messages.Mode] = {}
         self._available_commands: list[AvailableCommand] = []
-        self._session_id: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="agent-output-container"):
@@ -163,40 +163,27 @@ class AgentOutputModal(ModalScreen[None]):
             return None
         return cast("QueuedMessageService", service)
 
-    async def _resolve_session_id(self) -> str | None:
-        if self._session_id is not None:
-            return self._session_id
-        app = cast("KaganApp", self.app)
-        latest = await app.ctx.execution_service.get_latest_execution_for_task(self._task_model.id)
-        if latest is None:
-            return None
-        self._session_id = latest.session_id
-        return self._session_id
-
     async def _send_message(self, content: str) -> None:
         service = self._get_queue_service()
-        session_id = await self._resolve_session_id()
-        if service is None or session_id is None:
+        if service is None:
             raise RuntimeError("Message queue unavailable")
-        result = service.queue_message(session_id, content)
+        result = service.queue_message(self._task_model.id, content, lane="implementation")
         if inspect.isawaitable(result):
             await result
 
     async def _get_queued_messages(self) -> list:
         """Get all queued messages for display."""
         service = self._get_queue_service()
-        session_id = await self._resolve_session_id()
-        if service is None or session_id is None:
+        if service is None:
             return []
-        return await service.get_queued(session_id)
+        return await service.get_queued(self._task_model.id, lane="implementation")
 
     async def _remove_queued_message(self, index: int) -> bool:
         """Remove a queued message by index."""
         service = self._get_queue_service()
-        session_id = await self._resolve_session_id()
-        if service is None or session_id is None:
+        if service is None:
             return False
-        return await service.remove_message(session_id, index)
+        return await service.remove_message(self._task_model.id, index, lane="implementation")
 
     async def _mount_tabbed(self) -> None:
         impl_panel = self.query_one("#impl-chat", ChatPanel)
@@ -275,18 +262,12 @@ class AgentOutputModal(ModalScreen[None]):
     @on(messages.ToolCall)
     async def on_tool_call(self, message: messages.ToolCall) -> None:
         """Handle tool call start."""
-        tool_id = message.tool_call.tool_call_id
-        title = message.tool_call.title
-        kind = message.tool_call.kind or ""
-        await self._get_active_output().post_tool_call(tool_id, title, kind)
+        await self._get_active_output().upsert_tool_call(message.tool_call)
 
     @on(messages.ToolCallUpdate)
     async def on_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
         """Handle tool call update."""
-        tool_id = message.update.tool_call_id
-        status = message.update.status or ""
-        if status:
-            self._get_active_output().update_tool_status(tool_id, status)
+        await self._get_active_output().apply_tool_call_update(message.update, message.tool_call)
 
     @on(messages.AgentReady)
     async def on_agent_ready(self, message: messages.AgentReady) -> None:
@@ -297,6 +278,12 @@ class AgentOutputModal(ModalScreen[None]):
     async def on_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""
         output = self._get_active_output()
+        if is_graceful_agent_termination(message.message):
+            await output.post_note(
+                "Agent stream ended by cancellation (SIGTERM).",
+                classes="dismissed",
+            )
+            return
         await output.post_note(f"Error: {message.message}", classes="error")
         if message.details:
             await output.post_note(message.details)

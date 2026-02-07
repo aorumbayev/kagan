@@ -22,7 +22,7 @@ from kagan.ui.modals.review import ReviewModal
 from kagan.ui.modals.settings import SettingsModal
 from kagan.ui.modals.start_workspace import StartWorkspaceModal
 from kagan.ui.modals.task_details_modal import TaskDetailsModal
-from kagan.ui.modals.tmux_gateway import TmuxGatewayModal
+from kagan.ui.modals.tmux_gateway import PairInstructionsModal, TmuxGatewayModal
 
 __all__ = [
     "AgentChoiceModal",
@@ -42,6 +42,7 @@ __all__ = [
     "MergeDialog",
     "ModalAction",
     "NewProjectModal",
+    "PairInstructionsModal",
     "RejectionInputModal",
     "ReviewModal",
     "SettingsModal",

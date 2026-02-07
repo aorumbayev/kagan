@@ -19,6 +19,7 @@ from kagan.ui.widgets.base import (
     AcceptanceCriteriaArea,
     AgentBackendSelect,
     BaseBranchInput,
+    PairTerminalBackendSelect,
     PrioritySelect,
     StatusSelect,
     TaskTypeSelect,
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
 
 
 TaskUpdateDict = dict[str, object]
+VALID_PAIR_LAUNCHERS = {"tmux", "vscode", "cursor"}
 
 
 class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
@@ -85,6 +87,7 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
         if self.is_create:
             self.add_class("create-mode")
         self.editing = self._initial_editing
+        self._sync_pair_terminal_visibility()
         if self.editing:
             if title_input := safe_query_one(self, "#title-input", Input):
                 title_input.focus()
@@ -105,6 +108,7 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
             yield from self._compose_badge_row()
 
             yield from self._compose_edit_fields_row()
+            yield from self._compose_pair_terminal_row()
 
             if self.is_create:
                 with Vertical(classes="form-field edit-fields", id="status-field"):
@@ -179,6 +183,12 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
                 agent_options = self._build_agent_options()
                 current_backend = self._get_agent_backend_value()
                 yield AgentBackendSelect(options=agent_options, value=current_backend)
+
+    def _compose_pair_terminal_row(self) -> ComposeResult:
+        with Horizontal(classes="field-row edit-fields", id="pair-terminal-row"):
+            with Vertical(classes="form-field field-third", id="pair-terminal-field"):
+                yield Label("Terminal:", classes="form-label")
+                yield PairTerminalBackendSelect(value=self._get_pair_terminal_backend_value())
 
     def _compose_title_field(self) -> ComposeResult:
         """Compose the title field."""
@@ -292,6 +302,7 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
 
     def watch_editing(self, editing: bool) -> None:
         self.set_class(editing, "editing")
+        self._sync_pair_terminal_visibility()
 
         if title_label := safe_query_one(self, "#modal-title-label", Label):
             title_label.update(self._get_modal_title())
@@ -305,6 +316,10 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
             self.run_worker(self._load_mention_items, exclusive=True)
             if title_input := safe_query_one(self, "#title-input", Input):
                 title_input.focus()
+
+    @on(Select.Changed, "#type-select")
+    def on_type_changed(self) -> None:
+        self._sync_pair_terminal_visibility()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Control which bindings are shown based on editing state.
@@ -536,6 +551,42 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
             return self._format_agent_label(builtin.config.name, False)
         return self._format_agent_label(agent_key, False)
 
+    def _get_default_pair_terminal_backend(self) -> str:
+        default_backend = "tmux"
+        if hasattr(self.kagan_app, "config"):
+            configured = getattr(
+                self.kagan_app.config.general,
+                "default_pair_terminal_backend",
+                default_backend,
+            )
+            if configured in VALID_PAIR_LAUNCHERS:
+                return configured
+        return default_backend
+
+    def _get_pair_terminal_backend_value(self) -> str:
+        task_backend = getattr(self._task_model, "terminal_backend", None)
+        if isinstance(task_backend, str) and task_backend in VALID_PAIR_LAUNCHERS:
+            return task_backend
+        return self._get_default_pair_terminal_backend()
+
+    def _is_pair_type_selected(self) -> bool:
+        type_select = safe_query_one(self, "#type-select", Select)
+        if type_select is None:
+            return True
+        selected = type_select.value
+        if selected is Select.BLANK:
+            return True
+        return str(selected) == TaskType.PAIR.value
+
+    def _sync_pair_terminal_visibility(self) -> None:
+        pair_field = safe_query_one(self, "#pair-terminal-field", Vertical)
+        pair_select = safe_query_one(self, "#pair-terminal-backend-select", Select)
+        if pair_field is None or pair_select is None:
+            return
+        is_pair = self._is_pair_type_selected()
+        pair_field.display = is_pair
+        pair_select.disabled = not is_pair
+
     @staticmethod
     def _format_agent_label(label: str, is_default: bool) -> str:
         display = label.removesuffix(" Code")
@@ -597,6 +648,18 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
         else:
             agent_backend = str(agent_backend_value)
 
+        pair_terminal_select: Select[str] = self.query_one("#pair-terminal-backend-select", Select)
+        pair_terminal_value = pair_terminal_select.value
+        if pair_terminal_value is Select.BLANK:
+            terminal_backend = self._get_default_pair_terminal_backend()
+        else:
+            selected_backend = str(pair_terminal_value)
+            terminal_backend = (
+                selected_backend if selected_backend in VALID_PAIR_LAUNCHERS else "tmux"
+            )
+        if task_type == TaskType.AUTO:
+            terminal_backend = None
+
         acceptance_criteria = self._parse_acceptance_criteria()
 
         base_branch_input = self.query_one("#base-branch-input", BaseBranchInput)
@@ -617,6 +680,7 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
                 "task_type": task_type,
                 "status": status,
                 "agent_backend": agent_backend or None,
+                "terminal_backend": terminal_backend,
                 "acceptance_criteria": acceptance_criteria,
                 "base_branch": base_branch,
             }
@@ -627,6 +691,7 @@ class TaskDetailsModal(ModalScreen[ModalAction | TaskUpdateDict | None]):
                 "priority": priority,
                 "task_type": task_type,
                 "agent_backend": agent_backend or None,
+                "terminal_backend": terminal_backend,
                 "acceptance_criteria": acceptance_criteria,
                 "base_branch": base_branch,
             }

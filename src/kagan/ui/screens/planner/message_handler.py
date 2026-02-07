@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from kagan.acp import messages  # noqa: TC001 - used in method signatures at runtime
+from kagan.ui.utils.agent_exit import is_graceful_agent_termination
 
 if TYPE_CHECKING:
     from kagan.ui.screens.planner.screen import PlannerScreen
@@ -52,17 +53,12 @@ class MessageHandler:
     async def handle_tool_call(self, message: messages.ToolCall) -> None:
         """Handle tool call from agent."""
         self._show_output()
-        tool_id = message.tool_call.tool_call_id
-        title = message.tool_call.title
-        kind = message.tool_call.kind or ""
-        await self._get_output().post_tool_call(tool_id, title, kind)
+        await self._get_output().upsert_tool_call(message.tool_call)
 
-    def handle_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
+    async def handle_tool_call_update(self, message: messages.ToolCallUpdate) -> None:
         """Handle tool call status update."""
-        tool_id = message.update.tool_call_id
-        status = message.update.status or ""
-        if status:
-            self._get_output().update_tool_status(tool_id, status)
+        self._show_output()
+        await self._get_output().apply_tool_call_update(message.update, message.tool_call)
 
     async def handle_agent_ready(self, message: messages.AgentReady) -> None:
         """Handle agent ready notification."""
@@ -72,6 +68,16 @@ class MessageHandler:
 
     async def handle_agent_fail(self, message: messages.AgentFail) -> None:
         """Handle agent failure."""
+        if is_graceful_agent_termination(message.message):
+            self._screen._update_status("ready", "Agent stream ended (cancelled)")
+            self._screen._enable_input()
+            self._show_output()
+            await self._get_output().post_note(
+                "Agent stream ended by cancellation (SIGTERM).",
+                classes="dismissed",
+            )
+            return
+
         self._screen._update_status("error", f"Error: {message.message}")
         self._screen._disable_input()
 

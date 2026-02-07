@@ -130,6 +130,8 @@ class KaganAgent:
         self._ready_event = asyncio.Event()
         self._done_event = asyncio.Event()
         self._auto_approve = False
+        self._stop_requested = False
+        self._prompt_completed = False
 
     @property
     def command(self) -> str | None:
@@ -171,6 +173,10 @@ class KaganAgent:
         log.info(f"Starting agent for project: {self.project_root}")
         log.debug(f"Agent config: {self._agent_config}")
         self._message_target = message_target
+        self._stop_requested = False
+        self._prompt_completed = False
+        self._ready_event.clear()
+        self._done_event.clear()
         self._agent_task = asyncio.create_task(self._run_agent())
 
     async def _run_agent(self) -> None:
@@ -228,7 +234,7 @@ class KaganAgent:
                 self._process = process
                 await self._initialize(conn)
                 await process.wait()
-                if process.returncode:
+                if process.returncode and not self._should_ignore_exit_code(process.returncode):
                     fail_details = await self._read_process_stderr(process)
                     log.error(
                         f"[_run_agent] Agent exited with code {process.returncode}: "
@@ -239,6 +245,12 @@ class KaganAgent:
                             f"Agent exited with code {process.returncode}",
                             fail_details,
                         )
+                    )
+                elif process.returncode:
+                    log.info(
+                        f"[_run_agent] Ignoring expected process exit code {process.returncode} "
+                        f"(stop_requested={self._stop_requested}, "
+                        f"prompt_completed={self._prompt_completed})"
                     )
         except RequestError as exc:
             log.error(f"[_run_agent] ACP request error: {exc}")
@@ -693,6 +705,7 @@ class KaganAgent:
         stop_reason = result.stop_reason if result else None
         resp_len = len(self.get_response_text())
         log.info(f"Agent response complete. stop_reason={stop_reason}, response_len={resp_len}")
+        self._prompt_completed = True
         self.post_message(messages.AgentComplete())
         return str(stop_reason) if stop_reason is not None else None
 
@@ -729,6 +742,7 @@ class KaganAgent:
         """Stop the agent process gracefully (non-blocking)."""
         self._terminals.cleanup_all()
         self._buffers.clear_all()
+        self._stop_requested = True
 
         if self._process and self._process.returncode is None:
             self._process.terminate()
@@ -736,6 +750,10 @@ class KaganAgent:
 
     def get_response_text(self) -> str:
         return self._buffers.get_response_text()
+
+    def _should_ignore_exit_code(self, code: int) -> bool:
+        """Treat expected process termination as non-errors."""
+        return code == -15 and (self._stop_requested or self._prompt_completed)
 
 
 def _find_option_id(options: list[PermissionOption], kind: str) -> str | None:

@@ -212,10 +212,30 @@ class StreamingOutput(VerticalScroll):
 
         while len(self._tool_calls) > MAX_TOOL_CALLS:
             _old_id, old_widget = self._tool_calls.popitem(last=False)
-            old_widget.remove()
+            await old_widget.remove()
 
         await self.mount(widget)
         self._scroll_to_end()
+        return widget
+
+    async def upsert_tool_call(self, tool_call: AcpToolCall) -> ToolCall:
+        """Create or update a tool call widget from full ACP payload."""
+        widget = await self.post_tool_call(
+            tool_call.tool_call_id,
+            tool_call.title or "Tool call",
+            tool_call.kind or "",
+        )
+        widget.update_tool_call(tool_call)
+        self._scroll_to_end()
+        return widget
+
+    async def apply_tool_call_update(
+        self, update: AcpToolCallUpdate, tool_call: AcpToolCall
+    ) -> ToolCall:
+        """Apply incremental tool call update while preserving full content."""
+        widget = await self.upsert_tool_call(tool_call)
+        if update.status:
+            widget.update_status(update.status)
         return widget
 
     def update_tool_status(self, tool_id: str, status: str) -> None:
