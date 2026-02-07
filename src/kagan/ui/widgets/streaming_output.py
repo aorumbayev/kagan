@@ -202,7 +202,7 @@ class StreamingOutput(VerticalScroll):
         # Evict oldest entries if over limit
         while len(self._tool_calls) > MAX_TOOL_CALLS:
             _old_id, old_widget = self._tool_calls.popitem(last=False)
-            old_widget.remove()  # Remove from DOM (sync remove is fine)
+            await old_widget.remove()
 
         await self.mount(widget)
         self._scroll_to_end()
