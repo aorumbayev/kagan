@@ -25,7 +25,7 @@ from kagan.ui.widgets.search_bar import SearchBar
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from kagan.core.models.entities import Task
+    from kagan.adapters.db.schema import Task
     from kagan.ui.screens.kanban.screen import KanbanScreen
 
 
@@ -43,13 +43,7 @@ class KanbanBoardController:
             self.screen._agent_offline = False
 
     def cleanup_on_unmount(self) -> None:
-        self.screen._pending_delete_task = None
-        self.screen._pending_merge_task = None
-        self.screen._pending_advance_task = None
-        self.screen._pending_auto_move_task = None
-        self.screen._pending_auto_move_status = None
-        self.screen._editing_task_id = None
-        self.screen._filtered_tasks = None
+        self.screen._ui_state.clear_all()
         self.screen._merge_failed_tasks.clear()
         if self.screen._refresh_timer:
             self.screen._refresh_timer.stop()
@@ -61,22 +55,23 @@ class KanbanBoardController:
             if search_bar.is_visible:
                 search_bar.hide()
                 search_bar.clear()
-        self.screen._filtered_tasks = None
+        self.screen._ui_state.filtered_tasks = None
         self.screen._task_hashes.clear()
         self.screen._tasks = []
         await self.refresh_and_sync()
         focus.focus_first_card(self.screen)
 
     def sync_agent_states(self) -> None:
-        scheduler = self.screen.ctx.automation_service
-        running_tasks = scheduler.running_tasks
-        indicators: dict[str, CardIndicator] = {}
-
+        runtime_view = self.screen.ctx.runtime_service
+        running_tasks = runtime_view.running_tasks()
+        indicators = {}
         for tid in running_tasks:
+            view = runtime_view.get(tid)
             indicators[tid] = (
-                CardIndicator.REVIEWING if scheduler.is_reviewing(tid) else CardIndicator.RUNNING
+                CardIndicator.REVIEWING
+                if view is not None and view.is_reviewing
+                else CardIndicator.RUNNING
             )
-
         for task in self.screen._tasks:
             if task.id in indicators:
                 continue
@@ -126,7 +121,9 @@ class KanbanBoardController:
             project_id=self.screen.ctx.active_project_id
         )
         display_tasks: Sequence[Task] = (
-            self.screen._filtered_tasks if self.screen._filtered_tasks is not None else new_tasks
+            self.screen._ui_state.filtered_tasks
+            if self.screen._ui_state.filtered_tasks is not None
+            else new_tasks
         )
 
         old_status_by_id = {task.id: task.status for task in self.screen._tasks}
@@ -232,7 +229,11 @@ class KanbanBoardController:
         self.screen._refresh_timer = None
         if not self.screen.is_mounted:
             return
-        self.screen.run_worker(self.refresh_and_sync())
+        self.screen.run_worker(
+            self.refresh_and_sync(),
+            group="kanban-refresh",
+            exclusive=True,
+        )
 
     def update_review_queue_hint(self) -> None:
         try:
