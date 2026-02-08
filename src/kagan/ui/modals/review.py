@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING
 
+from sqlalchemy.exc import OperationalError
 from textual import on
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
@@ -23,6 +24,7 @@ from textual.widgets import (
 )
 
 from kagan.acp import messages
+from kagan.adapters.db.repositories.base import RepositoryClosing
 from kagan.agents.agent_factory import AgentFactory, create_agent
 from kagan.constants import MODAL_TITLE_MAX_LENGTH
 from kagan.core.models.enums import StreamPhase, TaskStatus, TaskType
@@ -37,6 +39,8 @@ from kagan.ui.modals.review_state import ReviewStateMixin
 from kagan.ui.modals.review_stream import ReviewStreamMixin
 from kagan.ui.utils.agent_exit import parse_agent_exit_code as parse_agent_exit_code_message
 from kagan.ui.widgets import ChatPanel
+
+_SHUTDOWN_ERRORS = (RepositoryClosing, OperationalError)
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -464,7 +468,10 @@ class ReviewModal(
     async def _refresh_runtime_state(self) -> None:
         if not self.is_mounted:
             return
-        latest = await self.ctx.task_service.get_task(self._task_model.id)
+        try:
+            latest = await self.ctx.task_service.get_task(self._task_model.id)
+        except _SHUTDOWN_ERRORS:
+            return
         if latest is not None:
             previous_status = self._task_model.status
             self._task_model = latest
@@ -486,12 +493,15 @@ class ReviewModal(
 
         await self._attach_live_output_stream_if_available()
         await self._attach_live_review_stream_if_available()
-        await asyncio.gather(
-            self._refresh_review_queue_state(),
-            self._refresh_implementation_queue_state(),
-        )
-        if self._hydrated and self._task_model.status == TaskStatus.REVIEW:
-            await self._load_prior_review()
+        try:
+            await asyncio.gather(
+                self._refresh_review_queue_state(),
+                self._refresh_implementation_queue_state(),
+            )
+            if self._hydrated and self._task_model.status == TaskStatus.REVIEW:
+                await self._load_prior_review()
+        except _SHUTDOWN_ERRORS:
+            return
 
     async def on_unmount(self) -> None:
         """Cleanup agent and animation on close."""

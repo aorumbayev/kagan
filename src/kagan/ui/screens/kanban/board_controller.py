@@ -3,9 +3,11 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from sqlalchemy.exc import OperationalError
 from textual.css.query import NoMatches
 from textual.widgets import Static
 
+from kagan.adapters.db.repositories.base import RepositoryClosing
 from kagan.constants import (
     COLUMN_ORDER,
     MIN_SCREEN_HEIGHT,
@@ -117,9 +119,12 @@ class KanbanBoardController:
         if isinstance(focused, TaskCard) and focused.task_model:
             focused_task_id = focused.task_model.id
 
-        new_tasks = await self.screen.ctx.task_service.list_tasks(
-            project_id=self.screen.ctx.active_project_id
-        )
+        try:
+            new_tasks = await self.screen.ctx.task_service.list_tasks(
+                project_id=self.screen.ctx.active_project_id
+            )
+        except (RepositoryClosing, OperationalError):
+            return
         display_tasks: Sequence[Task] = (
             self.screen._ui_state.filtered_tasks
             if self.screen._ui_state.filtered_tasks is not None
