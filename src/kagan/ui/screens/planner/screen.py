@@ -726,18 +726,18 @@ class PlannerScreen(KaganScreen):
             await self._get_output().post_plan_approval(result)
 
     @on(TextArea.Changed, "#planner-input")
-    def on_planner_input_changed(self, event: TextArea.Changed) -> None:
-        self._check_slash_trigger()
+    async def on_planner_input_changed(self, event: TextArea.Changed) -> None:
+        await self._check_slash_trigger()
 
-    def _check_slash_trigger(self) -> None:
+    async def _check_slash_trigger(self) -> None:
         with suppress(NoMatches):
             planner_input = self.query_one("#planner-input", PlannerInput)
             text = planner_input.text
 
             if text.startswith("/") and len(text) <= 2:
-                self.run_worker(self._show_slash_complete())
+                await self._show_slash_complete()
             elif self._slash_complete is not None and not text.startswith("/"):
-                self.run_worker(self._hide_slash_complete())
+                await self._hide_slash_complete()
 
     async def _show_slash_complete(self) -> None:
         if self._slash_complete is None:
