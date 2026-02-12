@@ -39,7 +39,7 @@ def test_no_direct_service_access_in_tui() -> None:
     violations: list[str] = []
     for py_file in sorted(TUI_SRC.rglob("*.py")):
         rel = str(py_file.relative_to(TUI_SRC))
-        for i, line in enumerate(py_file.read_text().splitlines(), 1):
+        for i, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
             # Skip comments
             stripped = line.lstrip()
             if stripped.startswith("#"):
