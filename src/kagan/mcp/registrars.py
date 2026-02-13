@@ -46,6 +46,7 @@ from kagan.mcp.models import (
     TaskCreateResponse,
     TaskDeleteResponse,
     TaskListResponse,
+    TaskLogsResponse,
     TaskRuntimeState,
     TaskSummary,
     TaskWaitResponse,
@@ -144,6 +145,7 @@ _PLAN_PROPOSE = protocol_call(ProtocolCapability.PLAN, PlanMethod.PROPOSE)
 _TASKS_GET = protocol_call(ProtocolCapability.TASKS, TasksMethod.GET)
 _TASKS_SCRATCHPAD = protocol_call(ProtocolCapability.TASKS, TasksMethod.SCRATCHPAD)
 _TASKS_LIST = protocol_call(ProtocolCapability.TASKS, TasksMethod.LIST)
+_TASKS_LOGS = protocol_call(ProtocolCapability.TASKS, TasksMethod.LOGS)
 _PROJECTS_LIST = protocol_call(ProtocolCapability.PROJECTS, ProjectsMethod.LIST)
 _PROJECTS_REPOS = protocol_call(ProtocolCapability.PROJECTS, ProjectsMethod.REPOS)
 _AUDIT_LIST = protocol_call(ProtocolCapability.AUDIT, AuditMethod.LIST)
@@ -337,6 +339,67 @@ def register_shared_tools(
                             )
                     raw["logs"] = normalized_logs
             return raw
+
+    if allows_all(_TASKS_LOGS):
+
+        @mcp.tool(annotations=_READ_ONLY)
+        async def task_logs(
+            task_id: str,
+            limit: int = 5,
+            offset: int = 0,
+            ctx: MCPContext | None = None,
+        ) -> TaskLogsResponse:
+            """Get paginated task logs."""
+            bridge = _require_bridge(ctx)
+            raw = await bridge.list_task_logs(task_id=task_id, limit=limit, offset=offset)
+            raw_logs = raw.get("logs")
+            normalized_logs: list[AgentLogEntry] = []
+            if isinstance(raw_logs, list):
+                for log in raw_logs:
+                    if not isinstance(log, dict):
+                        continue
+                    run = log.get("run")
+                    content = log.get("content")
+                    created_at = log.get("created_at")
+                    if (
+                        isinstance(run, int)
+                        and isinstance(content, str)
+                        and isinstance(created_at, str)
+                    ):
+                        normalized_logs.append(
+                            AgentLogEntry(run=run, content=content, created_at=created_at)
+                        )
+
+            total_runs = _int_or_none(raw.get("total_runs"))
+            returned_runs = _int_or_none(raw.get("returned_runs"))
+            page_offset = _int_or_none(raw.get("offset"))
+            page_limit = _int_or_none(raw.get("limit"))
+            next_offset = _int_or_none(raw.get("next_offset"))
+            has_more_raw = raw.get("has_more")
+            has_more = has_more_raw if isinstance(has_more_raw, bool) else next_offset is not None
+            task_id_value = raw.get("task_id")
+            message = raw.get("message")
+            code = raw.get("code")
+            hint = raw.get("hint")
+            next_tool = raw.get("next_tool")
+            next_arguments = raw.get("next_arguments")
+            return TaskLogsResponse(
+                task_id=task_id_value if isinstance(task_id_value, str) else task_id,
+                logs=normalized_logs,
+                count=_int_or_none(raw.get("count")) or len(normalized_logs),
+                total_runs=total_runs if total_runs is not None else len(normalized_logs),
+                returned_runs=returned_runs if returned_runs is not None else len(normalized_logs),
+                offset=page_offset if page_offset is not None else offset,
+                limit=page_limit if page_limit is not None else limit,
+                has_more=has_more,
+                next_offset=next_offset,
+                truncated=bool(raw.get("truncated", False)),
+                message=message if isinstance(message, str) else None,
+                code=code if isinstance(code, str) else None,
+                hint=hint if isinstance(hint, str) else None,
+                next_tool=next_tool if isinstance(next_tool, str) else None,
+                next_arguments=next_arguments if isinstance(next_arguments, dict) else None,
+            )
 
     if allows_all(_TASKS_LIST):
 

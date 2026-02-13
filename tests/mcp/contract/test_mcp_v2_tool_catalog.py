@@ -13,6 +13,7 @@ def _tool_names(mcp) -> set[str]:
 READONLY_TOOLS = {
     "plan_submit",
     "task_get",
+    "task_logs",
     "task_list",
     "task_wait",
     "project_list",
@@ -22,6 +23,7 @@ READONLY_TOOLS = {
 
 FULL_TOOLS = {
     "task_get",
+    "task_logs",
     "task_list",
     "task_wait",
     "project_list",

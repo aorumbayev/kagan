@@ -589,6 +589,18 @@ class CoreClientBridge:
                 budget = _FULL_LOG_BUDGET if mode_name == "full" else _SUMMARY_LOG_BUDGET
                 logs = self._trim_logs_to_budget(logs, budget_chars=budget)
                 response["logs_truncated"] = bool(logs_result.get("truncated", False))
+                total_runs = logs_result.get("total_runs")
+                returned_runs = logs_result.get("returned_runs")
+                has_more = logs_result.get("has_more")
+                next_offset = logs_result.get("next_offset")
+                if isinstance(total_runs, int):
+                    response["logs_total_runs"] = total_runs
+                if isinstance(returned_runs, int):
+                    response["logs_returned_runs"] = returned_runs
+                if isinstance(has_more, bool):
+                    response["logs_has_more"] = has_more
+                if isinstance(next_offset, int):
+                    response["logs_next_offset"] = next_offset
             response["logs"] = logs
 
         if include_review:
@@ -596,6 +608,27 @@ class CoreClientBridge:
             response["review_feedback"] = None
 
         return self._fit_task_payload_budget(response, mode=mode_name)
+
+    async def list_task_logs(
+        self,
+        task_id: str,
+        *,
+        limit: int = 5,
+        offset: int = 0,
+        content_char_limit: int | None = None,
+        total_char_limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Get paginated task logs with transport-safe bounds."""
+        params: dict[str, Any] = {
+            "task_id": task_id,
+            "limit": limit,
+            "offset": offset,
+        }
+        if content_char_limit is not None:
+            params["content_char_limit"] = content_char_limit
+        if total_char_limit is not None:
+            params["total_char_limit"] = total_char_limit
+        return await self._query("tasks", "logs", params)
 
     async def get_scratchpad(self, task_id: str) -> str:
         """Get a task's scratchpad content."""

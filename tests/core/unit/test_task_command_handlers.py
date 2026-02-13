@@ -220,6 +220,50 @@ async def test_task_logs_applies_transport_limits() -> None:
     assert "[truncated " in result["logs"][0]["content"]
 
 
+async def test_task_logs_supports_offset_pagination() -> None:
+    now = datetime.now(tz=UTC)
+    executions_desc = [
+        SimpleNamespace(id="exec-3", created_at=now),
+        SimpleNamespace(id="exec-2", created_at=now),
+        SimpleNamespace(id="exec-1", created_at=now),
+    ]
+
+    async def list_executions_for_task(task_id: str, *, limit: int = 5, offset: int = 0):
+        assert task_id == "task-1"
+        return executions_desc[offset : offset + limit]
+
+    execution_service = SimpleNamespace(
+        list_executions_for_task=AsyncMock(side_effect=list_executions_for_task),
+        count_executions_for_task=AsyncMock(return_value=3),
+        get_execution_log_entries=AsyncMock(
+            side_effect=lambda execution_id: [
+                SimpleNamespace(logs=f"log for {execution_id}"),
+            ]
+        ),
+    )
+    f = _api(execution_service=execution_service)
+
+    first_page = await handle_task_logs(f, {"task_id": "task-1", "limit": 2, "offset": 0})
+    second_page = await handle_task_logs(f, {"task_id": "task-1", "limit": 2, "offset": 2})
+
+    assert [entry["run"] for entry in first_page["logs"]] == [2, 3]
+    assert first_page["total_runs"] == 3
+    assert first_page["has_more"] is True
+    assert first_page["next_offset"] == 2
+    assert [entry["run"] for entry in second_page["logs"]] == [1]
+    assert second_page["has_more"] is False
+    assert second_page["next_offset"] is None
+
+
+async def test_task_logs_rejects_invalid_offset() -> None:
+    f = _api()
+
+    result = await handle_task_logs(f, {"task_id": "task-1", "offset": "bad"})
+
+    assert result["success"] is False
+    assert result["code"] == "INVALID_OFFSET"
+
+
 async def test_delete_task_publishes_task_deleted_event(
     event_bus,
     state_manager,

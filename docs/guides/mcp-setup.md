@@ -45,6 +45,8 @@ For editor-specific config files and full snippets, use [Editor MCP setup](edito
 1. Keep `kagan mcp` running.
 1. From your client, call `task_list`.
 1. Confirm tasks from your active project are returned.
+1. Call `task_get(task_id, include_logs=true)` for a known task.
+1. If logs are truncated or `logs_has_more=true`, call `task_logs(task_id, offset, limit)`.
 
 ## 4. Choose a safe capability profile
 

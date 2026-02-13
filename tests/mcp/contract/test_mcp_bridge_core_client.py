@@ -290,6 +290,70 @@ async def test_get_task_with_logs_uses_tasks_logs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_task_with_logs_includes_pagination_hints() -> None:
+    client = AsyncMock()
+
+    async def mock_request(
+        *,
+        session_id,
+        session_profile,
+        session_origin,
+        capability,
+        method,
+        params,
+    ):
+        assert session_id == SESSION
+        assert session_profile is None
+        assert session_origin is None
+        if capability == "tasks" and method == "get":
+            return CoreResponse(
+                request_id="r1",
+                ok=True,
+                result={
+                    "found": True,
+                    "task": {
+                        "id": "T1",
+                        "title": "T",
+                        "status": "backlog",
+                        "description": None,
+                        "acceptance_criteria": [],
+                    },
+                },
+            )
+        if capability == "tasks" and method == "logs":
+            return CoreResponse(
+                request_id="r2",
+                ok=True,
+                result={
+                    "task_id": "T1",
+                    "logs": [
+                        {
+                            "run": 3,
+                            "content": "latest log",
+                            "created_at": "2026-02-09T10:00:00+00:00",
+                        }
+                    ],
+                    "total_runs": 8,
+                    "returned_runs": 1,
+                    "has_more": True,
+                    "next_offset": 3,
+                    "truncated": True,
+                },
+            )
+        return CoreResponse(request_id="rx", ok=True, result={})
+
+    client.request = mock_request
+    bridge = CoreClientBridge(client, SESSION)
+    result = await bridge.get_task("T1", include_logs=True)
+
+    assert result["logs_total_runs"] == 8
+    assert result["logs_returned_runs"] == 1
+    assert result["logs_has_more"] is True
+    assert result["logs_next_offset"] == 3
+    assert result["logs_truncated"] is True
+
+
+@pytest.mark.asyncio
 async def test_get_task_with_logs_fallback_when_query_unavailable() -> None:
     """get_task(include_logs=True) should return [] if tasks.logs is unavailable."""
     client = AsyncMock()
@@ -345,6 +409,38 @@ async def test_get_task_with_logs_fallback_when_query_unavailable() -> None:
     assert result["status"] == "backlog"
     assert result["logs"] == []
     assert calls == [("tasks", "get"), ("tasks", "logs")]
+
+
+@pytest.mark.asyncio
+async def test_list_task_logs_routes_to_tasks_logs_query() -> None:
+    client = make_client(
+        {
+            "task_id": "T1",
+            "logs": [],
+            "count": 0,
+            "total_runs": 12,
+            "returned_runs": 0,
+            "offset": 4,
+            "limit": 4,
+            "has_more": True,
+            "next_offset": 8,
+            "truncated": False,
+        }
+    )
+    bridge = CoreClientBridge(client, SESSION)
+
+    result = await bridge.list_task_logs(task_id="T1", limit=4, offset=4)
+
+    assert result["task_id"] == "T1"
+    assert result["next_offset"] == 8
+    client.request.assert_called_once_with(
+        session_id=SESSION,
+        session_profile=None,
+        session_origin=None,
+        capability="tasks",
+        method="logs",
+        params={"task_id": "T1", "limit": 4, "offset": 4},
+    )
 
 
 @pytest.mark.asyncio

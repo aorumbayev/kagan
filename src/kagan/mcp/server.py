@@ -357,6 +357,7 @@ def _build_server_instructions(readonly: bool) -> str:
         "",
         "The task_id is provided in your system prompt when Kagan assigns you work.",
         "Use task_get to inspect any task (with include_logs=true for execution history).",
+        "If task_get logs are truncated or logs_has_more=true, use task_logs.",
         "Use task_list to coordinate with other agents.",
         "Important: status is Kanban column, task_type is execution mode (AUTO/PAIR).",
         "Use job_start to spawn agents. job_poll(wait=true) tracks spawn state.",

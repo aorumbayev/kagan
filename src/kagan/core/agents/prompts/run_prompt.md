@@ -115,6 +115,7 @@ You may see them as `mcp__{mcp_server_name}__task_get` or
 `{mcp_server_name}_task_get` depending on the client.
 
 To get execution logs from previous runs, use `task_get` with `include_logs=true`.
+If logs are truncated or `logs_has_more=true`, call `task_logs(task_id, offset, limit)`.
 
 ## Response Structure (Required)
 
@@ -197,6 +198,7 @@ Review each concurrent task's title, description, and scratchpad to identify:
 
 **Step 2: Learn from History**
 Call `task_get(task_id, include_logs=true)` on completed or in-progress tasks
+and page older history with `task_logs(task_id, offset, limit)` when needed.
 that relate to your task. Use insights to:
 
 - Avoid repeating failed approaches documented in prior runs

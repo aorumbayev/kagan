@@ -277,21 +277,30 @@ class TaskApiMixin:
         }
 
     @expose("tasks", "logs", description="Return execution logs for a task.")
-    async def get_task_logs(self, task_id: str, *, limit: int = 5) -> list[dict[str, Any]]:
-        """Return execution logs for a task."""
+    async def get_task_logs(
+        self,
+        task_id: str,
+        *,
+        limit: int = 5,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return a paginated execution-log page for a task."""
         limit = max(1, min(limit, 20))
+        offset = max(0, offset)
         executions = await self._ctx.execution_service.list_executions_for_task(
-            task_id, limit=limit
+            task_id,
+            limit=limit,
+            offset=offset,
         )
-        logs: list[dict[str, Any]] = []
-        total_runs = len(executions)
+        total_runs = offset + len(executions)
         with contextlib.suppress(AttributeError, KeyError, RuntimeError):
             total_runs = max(
                 total_runs,
                 await self._ctx.execution_service.count_executions_for_task(task_id),
             )
 
-        run_start = max(1, total_runs - len(executions) + 1)
+        logs: list[dict[str, Any]] = []
+        run_start = max(1, total_runs - offset - len(executions) + 1)
         for run_number, execution in enumerate(reversed(executions), start=run_start):
             try:
                 log_entries = await self._ctx.execution_service.get_execution_log_entries(
@@ -310,7 +319,19 @@ class TaskApiMixin:
             except (AttributeError, KeyError, RuntimeError):
                 pass
 
-        return logs
+        next_offset = offset + len(executions)
+        has_more = next_offset < total_runs
+        return {
+            "task_id": task_id,
+            "logs": logs,
+            "count": len(logs),
+            "total_runs": total_runs,
+            "returned_runs": len(logs),
+            "offset": offset,
+            "limit": limit,
+            "has_more": has_more,
+            "next_offset": next_offset if has_more else None,
+        }
 
     @expose("tasks", "search", description="Search tasks by text query.")
     async def search_tasks(self, query: str) -> Sequence[Task]:

@@ -63,6 +63,17 @@ Fix:
 
 - Poll with `job_poll(wait=false)` until the state becomes running/terminal.
 
+## `logs_truncated=true` or `logs_has_more=true` in `task_get`
+
+Cause:
+
+- `task_get` returns a bounded, recency-first log view for transport reliability.
+
+Fix:
+
+- Fetch additional history with `task_logs(task_id, offset, limit)`.
+- Use `next_offset` until `has_more` is `false`.
+
 ## `PAIR terminal backend is set to tmux, but tmux was not found in PATH.`
 
 Cause:

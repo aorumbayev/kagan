@@ -367,6 +367,17 @@ async def handle_task_logs(api: KaganAPI, params: dict[str, Any]) -> dict[str, A
     limit = 5
     if isinstance(raw_limit, int) and not isinstance(raw_limit, bool):
         limit = max(1, min(raw_limit, 20))
+    offset_value = parse_events_offset(params.get("offset"))
+    match offset_value:
+        case str() as error_message:
+            return {
+                "success": False,
+                "task_id": task_id,
+                "message": error_message,
+                "code": "INVALID_OFFSET",
+            }
+        case _:
+            pass
     content_limit = _bounded_int(
         params.get("content_char_limit"),
         default=_DEFAULT_TASK_LOG_ENTRY_CHAR_LIMIT,
@@ -379,7 +390,8 @@ async def handle_task_logs(api: KaganAPI, params: dict[str, Any]) -> dict[str, A
         minimum=content_limit,
         maximum=1_000_000,
     )
-    logs = await f.get_task_logs(task_id, limit=limit)
+    raw_logs = await f.get_task_logs(task_id, limit=limit, offset=offset_value)
+    logs = raw_logs.get("logs", [])
 
     bounded_logs: list[dict[str, Any]] = []
     truncated = False
@@ -409,10 +421,30 @@ async def handle_task_logs(api: KaganAPI, params: dict[str, Any]) -> dict[str, A
         bounded_logs.append(bounded_log)
         used_chars += len(content) + per_entry_overhead
 
+    total_runs_raw = raw_logs.get("total_runs")
+    total_runs = total_runs_raw if isinstance(total_runs_raw, int) else offset_value + len(logs)
+    page_limit_raw = raw_logs.get("limit")
+    page_limit = page_limit_raw if isinstance(page_limit_raw, int) else limit
+    returned_runs_raw = raw_logs.get("returned_runs")
+    source_returned_runs = returned_runs_raw if isinstance(returned_runs_raw, int) else len(logs)
+    next_offset_raw = raw_logs.get("next_offset")
+    next_offset = next_offset_raw if isinstance(next_offset_raw, int) else None
+    has_more_raw = raw_logs.get("has_more")
+    has_more = has_more_raw if isinstance(has_more_raw, bool) else next_offset is not None
+    if truncated and len(bounded_logs) < source_returned_runs:
+        has_more = True
+        next_offset = offset_value + len(bounded_logs)
+
     return {
         "task_id": task_id,
         "logs": bounded_logs,
         "count": len(bounded_logs),
+        "total_runs": total_runs,
+        "returned_runs": len(bounded_logs),
+        "offset": offset_value,
+        "limit": page_limit,
+        "has_more": has_more,
+        "next_offset": next_offset if has_more else None,
         "truncated": truncated,
     }
 

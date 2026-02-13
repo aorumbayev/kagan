@@ -25,6 +25,7 @@ It is a breaking, non-backward-compatible contract.
 | Tool               | Annotation    | Purpose                                                                           |
 | ------------------ | ------------- | --------------------------------------------------------------------------------- |
 | `task_get(...)`    | `read-only`   | Read bounded task snapshot (`summary`/`full`) or bounded context (`mode=context`) |
+| `task_logs(...)`   | `read-only`   | Read paginated task execution logs (newest-first pages)                           |
 | `task_list(...)`   | `read-only`   | List tasks with optional filtering and scratchpad inclusion                       |
 | `task_wait(...)`   | `read-only`   | Long-poll task status changes                                                     |
 | `task_create(...)` | `mutating`    | Create a task                                                                     |
@@ -82,6 +83,33 @@ It is a breaking, non-backward-compatible contract.
 - When optional payloads are reduced due transport safety, response may include:
   - `scratchpad_truncated: true`
   - `logs_truncated: true`
+- When `include_logs=true`, pagination hints may be included:
+  - `logs_total_runs`, `logs_returned_runs`
+  - `logs_has_more`, `logs_next_offset`
+
+## `task_logs` API
+
+Use this tool to fetch additional log history when `task_get(..., include_logs=true)` is truncated
+or indicates more pages are available.
+
+### Parameters
+
+| Parameter | Type     | Default  | Description         |
+| --------- | -------- | -------- | ------------------- |
+| `task_id` | `string` | required | Target task         |
+| `limit`   | `int`    | `5`      | Runs per page       |
+| `offset`  | `int`    | `0`      | Newest-first offset |
+
+### Response fields
+
+| Field           | Type          | Description                            |
+| --------------- | ------------- | -------------------------------------- |
+| `logs`          | `list`        | Returned run log entries               |
+| `total_runs`    | `int`         | Total runs available                   |
+| `returned_runs` | `int`         | Runs returned in this response         |
+| `has_more`      | `bool`        | Whether another page is available      |
+| `next_offset`   | `int \| null` | Offset to fetch the next older page    |
+| `truncated`     | `bool`        | Whether content was reduced for safety |
 
 ## `task_patch` API
 

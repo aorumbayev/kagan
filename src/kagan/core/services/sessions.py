@@ -710,6 +710,7 @@ This session uses capability profile `pair_worker` scoped to task `{task.id}`.
 **Coordination Tools (USE THESE):**
 - `task_list` - Discover concurrent work to avoid merge conflicts
 - `task_get(task_id, include_logs=true)` - Execution logs from prior work
+- `task_logs(task_id, offset, limit)` - Page older run logs when task_get is truncated
 
 **Read-Only Browsing:**
 - `task_list` - List tasks with optional filter/project/exclusion controls
@@ -729,6 +730,7 @@ Before implementing, check for parallel work and historical context:
    Review concurrent tasks to identify overlapping file modifications or shared dependencies.
 
 2. **Learn from history**: Call `task_get(task_id, include_logs=true)` on related completed tasks.
+   If logs are truncated or indicate more pages, call `task_logs(task_id, offset, limit)`.
    Avoid repeating failed approaches; reuse successful patterns.
 
 3. **Coordinate strategy**: If overlap exists, plan which files to modify first or wait for.

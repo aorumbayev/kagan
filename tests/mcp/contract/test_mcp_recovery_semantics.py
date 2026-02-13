@@ -139,6 +139,53 @@ async def test_task_get_include_logs_returns_empty_list(monkeypatch) -> None:
     assert (result["task_id"], result["status"], result["logs"]) == ("T1", "in_progress", [])
 
 
+async def test_task_logs_returns_paginated_page(monkeypatch) -> None:
+    class _BridgeStub:
+        async def list_task_logs(
+            self,
+            task_id: str,
+            *,
+            limit: int = 5,
+            offset: int = 0,
+            content_char_limit: int | None = None,
+            total_char_limit: int | None = None,
+        ) -> dict[str, object]:
+            del content_char_limit, total_char_limit
+            assert task_id == "T1"
+            assert limit == 2
+            assert offset == 2
+            return {
+                "task_id": task_id,
+                "logs": [
+                    {
+                        "run": 1,
+                        "content": "older run log",
+                        "created_at": "2026-02-13T10:00:00Z",
+                    }
+                ],
+                "count": 1,
+                "total_runs": 3,
+                "returned_runs": 1,
+                "offset": 2,
+                "limit": 2,
+                "has_more": False,
+                "next_offset": None,
+                "truncated": False,
+            }
+
+    monkeypatch.setattr("kagan.mcp.server._require_bridge", lambda _ctx: _BridgeStub())
+    mcp = _create_mcp_server(readonly=True)
+    tool = _tool(mcp, "task_logs")
+
+    result = await tool.fn(task_id="T1", limit=2, offset=2, ctx=None)
+
+    assert result.task_id == "T1"
+    assert result.total_runs == 3
+    assert result.returned_runs == 1
+    assert result.has_more is False
+    assert [entry.run for entry in result.logs] == [1]
+
+
 async def test_task_patch_append_note_uses_default_success_message(monkeypatch) -> None:
     class _BridgeStub:
         async def update_scratchpad(self, task_id: str, content: str) -> dict[str, object]:

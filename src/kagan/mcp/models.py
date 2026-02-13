@@ -222,6 +222,24 @@ class TaskListResponse(BaseModel):
     count: int = Field(default=0, description="Total number of tasks returned")
 
 
+class TaskLogsResponse(RecoveryResponse):
+    """Response from task_logs tool."""
+
+    task_id: str = Field(description="ID of the task")
+    logs: list[AgentLogEntry] = Field(default_factory=list, description="Ordered log entries")
+    count: int = Field(default=0, description="Number of logs returned")
+    total_runs: int = Field(default=0, description="Total runs available for this task")
+    returned_runs: int = Field(default=0, description="Number of runs included in this page")
+    offset: int = Field(default=0, description="Page offset used for this response")
+    limit: int = Field(default=0, description="Page limit used for this response")
+    has_more: bool = Field(default=False, description="Whether additional runs are available")
+    next_offset: int | None = Field(default=None, description="Offset for the next page")
+    truncated: bool = Field(
+        default=False,
+        description="Whether log content was reduced for transport safety",
+    )
+
+
 class TaskCreateResponse(TaskScopedMutatingResponse):
     """Response from task_create tool."""
 
