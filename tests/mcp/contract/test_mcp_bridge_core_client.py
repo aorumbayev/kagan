@@ -213,7 +213,7 @@ async def test_get_task_with_scratchpad() -> None:
     assert result["scratchpad"] == "notes"
     assert calls == [
         ("tasks", "get", {"task_id": "T1"}),
-        ("tasks", "scratchpad", {"task_id": "T1"}),
+        ("tasks", "scratchpad", {"task_id": "T1", "content_char_limit": 6000}),
     ]
 
 
@@ -252,6 +252,12 @@ async def test_get_task_with_logs_uses_tasks_logs() -> None:
                 },
             )
         if capability == "tasks" and method == "logs":
+            assert params == {
+                "task_id": "T1",
+                "limit": 3,
+                "content_char_limit": 2000,
+                "total_char_limit": 6000,
+            }
             return CoreResponse(
                 request_id="r2",
                 ok=True,
@@ -318,6 +324,12 @@ async def test_get_task_with_logs_fallback_when_query_unavailable() -> None:
                 },
             )
         if capability == "tasks" and method == "logs":
+            assert params == {
+                "task_id": "T1",
+                "limit": 3,
+                "content_char_limit": 2000,
+                "total_char_limit": 6000,
+            }
             return CoreResponse(
                 request_id="r2",
                 ok=False,
@@ -333,6 +345,58 @@ async def test_get_task_with_logs_fallback_when_query_unavailable() -> None:
     assert result["status"] == "backlog"
     assert result["logs"] == []
     assert calls == [("tasks", "get"), ("tasks", "logs")]
+
+
+@pytest.mark.asyncio
+async def test_get_task_degrades_when_optional_payload_query_exceeds_transport_limit() -> None:
+    """Oversized scratchpad/log queries should degrade rather than fail task_get."""
+    client = AsyncMock()
+
+    async def mock_request(
+        *,
+        session_id,
+        session_profile,
+        session_origin,
+        capability,
+        method,
+        params,
+    ):
+        assert session_id == SESSION
+        assert session_profile is None
+        assert session_origin is None
+        if capability == "tasks" and method == "get":
+            return CoreResponse(
+                request_id="r1",
+                ok=True,
+                result={
+                    "found": True,
+                    "task": {
+                        "id": "T-OVERSIZE",
+                        "title": "Oversized task",
+                        "status": "backlog",
+                        "description": None,
+                        "acceptance_criteria": [],
+                    },
+                },
+            )
+        if capability == "tasks" and method in {"scratchpad", "logs"}:
+            raise RuntimeError("Separator is not found, and chunk exceed the limit")
+        return CoreResponse(request_id="rx", ok=True, result={})
+
+    client.request = mock_request
+    bridge = CoreClientBridge(client, SESSION)
+    result = await bridge.get_task(
+        "T-OVERSIZE",
+        mode="full",
+        include_scratchpad=True,
+        include_logs=True,
+    )
+
+    assert result["task_id"] == "T-OVERSIZE"
+    assert result["scratchpad"] == "[omitted: scratchpad exceeded transport limits]"
+    assert result["scratchpad_truncated"] is True
+    assert result["logs"] == []
+    assert result["logs_truncated"] is True
 
 
 @pytest.mark.asyncio
@@ -536,7 +600,7 @@ async def test_get_task_full_mode_stays_within_transport_budget() -> None:
 
     assert result["task_id"] == "T-BUDGET-F"
     assert result["status"] == "backlog"
-    assert len(json.dumps(result, ensure_ascii=True, default=str)) <= 40_000
+    assert len(json.dumps(result, ensure_ascii=True, default=str)) <= 24_000
 
 
 @pytest.mark.asyncio

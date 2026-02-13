@@ -12,7 +12,12 @@ import pytest
 from kagan.core.api import KaganAPI
 from kagan.core.events import TaskDeleted
 from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
-from kagan.core.request_handlers import handle_task_context, handle_task_delete, handle_task_logs
+from kagan.core.request_handlers import (
+    handle_task_context,
+    handle_task_delete,
+    handle_task_logs,
+    handle_task_scratchpad,
+)
 
 
 def _api(**services: object) -> KaganAPI:
@@ -174,6 +179,45 @@ async def test_task_logs_returns_empty_on_fetch_failures() -> None:
     assert result["task_id"] == "task-1"
     assert result["count"] == 0
     assert result["logs"] == []
+
+
+async def test_task_scratchpad_applies_transport_limit() -> None:
+    task_service = SimpleNamespace(get_scratchpad=AsyncMock(return_value="x" * 1200))
+    f = _api(task_service=task_service)
+
+    result = await handle_task_scratchpad(
+        f,
+        {"task_id": "task-1", "content_char_limit": 256},
+    )
+
+    assert result["task_id"] == "task-1"
+    assert result["truncated"] is True
+    assert "[truncated " in result["content"]
+
+
+async def test_task_logs_applies_transport_limits() -> None:
+    execution = SimpleNamespace(id="exec-1", created_at=datetime.now(tz=UTC))
+    execution_service = SimpleNamespace(
+        list_executions_for_task=AsyncMock(return_value=[execution]),
+        count_executions_for_task=AsyncMock(return_value=1),
+        get_execution_log_entries=AsyncMock(return_value=[SimpleNamespace(logs="x" * 500)]),
+    )
+    f = _api(execution_service=execution_service)
+
+    result = await handle_task_logs(
+        f,
+        {
+            "task_id": "task-1",
+            "limit": 5,
+            "content_char_limit": 64,
+            "total_char_limit": 256,
+        },
+    )
+
+    assert result["task_id"] == "task-1"
+    assert result["count"] == 1
+    assert result["truncated"] is True
+    assert "[truncated " in result["logs"][0]["content"]
 
 
 async def test_delete_task_publishes_task_deleted_event(

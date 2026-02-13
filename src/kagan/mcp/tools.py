@@ -29,9 +29,15 @@ _FULL_LOG_ENTRIES = 10
 _SUMMARY_LOG_BUDGET = 7_500
 _FULL_LOG_BUDGET = 24_000
 _SUMMARY_RESPONSE_BUDGET = 12_000
-_FULL_RESPONSE_BUDGET = 40_000
+_FULL_RESPONSE_BUDGET = 24_000
 _SUMMARY_TITLE_LIMIT = 400
 _FULL_TITLE_LIMIT = 1_000
+_SUMMARY_SCRATCHPAD_FETCH_LIMIT = 6_000
+_FULL_SCRATCHPAD_FETCH_LIMIT = 14_000
+_SUMMARY_LOG_FETCH_ENTRY_LIMIT = 2_000
+_FULL_LOG_FETCH_ENTRY_LIMIT = 6_000
+_SUMMARY_LOG_FETCH_BUDGET = 6_000
+_FULL_LOG_FETCH_BUDGET = 18_000
 _QUERY_UNAVAILABLE_CODES = {"UNKNOWN_METHOD", "UNAUTHORIZED"}
 
 
@@ -169,6 +175,19 @@ class CoreClientBridge:
             return value
         omitted_chars = len(value) - limit
         return f"{value[:limit]}\n\n[truncated {omitted_chars} chars]"
+
+    @staticmethod
+    def _is_transport_oversize_error(exc: Exception) -> bool:
+        if not isinstance(exc, MCPBridgeError):
+            return False
+        message = f"{exc.code} {exc.message}".lower()
+        markers = (
+            "chunk exceed the limit",
+            "chunk is longer than limit",
+            "separator is not found",
+            "separator is found, but chunk",
+        )
+        return any(marker in message for marker in markers)
 
     @classmethod
     def _truncate_acceptance_criteria(cls, value: object, *, mode: str) -> list[str] | None:
@@ -396,6 +415,19 @@ class CoreClientBridge:
                     message=str(exc),
                     hint="Ensure Kagan core is running and reachable, then retry.",
                 ) from exc
+            except Exception as exc:
+                if attempt < max_attempts - 1 and await self._recover_client(
+                    refresh_endpoint=False
+                ):
+                    continue
+                raise MCPBridgeError.core_failure(
+                    kind=kind,
+                    capability=capability,
+                    method=method,
+                    code="DISCONNECTED",
+                    message=str(exc),
+                    hint="Ensure Kagan core is running and reachable, then retry.",
+                ) from exc
 
             if resp.ok:
                 return resp.result or {}
@@ -468,27 +500,77 @@ class CoreClientBridge:
         }
 
         if include_scratchpad:
-            scratchpad_result = await self._query("tasks", "scratchpad", {"task_id": task_id})
-            response["scratchpad"] = self._truncate_text(
-                scratchpad_result.get("content"),
-                limit=text_limit,
+            scratchpad_fetch_limit = (
+                _FULL_SCRATCHPAD_FETCH_LIMIT
+                if mode_name == "full"
+                else _SUMMARY_SCRATCHPAD_FETCH_LIMIT
             )
+            try:
+                scratchpad_result = await self._query(
+                    "tasks",
+                    "scratchpad",
+                    {
+                        "task_id": task_id,
+                        "content_char_limit": scratchpad_fetch_limit,
+                    },
+                )
+            except MCPBridgeError as exc:
+                if self._is_transport_oversize_error(exc):
+                    logger.warning(
+                        "tasks.scratchpad response exceeded transport budget for task %s; "
+                        "returning bounded placeholder",
+                        task_id,
+                    )
+                    response["scratchpad"] = "[omitted: scratchpad exceeded transport limits]"
+                    response["scratchpad_truncated"] = True
+                else:
+                    raise
+            else:
+                response["scratchpad"] = self._truncate_text(
+                    scratchpad_result.get("content"),
+                    limit=text_limit,
+                )
+                response["scratchpad_truncated"] = bool(scratchpad_result.get("truncated", False))
 
         if include_logs:
             logs: list[dict[str, Any]] = []
+            max_entries = _FULL_LOG_ENTRIES if mode_name == "full" else _SUMMARY_LOG_ENTRIES
+            entry_limit = _FULL_LOG_ENTRY_LIMIT if mode_name == "full" else _SUMMARY_LOG_ENTRY_LIMIT
+            fetch_entry_limit = (
+                _FULL_LOG_FETCH_ENTRY_LIMIT
+                if mode_name == "full"
+                else _SUMMARY_LOG_FETCH_ENTRY_LIMIT
+            )
+            fetch_budget = (
+                _FULL_LOG_FETCH_BUDGET if mode_name == "full" else _SUMMARY_LOG_FETCH_BUDGET
+            )
             try:
-                logs_result = await self._query("tasks", "logs", {"task_id": task_id})
+                logs_result = await self._query(
+                    "tasks",
+                    "logs",
+                    {
+                        "task_id": task_id,
+                        "limit": max_entries,
+                        "content_char_limit": fetch_entry_limit,
+                        "total_char_limit": fetch_budget,
+                    },
+                )
             except MCPBridgeError as exc:
                 if not self._is_query_unavailable(exc):
-                    raise
-                logger.debug(
-                    "tasks.logs unavailable; returning empty logs list for task %s", task_id
-                )
+                    if self._is_transport_oversize_error(exc):
+                        logger.warning(
+                            "tasks.logs response exceeded transport budget for task %s; "
+                            "returning empty bounded logs",
+                            task_id,
+                        )
+                        response["logs_truncated"] = True
+                    else:
+                        raise
+                else:
+                    logger.debug(
+                        "tasks.logs unavailable; returning empty logs list for task %s", task_id
+                    )
             else:
-                max_entries = _FULL_LOG_ENTRIES if mode_name == "full" else _SUMMARY_LOG_ENTRIES
-                entry_limit = (
-                    _FULL_LOG_ENTRY_LIMIT if mode_name == "full" else _SUMMARY_LOG_ENTRY_LIMIT
-                )
                 logs = [
                     {
                         "run": int(log["run"]),
@@ -506,6 +588,7 @@ class CoreClientBridge:
                     logs = logs[-max_entries:]
                 budget = _FULL_LOG_BUDGET if mode_name == "full" else _SUMMARY_LOG_BUDGET
                 logs = self._trim_logs_to_budget(logs, budget_chars=budget)
+                response["logs_truncated"] = bool(logs_result.get("truncated", False))
             response["logs"] = logs
 
         if include_review:

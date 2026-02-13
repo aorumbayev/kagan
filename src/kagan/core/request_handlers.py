@@ -36,6 +36,30 @@ if TYPE_CHECKING:
     from kagan.core.models.enums import PairTerminalBackend, TaskPriority, TaskStatus, TaskType
 
 logger = logging.getLogger(__name__)
+_DEFAULT_TASK_SCRATCHPAD_CHAR_LIMIT = 16_000
+_DEFAULT_TASK_LOG_ENTRY_CHAR_LIMIT = 6_000
+_DEFAULT_TASK_LOG_TOTAL_CHAR_LIMIT = 18_000
+
+
+def _bounded_int(
+    value: object,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(minimum, min(value, maximum))
+    return default
+
+
+def _truncate_for_transport(content: str, *, limit: int) -> tuple[str, bool]:
+    if limit <= 0:
+        return "", bool(content)
+    if len(content) <= limit:
+        return content, False
+    omitted_chars = len(content) - limit
+    return f"{content[:limit]}\n\n[truncated {omitted_chars} chars for transport]", True
 
 
 def _task_not_found_response(task_id: str) -> dict[str, Any]:
@@ -320,8 +344,15 @@ async def handle_task_search(api: KaganAPI, params: dict[str, Any]) -> dict[str,
 async def handle_task_scratchpad(api: KaganAPI, params: dict[str, Any]) -> dict[str, Any]:
     f = _assert_api(api)
     task_id = params["task_id"]
-    content = await f.get_scratchpad(task_id)
-    return {"task_id": task_id, "content": content}
+    content_limit = _bounded_int(
+        params.get("content_char_limit"),
+        default=_DEFAULT_TASK_SCRATCHPAD_CHAR_LIMIT,
+        minimum=256,
+        maximum=200_000,
+    )
+    scratchpad = await f.get_scratchpad(task_id)
+    content, truncated = _truncate_for_transport(scratchpad, limit=content_limit)
+    return {"task_id": task_id, "content": content, "truncated": truncated}
 
 
 async def handle_task_context(api: KaganAPI, params: dict[str, Any]) -> dict[str, Any]:
@@ -336,8 +367,54 @@ async def handle_task_logs(api: KaganAPI, params: dict[str, Any]) -> dict[str, A
     limit = 5
     if isinstance(raw_limit, int) and not isinstance(raw_limit, bool):
         limit = max(1, min(raw_limit, 20))
+    content_limit = _bounded_int(
+        params.get("content_char_limit"),
+        default=_DEFAULT_TASK_LOG_ENTRY_CHAR_LIMIT,
+        minimum=256,
+        maximum=200_000,
+    )
+    total_limit = _bounded_int(
+        params.get("total_char_limit"),
+        default=_DEFAULT_TASK_LOG_TOTAL_CHAR_LIMIT,
+        minimum=content_limit,
+        maximum=1_000_000,
+    )
     logs = await f.get_task_logs(task_id, limit=limit)
-    return {"task_id": task_id, "logs": logs, "count": len(logs)}
+
+    bounded_logs: list[dict[str, Any]] = []
+    truncated = False
+    used_chars = 0
+    per_entry_overhead = 128
+    for log in logs:
+        if not isinstance(log, dict):
+            continue
+
+        raw_content = str(log.get("content", ""))
+        content, entry_truncated = _truncate_for_transport(raw_content, limit=content_limit)
+        if entry_truncated:
+            truncated = True
+
+        remaining = total_limit - used_chars - per_entry_overhead
+        if remaining <= 0:
+            truncated = True
+            break
+        if len(content) > remaining:
+            content, _ = _truncate_for_transport(content, limit=remaining)
+            truncated = True
+        if not content:
+            continue
+
+        bounded_log = dict(log)
+        bounded_log["content"] = content
+        bounded_logs.append(bounded_log)
+        used_chars += len(content) + per_entry_overhead
+
+    return {
+        "task_id": task_id,
+        "logs": bounded_logs,
+        "count": len(bounded_logs),
+        "truncated": truncated,
+    }
 
 
 async def handle_task_create(api: KaganAPI, params: dict[str, Any]) -> dict[str, Any]:

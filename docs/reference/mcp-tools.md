@@ -76,6 +76,13 @@ It is a breaking, non-backward-compatible contract.
 | `include_logs`       | `bool \| null` | Include bounded logs (summary/full modes) |
 | `include_review`     | `bool \| null` | Include review payload when available     |
 
+### Notes
+
+- Scratchpad/log payloads are transport-bounded by default for reliability.
+- When optional payloads are reduced due transport safety, response may include:
+  - `scratchpad_truncated: true`
+  - `logs_truncated: true`
+
 ## `task_patch` API
 
 `task_patch` is the single task mutation endpoint for incremental updates.

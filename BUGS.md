@@ -88,12 +88,19 @@ Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `s
   - Summary/full task introspection remains unreliable.
   - Orchestration has to rely on `task_list`, `task_get(mode=context)`, and `job_poll(events=true, ...)` as workaround paths.
 - Suggested fix:
-  - Apply response-budgeting/safety-valve logic to all high-variance fields in summary/full payloads, not only logs/scratchpad.
-  - Enforce a hard serialized-size invariant before returning payloads.
+  - Bound scratchpad/log fetches at the core request-handler level so oversized blobs never reach MCP response framing.
+  - Keep bridge-side payload budgeting and add graceful overflow fallback for optional fields.
 - Resolution:
-  - `task_get` budget fitting now applies compaction to `title`, `acceptance_criteria`, and `runtime` in addition to logs/scratchpad/description.
-  - Added strict final fallback shaping so summary/full responses always fit transport-safe budgets.
-  - Added regression tests that assert serialized payload sizes stay within configured summary/full limits.
+  - Added core-side bounded fetch controls for `tasks.scratchpad` and `tasks.logs`:
+    - `content_char_limit`
+    - `total_char_limit` (logs)
+  - Updated bridge `task_get` to request bounded scratchpad/log payloads before response assembly.
+  - Added overflow-aware fallback for optional fields:
+    - `scratchpad` falls back to bounded placeholder with `scratchpad_truncated=true`
+    - `logs` falls back to `[]` with `logs_truncated=true`
+    - Transport-overflow errors no longer fail the entire `task_get` call.
+  - Tightened full-mode response budget and kept final safety-valve trimming.
+  - Added regression tests for bounded fetch params and transport-overflow degradation behavior.
 
 ## 6) MCP docs still referenced legacy tool names in setup/troubleshooting [RESOLVED]
 
