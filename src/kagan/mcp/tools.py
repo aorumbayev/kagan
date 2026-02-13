@@ -30,6 +30,8 @@ _SUMMARY_LOG_BUDGET = 7_500
 _FULL_LOG_BUDGET = 24_000
 _SUMMARY_RESPONSE_BUDGET = 12_000
 _FULL_RESPONSE_BUDGET = 40_000
+_SUMMARY_TITLE_LIMIT = 400
+_FULL_TITLE_LIMIT = 1_000
 _QUERY_UNAVAILABLE_CODES = {"UNKNOWN_METHOD", "UNAUTHORIZED"}
 
 
@@ -188,8 +190,7 @@ class CoreClientBridge:
     @classmethod
     def _fit_task_payload_budget(cls, payload: dict[str, Any], *, mode: str) -> dict[str, Any]:
         budget = _FULL_RESPONSE_BUDGET if mode == "full" else _SUMMARY_RESPONSE_BUDGET
-        serialized = json.dumps(payload, ensure_ascii=True, default=str)
-        if len(serialized) <= budget:
+        if cls._serialized_size(payload) <= budget:
             return payload
 
         trimmed = dict(payload)
@@ -207,31 +208,118 @@ class CoreClientBridge:
                 limit=description_limit,
             )
 
-        serialized = json.dumps(trimmed, ensure_ascii=True, default=str)
-        if len(serialized) <= budget:
+        if cls._serialized_size(trimmed) <= budget:
             return trimmed
 
         if isinstance(trimmed.get("logs"), list):
             logs_budget = max(0, budget // 3)
             trimmed["logs"] = cls._trim_logs_to_budget(trimmed["logs"], budget_chars=logs_budget)
 
-        serialized = json.dumps(trimmed, ensure_ascii=True, default=str)
-        if len(serialized) <= budget:
+        if isinstance(trimmed.get("title"), str):
+            title_limit = _FULL_TITLE_LIMIT if mode == "full" else _SUMMARY_TITLE_LIMIT
+            trimmed["title"] = cls._truncate_text(trimmed["title"], limit=title_limit) or ""
+
+        if isinstance(trimmed.get("runtime"), dict):
+            trimmed["runtime"] = cls._compact_runtime(trimmed["runtime"], mode=mode)
+
+        if isinstance(trimmed.get("acceptance_criteria"), list):
+            if mode == "full":
+                max_items = 20
+                item_limit = 320
+            else:
+                max_items = 8
+                item_limit = 160
+            trimmed["acceptance_criteria"] = cls._compact_string_list(
+                trimmed["acceptance_criteria"],
+                max_items=max_items,
+                item_limit=item_limit,
+                label="criteria",
+            )
+
+        if cls._serialized_size(trimmed) <= budget:
             return trimmed
 
         # Last-resort safety valve for transport framing limits.
-        trimmed.pop("logs", None)
-        if isinstance(trimmed.get("scratchpad"), str):
-            trimmed["scratchpad"] = cls._truncate_text(
-                trimmed["scratchpad"],
-                limit=max(0, budget // 4),
-            )
+        for key in ("logs", "scratchpad", "runtime", "acceptance_criteria"):
+            trimmed.pop(key, None)
+            if cls._serialized_size(trimmed) <= budget:
+                return trimmed
+
         if isinstance(trimmed.get("description"), str):
             trimmed["description"] = cls._truncate_text(
                 trimmed["description"],
-                limit=max(0, budget // 5),
+                limit=max(0, budget // 10),
             )
-        return trimmed
+            if cls._serialized_size(trimmed) <= budget:
+                return trimmed
+
+        title_value = trimmed.get("title")
+        status_value = trimmed.get("status")
+        minimal = {
+            "task_id": str(trimmed.get("task_id", "")),
+            "title": cls._truncate_text(
+                str(title_value) if title_value is not None else "",
+                limit=120,
+            )
+            or "",
+            "status": str(status_value) if status_value is not None else "",
+        }
+        if cls._serialized_size(minimal) <= budget:
+            return minimal
+        minimal["title"] = minimal["title"][:32]
+        return minimal
+
+    @staticmethod
+    def _serialized_size(payload: dict[str, Any]) -> int:
+        return len(json.dumps(payload, ensure_ascii=True, default=str))
+
+    @classmethod
+    def _compact_string_list(
+        cls,
+        values: list[object],
+        *,
+        max_items: int,
+        item_limit: int,
+        label: str,
+    ) -> list[str]:
+        normalized = [cls._truncate_text(str(value), limit=item_limit) or "" for value in values]
+        if len(normalized) <= max_items:
+            return normalized
+        omitted = len(normalized) - max_items
+        return [*normalized[:max_items], f"[truncated {omitted} {label}]"]
+
+    @classmethod
+    def _compact_runtime(cls, runtime: dict[str, Any], *, mode: str) -> dict[str, Any]:
+        compact = dict(runtime)
+        reason_limit = 600 if mode == "full" else 240
+        hint_limit = 240 if mode == "full" else 120
+        blocked_ids = 16 if mode == "full" else 8
+        overlap_hints = 12 if mode == "full" else 6
+
+        for key in ("blocked_reason", "pending_reason"):
+            value = compact.get(key)
+            if isinstance(value, str):
+                compact[key] = cls._truncate_text(value, limit=reason_limit)
+
+        blocked = compact.get("blocked_by_task_ids")
+        if isinstance(blocked, list):
+            compact["blocked_by_task_ids"] = cls._compact_string_list(
+                blocked,
+                max_items=blocked_ids,
+                item_limit=hint_limit,
+                label="task IDs",
+            )
+
+        hints = compact.get("overlap_hints")
+        if isinstance(hints, list):
+            compact["overlap_hints"] = cls._compact_string_list(
+                hints,
+                max_items=overlap_hints,
+                item_limit=hint_limit,
+                label="hints",
+            )
+
+        return compact
 
     async def _refresh_client_from_discovery(self) -> bool:
         from kagan.core.ipc.client import IPCClient

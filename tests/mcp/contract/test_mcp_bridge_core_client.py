@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -427,6 +428,115 @@ async def test_get_task_summary_mode_truncates_description_and_acceptance_criter
     assert isinstance(result["acceptance_criteria"], list)
     assert len(result["acceptance_criteria"]) == 21
     assert result["acceptance_criteria"][-1].startswith("[truncated ")
+
+
+@pytest.mark.asyncio
+async def test_get_task_summary_mode_stays_within_transport_budget() -> None:
+    """summary payload should stay under budget even with oversized runtime/title/criteria."""
+    client = make_client(
+        {
+            "found": True,
+            "task": {
+                "id": "T-BUDGET-S",
+                "title": "x" * 18_000,
+                "status": "backlog",
+                "description": "d" * 8_000,
+                "acceptance_criteria": [f"criterion-{idx}-" + ("x" * 1_000) for idx in range(80)],
+                "runtime": {
+                    "blocked_reason": "blocked-" + ("r" * 5_000),
+                    "pending_reason": "pending-" + ("p" * 5_000),
+                    "blocked_by_task_ids": [f"task-{idx}-" + ("t" * 200) for idx in range(120)],
+                    "overlap_hints": [f"hint-{idx}-" + ("h" * 500) for idx in range(200)],
+                },
+            },
+        }
+    )
+    bridge = CoreClientBridge(client, SESSION)
+    result = await bridge.get_task("T-BUDGET-S", mode="summary")
+
+    assert result["task_id"] == "T-BUDGET-S"
+    assert result["status"] == "backlog"
+    assert len(json.dumps(result, ensure_ascii=True, default=str)) <= 12_000
+
+
+@pytest.mark.asyncio
+async def test_get_task_full_mode_stays_within_transport_budget() -> None:
+    """full payload should stay under budget even with large logs/scratchpad inputs."""
+    client = AsyncMock()
+
+    async def mock_request(
+        *,
+        session_id,
+        session_profile,
+        session_origin,
+        capability,
+        method,
+        params,
+    ):
+        assert session_id == SESSION
+        assert session_profile is None
+        assert session_origin is None
+        if capability == "tasks" and method == "get":
+            return CoreResponse(
+                request_id="r1",
+                ok=True,
+                result={
+                    "found": True,
+                    "task": {
+                        "id": "T-BUDGET-F",
+                        "title": "x" * 24_000,
+                        "status": "backlog",
+                        "description": "d" * 20_000,
+                        "acceptance_criteria": [
+                            f"criterion-{idx}-" + ("x" * 1_600) for idx in range(120)
+                        ],
+                        "runtime": {
+                            "blocked_reason": "blocked-" + ("r" * 12_000),
+                            "pending_reason": "pending-" + ("p" * 12_000),
+                            "blocked_by_task_ids": [
+                                f"task-{idx}-" + ("t" * 400) for idx in range(120)
+                            ],
+                            "overlap_hints": [f"hint-{idx}-" + ("h" * 800) for idx in range(200)],
+                        },
+                    },
+                },
+            )
+        if capability == "tasks" and method == "scratchpad":
+            return CoreResponse(
+                request_id="r2",
+                ok=True,
+                result={"content": "s" * 80_000},
+            )
+        if capability == "tasks" and method == "logs":
+            return CoreResponse(
+                request_id="r3",
+                ok=True,
+                result={
+                    "task_id": "T-BUDGET-F",
+                    "logs": [
+                        {
+                            "run": idx,
+                            "content": f"log-{idx}-" + ("x" * 30_000),
+                            "created_at": "2026-02-09T10:00:00+00:00",
+                        }
+                        for idx in range(1, 25)
+                    ],
+                },
+            )
+        return CoreResponse(request_id="rx", ok=True, result={})
+
+    client.request = mock_request
+    bridge = CoreClientBridge(client, SESSION)
+    result = await bridge.get_task(
+        "T-BUDGET-F",
+        mode="full",
+        include_scratchpad=True,
+        include_logs=True,
+    )
+
+    assert result["task_id"] == "T-BUDGET-F"
+    assert result["status"] == "backlog"
+    assert len(json.dumps(result, ensure_ascii=True, default=str)) <= 40_000
 
 
 @pytest.mark.asyncio

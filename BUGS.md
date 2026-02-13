@@ -68,22 +68,32 @@ Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `s
 - Resolution:
   - `tasks.list` handler now reads `include_scratchpad` and populates per-task scratchpad content.
 
-## 5) `task_get(mode=full)` still exceeds MCP transport chunk limits [OPEN/REGRESSION]
+## 5) `task_get` summary/full payload paths still exceed MCP transport chunk limits [RESOLVED]
 
 - Observed behavior:
-  - `task_get` with full payload flags can still fail with:
+  - `task_get` still fails on `mode=summary` and `mode=full` with separator/chunk errors, e.g.:
     - "Separator is not found, and chunk exceed the limit"
-  - Reproduced with:
-    - `task_get(task_id=..., mode=context, include_logs=true, include_scratchpad=true)` (current naming)
+    - "Separator is found, but chunk is longer than limit"
+  - Reproduced post-reinstall on latest consolidated tool surface with:
+    - `task_get(task_id=39c01113, mode=full, include_logs=true, include_scratchpad=true)`
+    - `task_get(task_id=39c01113, mode=summary, include_scratchpad=true)`
+    - `task_get(task_id=7be6b6b8, mode=summary)`
+    - `task_get(task_id=7be6b6b8, mode=full, include_logs=true, include_scratchpad=true)`
+- Contrasting successful path:
+  - `task_get(task_id=7be6b6b8, mode=context)` succeeds in the same session.
 - Current contrasting behavior:
   - `task_wait` now returns structured timeout/status responses (no empty opaque error).
   - `task_list(include_scratchpad=true)` now returns scratchpad text.
 - Impact:
-  - Full task introspection remains unreliable for long-running tasks with large scratchpad/log payloads.
-  - Orchestration has to use narrower reads (`mode=summary`, filtered `task_list`, and `job_poll(events=true, ...)`) as a workaround.
+  - Summary/full task introspection remains unreliable.
+  - Orchestration has to rely on `task_list`, `task_get(mode=context)`, and `job_poll(events=true, ...)` as workaround paths.
 - Suggested fix:
-  - Apply response-budgeting/safety-valve logic to the full `task_get` payload path after logs/scratchpad inclusion.
-  - Consider explicit truncation metadata per large field (`logs_truncated`, `scratchpad_truncated`) and optional pagination.
+  - Apply response-budgeting/safety-valve logic to all high-variance fields in summary/full payloads, not only logs/scratchpad.
+  - Enforce a hard serialized-size invariant before returning payloads.
+- Resolution:
+  - `task_get` budget fitting now applies compaction to `title`, `acceptance_criteria`, and `runtime` in addition to logs/scratchpad/description.
+  - Added strict final fallback shaping so summary/full responses always fit transport-safe budgets.
+  - Added regression tests that assert serialized payload sizes stay within configured summary/full limits.
 
 ## 6) MCP docs still referenced legacy tool names in setup/troubleshooting [RESOLVED]
 
