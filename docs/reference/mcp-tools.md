@@ -1,10 +1,13 @@
 ---
 title: MCP tools reference
-description: Tool catalog, capability profiles, and recovery semantics
+description: Consolidated tool catalog, pagination contract, and scope rules
 icon: material/tools
 ---
 
 # MCP tools reference
+
+This document defines the consolidated MCP toolset for Kagan.
+It is a breaking, non-backward-compatible contract.
 
 ## Annotation model
 
@@ -12,131 +15,137 @@ icon: material/tools
 | ------------- | ---------------------------------- |
 | `read-only`   | Reads state only                   |
 | `mutating`    | Modifies state                     |
+| `mixed`       | Action-dependent read/write modes  |
 | `destructive` | Irreversible/high-impact operation |
 
 ## Tool catalog
 
-### Shared coordination
+### Core task workflow
 
-| Tool                         | Annotation  | Purpose                                        |
-| ---------------------------- | ----------- | ---------------------------------------------- |
-| `propose_plan(tasks, todos)` | `mutating`  | Submit structured plan payload                 |
-| `get_task(task_id, ...)`     | `read-only` | Read task with optional logs/review/scratchpad |
-| `tasks_list(...)`            | `read-only` | List tasks                                     |
-| `tasks_wait(task_id, ...)`   | `read-only` | Long-poll until task status changes or timeout |
-| `projects_list(...)`         | `read-only` | List projects                                  |
-| `repos_list(project_id)`     | `read-only` | List repos in project                          |
-| `audit_tail(...)`            | `read-only` | Read recent audit events                       |
+| Tool                | Annotation    | Purpose |
+| ------------------- | ------------- | ------- |
+| `task_get(...)`     | `read-only`   | Read bounded task snapshot (`summary`) or full bounded context (`context`) |
+| `task_list(...)`    | `read-only`   | Paginated task listing |
+| `task_stream(...)`  | `read-only`   | Paginated large task data (`notes` or `logs`) |
+| `task_wait(...)`    | `read-only`   | Long-poll task status changes |
+| `task_create(...)`  | `mutating`    | Create a task |
+| `task_patch(...)`   | `mutating`    | Apply partial task changes, transitions, or note append |
+| `task_delete(...)`  | `destructive` | Delete a task |
 
-### Task and project operations
+### Automation jobs
 
-| Tool                                  | Annotation    | Purpose                  |
-| ------------------------------------- | ------------- | ------------------------ |
-| `get_context(task_id)`                | `read-only`   | Task + workspace context |
-| `update_scratchpad(task_id, content)` | `mutating`    | Append task notes        |
-| `tasks_create(...)`                   | `mutating`    | Create task              |
-| `tasks_update(...)`                   | `mutating`    | Update task fields       |
-| `tasks_move(task_id, status)`         | `mutating`    | Move Kanban status       |
-| `tasks_delete(task_id)`               | `destructive` | Delete task              |
-| `projects_create(...)`                | `mutating`    | Create project           |
-| `projects_open(project_id)`           | `mutating`    | Open/switch project      |
+| Tool             | Annotation  | Purpose |
+| ---------------- | ----------- | ------- |
+| `job_start(...)` | `mutating`  | Submit async automation action for a task |
+| `job_poll(...)`  | `read-only` | Read job state; optionally wait and/or page events |
+| `job_cancel(...)` | `mutating`  | Cancel a submitted job |
 
-### Automation jobs (AUTO)
+### PAIR session lifecycle
 
-| Tool                                | Annotation  | Purpose                               |
-| ----------------------------------- | ----------- | ------------------------------------- |
-| `jobs_list_actions()`               | `read-only` | List valid `jobs_submit` action names |
-| `jobs_submit(task_id, action, ...)` | `mutating`  | Submit async automation job           |
-| `jobs_get(job_id, task_id)`         | `read-only` | Get job status/result                 |
-| `jobs_wait(job_id, task_id, ...)`   | `read-only` | Wait until terminal status or timeout |
-| `jobs_events(job_id, task_id, ...)` | `read-only` | Read paginated job events             |
-| `jobs_cancel(job_id, task_id)`      | `mutating`  | Cancel submitted job                  |
+| Tool                  | Annotation | Purpose |
+| --------------------- | ---------- | ------- |
+| `session_manage(...)` | mixed      | `open`, `read`, or `close` PAIR session state |
 
-### PAIR sessions
+### Project, review, and admin
 
-| Tool                       | Annotation  | Purpose                      |
-| -------------------------- | ----------- | ---------------------------- |
-| `sessions_create(...)`     | `mutating`  | Create/reuse PAIR session    |
-| `sessions_exists(task_id)` | `read-only` | Check PAIR session existence |
-| `sessions_kill(task_id)`   | `mutating`  | Terminate PAIR session       |
+| Tool                 | Annotation    | Purpose |
+| -------------------- | ------------- | ------- |
+| `project_list(...)`  | `read-only`   | Paginated project listing |
+| `project_open(...)`  | `mutating`    | Open/switch project |
+| `repo_list(...)`     | `read-only`   | Paginated repo listing by project |
+| `review_apply(...)`  | `destructive` | Apply review action (`approve`, `reject`, `merge`, `rebase`) |
+| `audit_list(...)`    | `read-only`   | Paginated audit events |
+| `settings_get()`     | `read-only`   | Read allowlisted settings |
+| `settings_set(...)`  | `mutating`    | Update allowlisted settings |
+| `plan_submit(...)`   | `mutating`    | Submit planner proposal payload |
 
-### Review and settings
+## Pagination Contract
 
-| Tool                               | Annotation    | Purpose                                |
-| ---------------------------------- | ------------- | -------------------------------------- |
-| `request_review(task_id, summary)` | `mutating`    | Move task to `REVIEW`                  |
-| `review(task_id, action, ...)`     | `destructive` | `approve`, `reject`, `merge`, `rebase` |
-| `settings_get()`                   | `read-only`   | Read allowlisted settings              |
-| `settings_update(...)`             | `mutating`    | Update allowlisted settings            |
+Kagan uses cursor pagination for every unbounded read.
 
-## `tasks_wait` long-poll API
+### Request
 
-`tasks_wait` blocks until a target task changes status or the timeout elapses.
-It uses event-driven wakeup (no polling loops) for efficient orchestration.
+| Field    | Type     | Description |
+| -------- | -------- | ----------- |
+| `cursor` | `string` | Opaque position token returned by previous page |
+| `limit`  | `int`    | Maximum items/chunks per page |
+
+### Response
+
+| Field         | Type              | Description |
+| ------------- | ----------------- | ----------- |
+| `items`       | `list[object]`    | Returned page payload |
+| `next_cursor` | `string \| null`  | `null` means end of sequence |
+
+Cursor tokens are opaque and server-owned. Clients must not parse them.
+
+## `task_stream` API
+
+`task_stream` is the only API for large task fields.
+`task_get` never returns unbounded blobs.
 
 ### Parameters
 
-| Parameter         | Type           | Default               | Description                                             |
-| ----------------- | -------------- | --------------------- | ------------------------------------------------------- |
-| `task_id`         | `string`       | required              | Task to watch                                           |
-| `timeout_seconds` | `float|string` | server default (900s) | Max wait time; numeric strings are accepted              |
-| `wait_for_status` | `list|string`  | `null` (any change)   | Status list, CSV string, or JSON list string             |
-| `from_updated_at` | `string`       | `null`                | ISO timestamp cursor for race-safe resume               |
+| Parameter | Type | Description |
+| --------- | ---- | ----------- |
+| `task_id` | `string` | Target task |
+| `stream`  | `string` | `notes` or `logs` |
+| `cursor`  | `string \| null` | Pagination cursor |
+| `limit`   | `int` | Page size |
 
-### Response fields
+## `task_patch` API
 
-| Field             | Type     | Description                                       |
-| ----------------- | -------- | ------------------------------------------------- |
-| `changed`         | `bool`   | Whether the task changed before timeout           |
-| `timed_out`       | `bool`   | Whether the wait timed out                        |
-| `task_id`         | `string` | ID of the watched task                            |
-| `previous_status` | `string` | Status when wait started                          |
-| `current_status`  | `string` | Status when wait ended                            |
-| `changed_at`      | `string` | ISO timestamp of the change                       |
-| `task`            | `object` | Compact task snapshot (no large logs/scratchpads) |
-| `code`            | `string` | Machine-readable result code                      |
+`task_patch` is the single task mutation endpoint for incremental updates.
+
+### Parameters
+
+| Parameter     | Type | Description |
+| ------------- | ---- | ----------- |
+| `task_id`     | `string` | Target task |
+| `set`         | `object \| null` | Partial field updates (title, description, status, priority, task_type, etc.) |
+| `transition`  | `string \| null` | `request_review`, `set_status`, or `set_task_type` |
+| `append_note` | `string \| null` | Text appended to task notes stream |
+
+## `task_wait` long-poll API
+
+`task_wait` blocks until a task changes or timeout is reached.
+
+### Parameters
+
+| Parameter         | Type           | Default               | Description |
+| ----------------- | -------------- | --------------------- | ----------- |
+| `task_id`         | `string`       | required              | Task to watch |
+| `timeout_seconds` | `float|string` | server default (900s) | Maximum wait duration |
+| `wait_for_status` | `list|string`  | `null`                | Optional status filter |
+| `from_updated_at` | `string`       | `null`                | Race-safe resume cursor |
 
 ### Response codes
 
-| Code                   | Meaning                                                          |
-| ---------------------- | ---------------------------------------------------------------- |
-| `TASK_CHANGED`         | Status changed during wait                                       |
-| `ALREADY_AT_STATUS`    | Task was already at a target status (immediate return)           |
-| `CHANGED_SINCE_CURSOR` | Task changed since `from_updated_at` cursor (race-safe catch-up) |
-| `WAIT_TIMEOUT`         | No change detected within timeout                                |
-| `WAIT_INTERRUPTED`     | Wait was cancelled/interrupted                                   |
-| `TASK_DELETED`         | Task was deleted during wait                                     |
-| `INVALID_TIMEOUT`      | Invalid timeout value                                            |
+| Code                   | Meaning |
+| ---------------------- | ------- |
+| `TASK_CHANGED`         | Status or task state changed |
+| `ALREADY_AT_STATUS`    | Task already matches filter |
+| `CHANGED_SINCE_CURSOR` | Task changed after supplied cursor |
+| `WAIT_TIMEOUT`         | Timeout reached |
+| `WAIT_INTERRUPTED`     | Wait cancelled/interrupted |
+| `TASK_DELETED`         | Task deleted while waiting |
+| `INVALID_TIMEOUT`      | Invalid timeout value |
+| `INVALID_PARAMS`       | Invalid parameter payload |
+
+## Scope and isolation
+
+- Task mutations are enforced against task-scoped sessions (`task:<task_id>`).
+- PAIR workers use task-scoped MCP sessions with capability lane `pair_worker`.
+- AUTO workers use task-scoped MCP sessions resolved from runtime permission policy.
+- Scoped task sessions cannot mutate other task IDs.
+- Global MCP access does not override task-scoped worker isolation.
 
 ### Timeout configuration
 
 Default and max timeouts are server-side configurable via settings:
 
-- `general.tasks_wait_default_timeout_seconds` (default: 900)
-- `general.tasks_wait_max_timeout_seconds` (default: 900)
-
-### Worktree base-ref strategy
-
-`settings_update` can also set `general.worktree_base_ref_strategy`:
-
-- `remote` (default): prefer `origin/<base_branch>` when present
-- `local_if_ahead`: use local `<base_branch>` only when it is ahead of `origin/<base_branch>`
-- `local`: always prefer local `<base_branch>`
-
-### Orchestration pattern
-
-```
-# Wait for task to reach REVIEW or DONE
-result = tasks_wait(task_id="T-1", wait_for_status=["REVIEW", "DONE"])
-
-# Race-safe resume after reconnect
-result = tasks_wait(task_id="T-1", from_updated_at=last_known_updated_at)
-
-# Short poll with timeout
-result = tasks_wait(task_id="T-1", timeout_seconds=30)
-if result.timed_out:
-    # retry or take action
-```
+- `general.tasks_wait_default_timeout_seconds`
+- `general.tasks_wait_max_timeout_seconds`
 
 ## Task field semantics
 
@@ -144,21 +153,15 @@ if result.timed_out:
 - `task_type` is execution mode: `AUTO`, `PAIR`.
 - `acceptance_criteria` accepts either a single string or a list of strings.
 
-Recovery behavior:
-
-- `tasks_move(status="AUTO"|"PAIR")` returns recovery metadata pointing to `tasks_update(..., task_type=...)`.
-- `jobs_submit` requires `task_type="AUTO"`.
-
 ## Common recovery codes
 
 | Code                   | Meaning                                         | Typical action                      |
 | ---------------------- | ----------------------------------------------- | ----------------------------------- |
-| `START_PENDING`        | Job accepted, pending scheduler admission       | Poll `jobs_wait` or `jobs_get`      |
+| `START_PENDING`        | Job accepted, pending scheduler admission       | Poll with `job_poll(wait=false)`    |
 | `DISCONNECTED`         | Core unavailable                                | Start/restart core, retry           |
 | `AUTH_STALE_TOKEN`     | MCP token is stale after core restart           | Reconnect MCP client                |
-| `STATUS_WAS_TASK_TYPE` | `status` was used where `task_type` is required | Retry with `tasks_update`           |
-| `WAIT_TIMEOUT`         | `tasks_wait` timed out without a change         | Retry with same or adjusted timeout |
-| `WAIT_INTERRUPTED`     | `tasks_wait` was interrupted/cancelled          | Retry with `from_updated_at` cursor |
+| `WAIT_TIMEOUT`         | `task_wait` timed out without a change          | Retry with same or adjusted timeout |
+| `WAIT_INTERRUPTED`     | `task_wait` was interrupted/cancelled           | Retry with `from_updated_at` cursor |
 
 ## Capability profiles
 
@@ -167,8 +170,8 @@ Higher profiles include lower-level permissions.
 | Profile       | Scope                                                                  |
 | ------------- | ---------------------------------------------------------------------- |
 | `viewer`      | Read-only operations                                                   |
-| `planner`     | `viewer` + planning surface                                            |
-| `pair_worker` | `planner` + task progress tools                                        |
+| `planner`     | `viewer` + `plan_submit`                                               |
+| `pair_worker` | `planner` + task mutation, automation, and PAIR session lifecycle      |
 | `operator`    | `pair_worker` + create/update/move + non-destructive review operations |
 | `maintainer`  | `operator` + destructive/admin operations                              |
 

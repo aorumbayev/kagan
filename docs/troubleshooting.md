@@ -57,11 +57,11 @@ kagan mcp
 
 Cause:
 
-- `jobs_submit` accepted the request but scheduler admission is still pending.
+- `job_start` was accepted but scheduler admission is still pending.
 
 Fix:
 
-- Poll with `jobs_wait` or `jobs_get` until the state becomes running/terminal.
+- Poll with `job_poll(wait=false)` until the state becomes running/terminal.
 
 ## `PAIR terminal backend is set to tmux, but tmux was not found in PATH.`
 

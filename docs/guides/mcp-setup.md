@@ -43,7 +43,7 @@ For editor-specific config files and full snippets, use [Editor MCP setup](edito
 ## 3. Verify connectivity
 
 1. Keep `kagan mcp` running.
-1. From your client, call `tasks_list`.
+1. From your client, call `task_list`.
 1. Confirm tasks from your active project are returned.
 
 ## 4. Choose a safe capability profile
@@ -59,6 +59,6 @@ For editor-specific config files and full snippets, use [Editor MCP setup](edito
 
 - `AUTH_STALE_TOKEN`: reconnect client or restart core lifecycle (`kagan core stop`, then `kagan core start`)
 - `DISCONNECTED`: core endpoint is unavailable; start Kagan or restart core
-- `START_PENDING`: task admission is pending; poll with `jobs_wait` or `jobs_get`
+- `START_PENDING`: task admission is pending; poll with `job_poll(wait=false)`
 
 Details: [MCP tools reference](../reference/mcp-tools.md).

@@ -131,7 +131,7 @@ kagan mcp --identity kagan_admin --capability maintainer
 
 1. Start Kagan in your project.
 1. Start the client MCP server.
-1. Run `tasks_list` from the client.
+1. Run `task_list` from the client.
 1. Confirm tasks are returned.
 
 If verification fails, use [Troubleshooting](../troubleshooting.md).
