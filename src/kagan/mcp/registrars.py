@@ -327,8 +327,10 @@ def register_shared_tools(
                         run = log.get("run")
                         content = log.get("content")
                         created_at = log.get("created_at")
-                        if isinstance(run, int) and isinstance(content, str) and isinstance(
-                            created_at, str
+                        if (
+                            isinstance(run, int)
+                            and isinstance(content, str)
+                            and isinstance(created_at, str)
                         ):
                             normalized_logs.append(
                                 AgentLogEntry(run=run, content=content, created_at=created_at)
@@ -1516,6 +1518,7 @@ def register_full_mode_tools(
         mutating_annotation=mutating_annotation,
         destructive_annotation=destructive_annotation,
     )
+
 
 __all__ = [
     "SharedToolRegistrationContext",

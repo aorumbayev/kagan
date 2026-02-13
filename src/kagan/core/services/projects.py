@@ -83,6 +83,7 @@ class ProjectService(Protocol):
         """Update Repo.default_branch, optionally marking branch as configured."""
         ...
 
+
 class ProjectServiceImpl:
     """Concrete ProjectService backed by session factory, EventBus, and RepoRepository."""
 

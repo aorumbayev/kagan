@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 from tests.helpers.config import write_test_config
 from tests.helpers.git import init_git_repo_with_commit
-from tests.helpers.mock_responses import make_propose_plan_tool_call
+from tests.helpers.mock_responses import make_plan_submit_tool_call
 from tests.helpers.mocks import MockAgent
 from tests.helpers.wait import (
     type_text,
@@ -101,7 +101,7 @@ async def test_planner_approval_returns_to_fresh_board(
     created_title = "Planner created task: board refresh regression"
     mock_agent_factory.set_default_response("Plan ready.")
     mock_agent_factory.set_default_tool_calls(
-        make_propose_plan_tool_call(
+        make_plan_submit_tool_call(
             tool_call_id="tc-board-refresh-001",
             tasks=[
                 {

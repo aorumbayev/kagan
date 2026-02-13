@@ -3,9 +3,10 @@
 Date: 2026-02-13
 Project: `kagan` (`c0cb25a3`)
 Context: Creating and executing `.github/context/github-plugin-v1` GH tasks purely via Kagan MCP tools.
-Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `task_stream`).
+Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `session_manage`).
 
 ## 1) `task_create` contract/type mismatch for `acceptance_criteria` [RESOLVED]
+
 - Observed behavior:
   - `task_create` rejected string input for `acceptance_criteria` with validation error:
     - "Input should be a valid list"
@@ -21,6 +22,7 @@ Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `t
   - Tool signatures and docs were updated to reflect accepted input forms.
 
 ## 2) `task_wait` appears non-functional (opaque empty error) [RESOLVED]
+
 - Observed behavior:
   - Multiple calls to `task_wait` returned:
     - `Error executing tool task_wait: `
@@ -39,6 +41,7 @@ Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `t
   - Bridge errors now guarantee non-empty fallback messages when core returns blank error text.
 
 ## 3) `task_get` can fail with chunk/separator errors [RESOLVED]
+
 - Observed behavior:
   - `task_get` (summary/full) intermittently failed with:
     - "Separator is not found, and chunk exceed the limit"
@@ -54,6 +57,7 @@ Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `t
   - Added response-size budgeting with a final safety valve to keep payloads transport-safe.
 
 ## 4) `task_list(include_scratchpad=true)` did not return scratchpad content [RESOLVED]
+
 - Observed behavior:
   - `task_list` with `include_scratchpad=true` still returned `scratchpad: null` for active task.
   - `task_get(mode=context)` for same task showed non-empty scratchpad.
@@ -65,6 +69,7 @@ Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `t
   - `tasks.list` handler now reads `include_scratchpad` and populates per-task scratchpad content.
 
 ## 5) `task_get(mode=full)` still exceeds MCP transport chunk limits [OPEN/REGRESSION]
+
 - Observed behavior:
   - `task_get` with full payload flags can still fail with:
     - "Separator is not found, and chunk exceed the limit"
@@ -75,12 +80,13 @@ Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `t
   - `task_list(include_scratchpad=true)` now returns scratchpad text.
 - Impact:
   - Full task introspection remains unreliable for long-running tasks with large scratchpad/log payloads.
-  - Orchestration has to use narrower reads (`mode=summary`, filtered `task_list`, and `task_stream`) as a workaround.
+  - Orchestration has to use narrower reads (`mode=summary`, filtered `task_list`, and `job_poll(events=true, ...)`) as a workaround.
 - Suggested fix:
   - Apply response-budgeting/safety-valve logic to the full `task_get` payload path after logs/scratchpad inclusion.
   - Consider explicit truncation metadata per large field (`logs_truncated`, `scratchpad_truncated`) and optional pagination.
 
 ## 6) MCP docs still referenced legacy tool names in setup/troubleshooting [RESOLVED]
+
 - Observed behavior:
   - MCP setup and troubleshooting pages were out of sync with the consolidated tool contract.
 - Impact:
@@ -94,3 +100,16 @@ Naming note: All entries below use consolidated MCP names (`task_*`, `job_*`, `t
     - `docs/guides/editor-mcp-setup.md`
     - `docs/troubleshooting.md`
     - `docs/reference/mcp-tools.md`
+
+## 7) Legacy wrapper names (`tasks_*`, `jobs_*`) still exposed in client tool surface [RESOLVED]
+
+- Observed behavior:
+  - Documentation used consolidated names, but some client call surfaces still exposed legacy wrapper names.
+- Impact:
+  - Inconsistent operator experience and confusion about the canonical MCP contract.
+- Suggested fix:
+  - Remove legacy wrappers entirely and keep one obvious tool surface.
+- Resolution:
+  - Removed legacy MCP wrapper tool names from the exposed tool surface.
+  - Updated MCP contract/smoke tests to use only consolidated names.
+  - Updated agent prompts and docs to consistently reference consolidated tools only.

@@ -398,6 +398,7 @@ async def handle_task_wait(api: KaganAPI, params: dict[str, Any]) -> dict[str, A
     import asyncio
 
     from kagan.core.events import TaskDeleted, TaskStatusChanged, TaskUpdated
+
     f = _assert_api(api)
     task_id = params["task_id"]
 

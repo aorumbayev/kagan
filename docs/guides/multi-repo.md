@@ -29,7 +29,7 @@ Press `Ctrl+R` to open the repo picker.
 ## 3. Set branch targets
 
 - Press `b` to set task-level base branch.
-Repo base branches are auto-synced from the currently checked out branch.
+  Repo base branches are auto-synced from the currently checked out branch.
 
 These values drive diff and merge targets, with task-level branch taking priority.
 

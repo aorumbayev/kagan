@@ -369,9 +369,7 @@ class CoreClientBridge:
             "description": self._truncate_text(
                 task_data.get("description"),
                 limit=(
-                    _FULL_DESCRIPTION_LIMIT
-                    if mode_name == "full"
-                    else _SUMMARY_DESCRIPTION_LIMIT
+                    _FULL_DESCRIPTION_LIMIT if mode_name == "full" else _SUMMARY_DESCRIPTION_LIMIT
                 ),
             ),
             "acceptance_criteria": self._truncate_acceptance_criteria(
@@ -687,6 +685,7 @@ class CoreClientBridge:
     async def update_settings(self, fields: dict[str, Any]) -> dict:
         """Update allowlisted settings fields."""
         return await self._command("settings", "update", {"fields": fields})
+
 
 def _format_review_feedback(review_result: object) -> str | None:
     """Format review result dict into a human-readable string."""

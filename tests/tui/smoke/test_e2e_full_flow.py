@@ -10,7 +10,7 @@ from tests.helpers.git import _run_git, configure_git_user, init_git_repo_with_c
 from tests.helpers.mock_responses import (
     SIMPLE_IMPLEMENTATION_TEXT,
     SIMPLE_PLAN_TEXT,
-    make_propose_plan_tool_call,
+    make_plan_submit_tool_call,
 )
 from tests.helpers.mocks import build_smart_agent_factory
 from tests.helpers.wait import (
@@ -97,7 +97,7 @@ async def test_full_e2e_flow(tmp_path: Path) -> None:
     config_path = tmp_path / "kagan-config" / "config.toml"
     db_path = tmp_path / "kagan-data" / "kagan.db"
 
-    plan_tool_calls = make_propose_plan_tool_call(
+    plan_tool_calls = make_plan_submit_tool_call(
         tool_call_id="tc-hello-001",
         tasks=[
             {
@@ -122,7 +122,7 @@ async def test_full_e2e_flow(tmp_path: Path) -> None:
         config_path=str(config_path),
         project_root=cwd_path,
         agent_factory=build_smart_agent_factory(
-            routes={"propose_plan": (SIMPLE_PLAN_TEXT, plan_tool_calls)},
+            routes={"plan_submit": (SIMPLE_PLAN_TEXT, plan_tool_calls)},
             default=(SIMPLE_IMPLEMENTATION_TEXT, {}),
         ),
     )
