@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 from kagan.core.services.workspaces.service import WorkspaceServiceImpl
 
 
@@ -21,6 +23,7 @@ def _make_service(*, repo_default_branch: str | None) -> WorkspaceServiceImpl:
             return_value=[
                 SimpleNamespace(
                     id="repo-1",
+                    name="repo-1",
                     path="/tmp/repo-1",
                     default_branch=repo_default_branch,
                 )
@@ -57,12 +60,10 @@ async def test_create_uses_repo_default_when_task_base_branch_absent() -> None:
     assert repos[0].target_branch == "develop"
 
 
-async def test_create_falls_back_to_main_when_base_and_repo_default_absent() -> None:
+async def test_create_raises_when_base_and_repo_default_absent() -> None:
     service = _make_service(repo_default_branch=None)
     service.provision = AsyncMock(return_value="ws-1")  # type: ignore[method-assign]
     service.get_agent_working_dir = AsyncMock(return_value=Path("/tmp/ws-1"))  # type: ignore[method-assign]
 
-    await service.create("task-1")
-
-    repos = service.provision.await_args.args[1]
-    assert repos[0].target_branch == "main"
+    with pytest.raises(ValueError, match="has no default branch configured"):
+        await service.create("task-1")

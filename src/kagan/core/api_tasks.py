@@ -401,9 +401,15 @@ class TaskApiMixin:
         if task.status != TaskStatus.REVIEW:
             return False, "Task is not in REVIEW", []
 
-        resolved_branch = (
-            base_branch or task.base_branch or self._ctx.config.general.default_base_branch
-        )
+        if base_branch is not None:
+            resolved_branch = base_branch.strip()
+            if not resolved_branch:
+                return False, "Base branch cannot be empty", []
+        else:
+            try:
+                resolved_branch = await self.resolve_task_base_branch(task)
+            except ValueError as exc:
+                return False, str(exc), []
 
         success, message, conflict_files = await self._ctx.workspace_service.rebase_onto_base(
             task.id, resolved_branch
@@ -433,6 +439,48 @@ class TaskApiMixin:
             f"Rebase conflict: {len(conflict_files)} file(s). Task moved to IN_PROGRESS.",
             conflict_files,
         )
+
+    async def resolve_task_base_branch(self, task: Task) -> str:
+        """Resolve effective base branch for a task.
+
+        Resolution order:
+        1. Explicit task override (`task.base_branch`)
+        2. Existing workspace repo target branch
+        3. Active repo default branch (or first project repo as fallback)
+        """
+        task_branch = (task.base_branch or "").strip()
+        if task_branch:
+            return task_branch
+
+        workspaces = await self._ctx.workspace_service.list_workspaces(task_id=task.id)
+        if workspaces:
+            workspace_repos = await self._ctx.workspace_service.get_workspace_repos(
+                workspaces[0].id
+            )
+            for repo in workspace_repos:
+                target_branch = str(repo.get("target_branch") or "").strip()
+                if target_branch:
+                    return target_branch
+
+        project_repos = await self._ctx.project_service.get_project_repos(task.project_id)
+        if not project_repos:
+            raise ValueError(f"Project {task.project_id} has no repositories")
+
+        active_repo_id = self._ctx.active_repo_id
+        selected_repo = None
+        if active_repo_id is not None:
+            selected_repo = next(
+                (repo for repo in project_repos if repo.id == active_repo_id),
+                None,
+            )
+
+        repo = selected_repo or project_repos[0]
+        repo_branch = (repo.default_branch or "").strip()
+        if repo_branch:
+            return repo_branch
+
+        repo_label = repo.display_name or repo.name
+        raise ValueError(f"Repository {repo_label} has no default branch configured")
 
     # ── Private helpers ────────────────────────────────────────────────
 

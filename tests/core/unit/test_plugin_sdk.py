@@ -109,7 +109,7 @@ async def _rollback_probe(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
 
 def _write_minimal_config(config_path: Path) -> None:
     config_path.write_text(
-        '[general]\nauto_review = false\ndefault_base_branch = "main"\n'
+        "[general]\nauto_review = false\n"
         'default_worker_agent = "claude"\n\n'
         "[agents.claude]\n"
         'identity = "claude.ai"\nname = "Claude"\nshort_name = "claude"\n'

@@ -87,11 +87,6 @@ class GeneralConfig(BaseModel):
         default="kagan",
         description="MCP server name for tool registration and config entries",
     )
-    default_base_branch: str = Field(default="main")
-    auto_sync_base_branch: bool = Field(
-        default=True,
-        description="Auto-update repo base branch when git branch changes",
-    )
     worktree_base_ref_strategy: WorktreeBaseRefStrategyLiteral = Field(
         default="remote",
         description=("Worktree base ref preference: remote (default), local_if_ahead, or local"),

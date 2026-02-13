@@ -594,7 +594,6 @@ class KanbanScreen(KaganScreen):
             KanbanActionId.TOGGLE_SEARCH: self._toggle_search_flow,
             KanbanActionId.SWITCH_GLOBAL_AGENT: self._switch_global_agent_flow,
             KanbanActionId.OPEN_SETTINGS: self._open_settings_flow,
-            KanbanActionId.SET_DEFAULT_BRANCH: self._set_default_branch_flow,
             KanbanActionId.OPEN_PLANNER: self._open_planner_flow,
         }
         operation_factory = global_operations.get(action)
@@ -770,12 +769,6 @@ class KanbanScreen(KaganScreen):
 
     async def _update_task_branch(self, task: Task, branch: str) -> None:
         await self._task_controller.update_task_branch(task, branch)
-
-    def action_set_default_branch(self) -> None:
-        self._dispatch_kanban_action(KanbanActionId.SET_DEFAULT_BRANCH)
-
-    async def _set_default_branch_flow(self) -> None:
-        await self._task_controller.set_default_branch_flow()
 
     def _start_branch_sync(self) -> None:
         """Start periodic git branch polling for auto-sync."""

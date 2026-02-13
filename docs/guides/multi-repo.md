@@ -29,9 +29,9 @@ Press `Ctrl+R` to open the repo picker.
 ## 3. Set branch targets
 
 - Press `b` to set task-level base branch.
-- Press `Shift+B` to set project/repo default base branch.
+Repo base branches are auto-synced from the currently checked out branch.
 
-These values drive diff and merge targets.
+These values drive diff and merge targets, with task-level branch taking priority.
 
 ## 4. Review changes per repo
 

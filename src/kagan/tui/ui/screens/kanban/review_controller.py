@@ -25,6 +25,13 @@ class KanbanReviewController:
     def __init__(self, screen: KanbanScreen) -> None:
         self.screen = screen
 
+    async def _resolve_base_branch(self, task: Task) -> str | None:
+        try:
+            return await self.screen.ctx.api.resolve_task_base_branch(task)
+        except ValueError as exc:
+            self.screen.notify(str(exc), severity="error")
+            return None
+
     def get_review_task(self, card: TaskCard | None) -> Task | None:
         if not card or not card.task_model:
             return None
@@ -50,7 +57,9 @@ class KanbanReviewController:
         task = self.get_review_task(self.screen.get_focused_card())
         if not task:
             return
-        base = task.base_branch or self.screen.ctx.config.general.default_base_branch
+        base = await self._resolve_base_branch(task)
+        if base is None:
+            return
         self.screen.notify("Rebasing... (this may take a few seconds)", severity="information")
         (
             success,
@@ -315,7 +324,9 @@ class KanbanReviewController:
         workspaces = await self.screen.ctx.api.list_workspaces(task_id=task.id)
 
         if not workspaces or self.screen.ctx.api.diff_service is None:
-            base = self.screen.kagan_app.config.general.default_base_branch
+            base = await self._resolve_base_branch(task)
+            if base is None:
+                return
             diff_text = await self.screen.ctx.api.get_workspace_diff(task.id, base_branch=base)
             result = await await_screen_result(
                 self.screen.app, DiffModal(title=title, diff_text=diff_text, task=task)
@@ -412,13 +423,17 @@ class KanbanReviewController:
                 if run_count == 0:
                     run_count = await self.screen.ctx.api.count_executions_for_task(task.id)
 
+        resolved_base_branch = await self._resolve_base_branch(task)
+        if resolved_base_branch is None:
+            return
+
         result = await await_screen_result(
             self.screen.app,
             ReviewModal(
                 task=task,
                 worktree_manager=self.screen.ctx.api.workspace_service,
                 agent_config=agent_config,
-                base_branch=self.screen.kagan_app.config.general.default_base_branch,
+                base_branch=resolved_base_branch,
                 agent_factory=self.screen.kagan_app._agent_factory,
                 execution_service=self.screen.ctx.api.execution_repo,
                 execution_id=execution_id,
@@ -450,7 +465,9 @@ class KanbanReviewController:
             return
 
         if result == "rebase_conflict":
-            base = task.base_branch or self.screen.ctx.config.general.default_base_branch
+            base = await self._resolve_base_branch(task)
+            if base is None:
+                return
             (
                 _success,
                 _msg,

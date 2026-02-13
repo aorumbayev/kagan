@@ -371,8 +371,7 @@ class TestSettingsAndAudit:
     async def test_get_settings(self, handle_env: tuple) -> None:
         _repo, api, _ctx = handle_env
         settings = await api.get_settings()
-        assert "general.default_base_branch" in settings
-        assert settings["general.default_base_branch"] == "main"
+        assert "general.default_base_branch" not in settings
         assert settings["general.worktree_base_ref_strategy"] == "remote"
 
     async def test_update_settings(self, handle_env: tuple) -> None:

@@ -18,8 +18,6 @@ EXPOSED_SETTINGS: tuple[str, ...] = (
     "general.auto_approve",
     "general.require_review_approval",
     "general.serialize_merges",
-    "general.default_base_branch",
-    "general.auto_sync_base_branch",
     "general.worktree_base_ref_strategy",
     "general.max_concurrent_agents",
     "general.default_worker_agent",
@@ -40,7 +38,6 @@ _BOOL_FIELDS: set[str] = {
     "general.auto_approve",
     "general.require_review_approval",
     "general.serialize_merges",
-    "general.auto_sync_base_branch",
     "ui.skip_pair_instructions",
 }
 _TIMEOUT_SECONDS_FIELDS: set[str] = {
@@ -65,8 +62,6 @@ def exposed_settings_snapshot(config: KaganConfig) -> dict[str, object]:
         "general.auto_approve": config.general.auto_approve,
         "general.require_review_approval": config.general.require_review_approval,
         "general.serialize_merges": config.general.serialize_merges,
-        "general.default_base_branch": config.general.default_base_branch,
-        "general.auto_sync_base_branch": config.general.auto_sync_base_branch,
         "general.worktree_base_ref_strategy": config.general.worktree_base_ref_strategy,
         "general.max_concurrent_agents": config.general.max_concurrent_agents,
         "general.default_worker_agent": config.general.default_worker_agent,
@@ -103,9 +98,6 @@ def _normalize_value(key: str, value: object) -> object:
         if isinstance(value, bool):
             return value
         raise ValueError(f"{key} must be a boolean")
-
-    if key == "general.default_base_branch":
-        return _normalize_non_empty_string(key, value)
 
     if key == "general.worktree_base_ref_strategy":
         strategy = _normalize_non_empty_string(key, value)

@@ -80,11 +80,7 @@ class KaganScreen(Screen):
         return repo.display_name or repo.name
 
     async def auto_sync_branch(self, header: KaganHeader) -> None:
-        """If auto_sync enabled and git branch changed, update Repo.default_branch."""
-        config = self.kagan_app.config
-        if not config.general.auto_sync_base_branch:
-            return
-
+        """If git branch changed, update Repo.default_branch."""
         repo_id = self.ctx.active_repo_id
         if repo_id is None:
             return

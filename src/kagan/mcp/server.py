@@ -137,8 +137,6 @@ _SETTINGS_UPDATE_FIELD_MAP: dict[str, str] = {
     "auto_approve": "general.auto_approve",
     "require_review_approval": "general.require_review_approval",
     "serialize_merges": "general.serialize_merges",
-    "default_base_branch": "general.default_base_branch",
-    "auto_sync_base_branch": "general.auto_sync_base_branch",
     "worktree_base_ref_strategy": "general.worktree_base_ref_strategy",
     "max_concurrent_agents": "general.max_concurrent_agents",
     "default_worker_agent": "general.default_worker_agent",

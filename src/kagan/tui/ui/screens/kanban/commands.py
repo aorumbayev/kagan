@@ -33,7 +33,6 @@ class KanbanActionId(StrEnum):
     SWITCH_GLOBAL_AGENT = "switch_global_agent"
     OPEN_SETTINGS = "open_settings"
     SET_TASK_BRANCH = "set_task_branch"
-    SET_DEFAULT_BRANCH = "set_default_branch"
     MERGE = "merge"
 
 
@@ -191,14 +190,6 @@ KANBAN_ACTIONS: tuple[KanbanAction, ...] = (
         KanbanActionId.SET_TASK_BRANCH,
         requires_task=True,
         worker_group="set-task-branch",
-        exclusive=True,
-        exit_on_error=False,
-    ),
-    KanbanAction(
-        "board set default branch",
-        "Set global default base branch",
-        KanbanActionId.SET_DEFAULT_BRANCH,
-        worker_group="set-default-branch",
         exclusive=True,
         exit_on_error=False,
     ),

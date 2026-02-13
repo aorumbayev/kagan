@@ -92,19 +92,6 @@ class SettingsModal(ModalScreen[bool]):
             yield Rule()
             yield Label("General", classes="section-title")
             with Vertical(classes="input-group"):
-                yield Label("Base branch", classes="input-label")
-                yield Input(
-                    value=self._config.general.default_base_branch,
-                    id="base-branch-input",
-                    placeholder="main",
-                )
-            with Horizontal(classes="setting-row"):
-                yield Switch(
-                    value=self._config.general.auto_sync_base_branch,
-                    id="auto-sync-base-branch-switch",
-                )
-                yield Label("Auto-sync base branch", classes="setting-label")
-            with Vertical(classes="input-group"):
                 yield Label("Max concurrent agents", classes="input-label")
                 yield Input(
                     value=str(self._config.general.max_concurrent_agents),
@@ -223,8 +210,6 @@ class SettingsModal(ModalScreen[bool]):
         require_review_approval = self.query_one("#require-review-approval-switch", Switch).value
         serialize_merges = self.query_one("#serialize-merges-switch", Switch).value
         skip_pair_instructions = self.query_one("#skip-pair-instructions-switch", Switch).value
-        auto_sync_base_branch = self.query_one("#auto-sync-base-branch-switch", Switch).value
-        base_branch = self.query_one("#base-branch-input", Input).value
         max_agents_str = self.query_one("#max-agents-input", Input).value
         default_agent_select = self.query_one("#default-agent-select", Select)
         default_agent = str(default_agent_select.value) if default_agent_select.value else "claude"
@@ -257,8 +242,6 @@ class SettingsModal(ModalScreen[bool]):
         self._config.general.auto_approve = auto_approve
         self._config.general.require_review_approval = require_review_approval
         self._config.general.serialize_merges = serialize_merges
-        self._config.general.default_base_branch = base_branch
-        self._config.general.auto_sync_base_branch = auto_sync_base_branch
         self._config.general.max_concurrent_agents = max_agents
         self._config.general.default_worker_agent = default_agent
         self._config.general.default_pair_terminal_backend = pair_terminal_backend
@@ -335,8 +318,6 @@ active = true'''
             f"auto_approve = {str(general.auto_approve).lower()}",
             f"require_review_approval = {str(general.require_review_approval).lower()}",
             f"serialize_merges = {str(general.serialize_merges).lower()}",
-            f'default_base_branch = "{general.default_base_branch}"',
-            f"auto_sync_base_branch = {str(general.auto_sync_base_branch).lower()}",
             f'worktree_base_ref_strategy = "{general.worktree_base_ref_strategy}"',
             f'default_worker_agent = "{general.default_worker_agent}"',
             f'default_pair_terminal_backend = "{general.default_pair_terminal_backend}"',

@@ -1260,42 +1260,6 @@ class PlannerScreen(KaganScreen):
             severity="warning",
         )
 
-    def action_set_default_branch(self) -> None:
-        """Open default branch selection flow for new tasks."""
-        self.run_worker(
-            self._set_default_branch_flow(),
-            group="planner-set-default-branch",
-            exclusive=True,
-            exit_on_error=False,
-        )
-
-    async def _set_default_branch_flow(self) -> None:
-        """Prompt user for default base branch and persist selection."""
-        from kagan.tui.ui.screens.branch_candidates import (
-            choose_branch_with_modal,
-        )
-
-        config = self.kagan_app.config
-        current = config.general.default_base_branch
-
-        result = await choose_branch_with_modal(
-            self.app,
-            project_root=self.kagan_app.project_root,
-            current_value=current,
-            title="Set Default Base Branch",
-            description="Branch used for new tasks (e.g. main, develop):",
-            timeout_seconds=BRANCH_LOOKUP_TIMEOUT_SECONDS,
-            warn=lambda message: self.notify(message, severity="warning"),
-        )
-
-        if result is not None:
-            config.general.default_base_branch = result
-            await config.save(self.kagan_app.config_path)
-            repo_id = self.ctx.active_repo_id
-            if repo_id:
-                await self.ctx.api.update_repo_default_branch(repo_id, result or "main")
-            self.notify(f"Default branch set to: {result}")
-
     async def _execute_clear(self, *, notify: bool = True) -> None:
         """Reset planner session and restart planner agent."""
         self._clearing = True

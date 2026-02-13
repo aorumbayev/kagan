@@ -483,14 +483,19 @@ class WorkspaceServiceImpl(WorkspaceMergeOpsMixin):
         if not repos:
             raise ValueError(f"Project {task.project_id} has no repos")
 
-        repo_inputs = [
-            RepoWorkspaceInput(
-                repo_id=repo.id,
-                repo_path=repo.path,
-                target_branch=base_branch or repo.default_branch or "main",
+        explicit_branch = (base_branch or "").strip()
+        repo_inputs: list[RepoWorkspaceInput] = []
+        for repo in repos:
+            target_branch = explicit_branch or (repo.default_branch or "").strip()
+            if not target_branch:
+                raise ValueError(f"Repository {repo.name} has no default branch configured")
+            repo_inputs.append(
+                RepoWorkspaceInput(
+                    repo_id=repo.id,
+                    repo_path=repo.path,
+                    target_branch=target_branch,
+                )
             )
-            for repo in repos
-        ]
         workspace_id = await self.provision(task_id, repo_inputs)
         return await self.get_agent_working_dir(workspace_id)
 

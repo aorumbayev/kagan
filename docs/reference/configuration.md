@@ -42,7 +42,6 @@ max_concurrent_agents = 3
 | ------------------------------- | -------------- | -------------------------------- | ------------------------------------------------------------------------------ |
 | `max_concurrent_agents`         | integer        | `3`                              | Concurrent AUTO execution cap                                                  |
 | `mcp_server_name`               | string         | `"kagan"`                        | MCP server registration name                                                   |
-| `default_base_branch`           | string         | `"main"`                         | Default merge/diff base branch                                                 |
 | `worktree_base_ref_strategy`    | string         | `"remote"`                       | Base ref preference for worktree add/diff: `remote`, `local_if_ahead`, `local` |
 | `auto_review`                   | boolean        | `true`                           | Run AI review on completion                                                    |
 | `auto_approve`                  | boolean        | `false`                          | Skip planner permission prompts                                                |

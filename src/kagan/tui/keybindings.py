@@ -53,7 +53,6 @@ KANBAN_BINDINGS: list[BindingType] = [
     Binding("R", "rebase", "Rebase", key_display="Shift+R", show=False),
     Binding("p", "open_planner", "Plan Mode", show=False),
     Binding("b", "set_task_branch", "Set Task Branch", show=False),
-    Binding("B", "set_default_branch", "Set Default Branch", key_display="Shift+B", show=False),
     Binding("A", "switch_global_agent", "Switch Agent", key_display="Shift+A", show=False),
     Binding("comma", "open_settings", "Settings", key_display=",", show=False),
     Binding("h", "focus_left", "Left", show=False),
@@ -158,7 +157,6 @@ PLANNER_BINDINGS: list[BindingType] = [
     Binding("ctrl+c", "cancel", "Stop", priority=True),
     Binding("f2", "refine", "Enhance", key_display="F2", priority=True),
     Binding("b", "set_task_branch", "Set Task Branch", show=False),
-    Binding("B", "set_default_branch", "Set Default Branch", key_display="Shift+B", show=False),
 ]
 
 TASK_EDITOR_BINDINGS: list[BindingType] = [

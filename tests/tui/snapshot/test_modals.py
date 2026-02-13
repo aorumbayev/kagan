@@ -154,7 +154,6 @@ AUTO_MODE_CONFIG = """\
 [general]
 auto_review = true
 auto_approve = true
-default_base_branch = "main"
 default_worker_agent = "claude"
 max_concurrent_agents = 3
 

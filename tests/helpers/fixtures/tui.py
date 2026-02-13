@@ -40,7 +40,6 @@ async def e2e_project(tmp_path: Path):
     config_content = """# Kagan Test Configuration
 [general]
 auto_review = false
-default_base_branch = "main"
 default_worker_agent = "claude"
 
 [agents.claude]

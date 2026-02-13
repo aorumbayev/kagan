@@ -421,7 +421,6 @@ async def create_app_context(
     task_repo = TaskRepository(
         db_path,
         project_root=project_root,
-        default_branch=config.general.default_base_branch,
     )
     await task_repo.initialize()
 

@@ -375,9 +375,27 @@ class AutomationReviewer:
         await self._tasks.update_fields(task.id, status=TaskStatus.BACKLOG)
         self._notify_task_changed()
 
+    async def _resolve_review_base_branch(self, task: TaskLike) -> str:
+        task_branch = (task.base_branch or "").strip()
+        if task_branch:
+            return task_branch
+
+        workspaces = await self._workspaces.list_workspaces(task_id=task.id)
+        if workspaces:
+            repos = await self._workspaces.get_workspace_repos(workspaces[0].id)
+            for repo in repos:
+                target_branch = str(repo.get("target_branch") or "").strip()
+                if target_branch:
+                    return target_branch
+
+        raise ValueError(
+            f"Task {task.id} has no base branch configured for review. "
+            "Set task branch explicitly or sync repository branch first."
+        )
+
     async def _build_review_prompt(self, task: TaskLike) -> str:
         """Build review prompt from template with commits and diff."""
-        base = task.base_branch or self._config.general.default_base_branch
+        base = await self._resolve_review_base_branch(task)
         commits = await self._workspaces.get_commit_log(task.id, base)
         diff_summary = await self._workspaces.get_diff_stats(task.id, base)
 

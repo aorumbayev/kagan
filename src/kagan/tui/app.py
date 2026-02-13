@@ -25,7 +25,7 @@ from kagan.core.constants import (
     KAGAN_BRANCH_CONFIGURED_KEY,
 )
 from kagan.core.debug_log import setup_debug_logging
-from kagan.core.git_utils import get_current_branch, get_remote_default_branch
+from kagan.core.git_utils import get_current_branch
 from kagan.core.instance_lock import InstanceLock, LockInfo
 from kagan.core.services.runtime import RuntimeContextState, RuntimeSessionEvent
 from kagan.core.terminal import supports_truecolor
@@ -413,19 +413,12 @@ class KaganApp(App):
         return True
 
     async def _first_time_branch_setup(self, repo: Repo) -> None:
-        """Auto-detect and set the base branch on first repo open."""
-        detected_default = await get_remote_default_branch(self.project_root)
-        branch = (
-            detected_default
-            or repo.default_branch
-            or self.config.general.default_base_branch
-            or "main"
-        )
-        if branch == "HEAD":
-            branch = self.config.general.default_base_branch or "main"
+        """Sync repo base branch from the currently checked out branch."""
+        branch = await get_current_branch(self.project_root)
+        if not branch:
+            self.log("Skipped first-time branch setup: no checked-out branch detected")
+            return
         await self.ctx.api.update_repo_default_branch(repo.id, branch, mark_configured=True)
-        self.config.general.default_base_branch = branch
-        await self.config.save(self.config_path)
 
     def _clear_active_repo(self) -> None:
         """Clear active repo selection when a project has no repos."""
