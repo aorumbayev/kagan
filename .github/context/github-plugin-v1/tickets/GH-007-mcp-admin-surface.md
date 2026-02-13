@@ -50,3 +50,11 @@ Expose minimal admin-safe MCP operations for GitHub plugin lifecycle.
 2. **Bridge pattern**: MCP tools delegate to plugin runtime via `_command("kagan_github", ...)` — no duplicate logic
 3. **Stable contract**: Tool names, param schemas, and response fields treated as V1 freeze
 4. **Machine-readable errors**: All failure responses include `code`, `message`, `hint` for admin tooling
+
+## Contract Scope Clarification
+- V1 contract freeze in this ticket applies to GitHub plugin admin tools only:
+  - `kagan_github_contract_probe`
+  - `kagan_github_connect_repo`
+  - `kagan_github_sync_issues`
+- Generic/core MCP catalog entries outside `kagan_github_*` (for example `tasks_wait`) are not part
+  of this initiative's frozen surface and may evolve independently.
