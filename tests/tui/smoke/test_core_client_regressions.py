@@ -150,6 +150,7 @@ async def test_task_output_streams_incremental_logs_for_external_running_executi
             card = kanban.query_one(f"#card-{task.id}", TaskCard)
             card.focus()
             await pilot.pause()
+            assert kanban.check_action("stop_agent", ()) is True
             await pilot.press("enter")
             review = cast("ReviewModal", await wait_for_screen(pilot, ReviewModal, timeout=10.0))
 

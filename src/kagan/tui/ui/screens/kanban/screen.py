@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import getters, on
 from textual.binding import Binding
@@ -184,13 +184,24 @@ class KanbanScreen(KaganScreen):
     def _runtime_view(self, task_id: str):
         return self.ctx.api.get_runtime_view(task_id)
 
+    @staticmethod
+    def _runtime_attr(runtime_view: object | None, name: str, default: Any = None) -> Any:
+        if runtime_view is None:
+            return default
+        if isinstance(runtime_view, dict):
+            return runtime_view.get(name, default)
+        return getattr(runtime_view, name, default)
+
     def _is_runtime_running(self, task_id: str) -> bool:
         runtime_view = self._runtime_view(task_id)
-        return runtime_view.is_running if runtime_view is not None else False
+        return bool(self._runtime_attr(runtime_view, "is_running", False))
 
     def _runtime_run_count(self, task_id: str) -> int:
         runtime_view = self._runtime_view(task_id)
-        return runtime_view.run_count if runtime_view is not None else 0
+        run_count = self._runtime_attr(runtime_view, "run_count", 0)
+        if isinstance(run_count, int) and not isinstance(run_count, bool):
+            return run_count
+        return 0
 
     def get_columns(self) -> list[KanbanColumn]:
         return [
