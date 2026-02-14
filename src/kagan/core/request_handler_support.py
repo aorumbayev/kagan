@@ -5,11 +5,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from kagan.core.runtime_helpers import runtime_snapshot_for_task
 from kagan.core.services.jobs import JobStatus
 
 if TYPE_CHECKING:
     from kagan.core.adapters.db.schema import Project, Task
     from kagan.core.bootstrap import AppContext
+    from kagan.core.runtime_helpers import RuntimeSnapshotSource
     from kagan.core.services.jobs import JobRecord
 
 TMUX_DOCS_URL = "https://github.com/tmux/tmux/wiki"
@@ -19,23 +21,38 @@ DEFAULT_EVENTS_LIMIT = 50
 MAX_EVENTS_LIMIT = 100
 
 
-def task_to_dict(task: Task) -> dict[str, Any]:
+def task_to_dict(
+    task: Task,
+    *,
+    runtime_service: RuntimeSnapshotSource | None = None,
+) -> dict[str, Any]:
     """Convert a Task domain object to the canonical dict representation."""
+    from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
+
+    status = task.status or TaskStatus.BACKLOG
+    priority = task.priority or TaskPriority.MEDIUM
+    task_type = task.task_type or TaskType.PAIR
     return {
         "id": task.id,
         "project_id": task.project_id,
         "parent_id": task.parent_id,
         "title": task.title,
         "description": task.description,
-        "status": task.status.value,
-        "priority": task.priority.value if task.priority else None,
-        "task_type": task.task_type.value if task.task_type else None,
+        "status": status.value,
+        "priority": priority.value,
+        "task_type": task_type.value,
         "terminal_backend": task.terminal_backend.value if task.terminal_backend else None,
         "agent_backend": task.agent_backend,
         "acceptance_criteria": task.acceptance_criteria,
         "base_branch": task.base_branch,
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
+        "runtime": dict(
+            runtime_snapshot_for_task(
+                task_id=task.id,
+                runtime_service=runtime_service,
+            )
+        ),
     }
 
 

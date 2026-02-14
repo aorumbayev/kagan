@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, Mock
 
 from kagan.core.adapters.db.schema import Repo
 from kagan.core.constants import KAGAN_BRANCH_CONFIGURED_KEY
@@ -126,11 +126,11 @@ async def test_startup_shows_welcome_when_no_project_decision(tmp_path: Path) ->
     assert isinstance(screen, WelcomeScreen)
 
 
-async def test_apply_active_repo_bootstraps_session_service_when_core_connected(
+async def test_apply_active_repo_sets_runtime_selection_when_core_connected(
     tmp_path: Path,
 ) -> None:
     app = KaganApp(db_path=":memory:", project_root=tmp_path)
-    api = SimpleNamespace(bootstrap_session_service=MagicMock())
+    api = SimpleNamespace()
     ctx = SimpleNamespace(active_project_id="proj-1", api=api)
     app._ctx = cast("Any", ctx)
     app._instance_lock = None
@@ -151,4 +151,3 @@ async def test_apply_active_repo_bootstraps_session_service_when_core_connected(
         project_id="proj-1",
         repo_id=repo.id,
     )
-    api.bootstrap_session_service.assert_called_once_with(repo_path, app.config)

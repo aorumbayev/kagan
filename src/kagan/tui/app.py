@@ -6,18 +6,12 @@ import asyncio
 import contextlib
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from textual.app import App, SystemCommand
 from textual.signal import Signal
 
 from kagan.core.agents.agent_factory import AgentFactory, create_agent
-from kagan.core.bootstrap import (
-    AppContext,
-    create_app_context,
-    create_signal_bridge,
-    wire_default_signals,
-)
 from kagan.core.config import KaganConfig
 from kagan.core.constants import (
     DEFAULT_CONFIG_PATH,
@@ -28,7 +22,9 @@ from kagan.core.debug_log import setup_debug_logging
 from kagan.core.git_utils import get_current_branch
 from kagan.core.instance_lock import InstanceLock, LockInfo
 from kagan.core.services.runtime import RuntimeContextState, RuntimeSessionEvent
+from kagan.core.session_binding import SessionNamespace
 from kagan.core.terminal import supports_truecolor
+from kagan.tui.core_client_api import CoreBackedApi, CoreBackedContext
 from kagan.tui.keybindings import APP_BINDINGS
 from kagan.tui.theme import KAGAN_THEME, KAGAN_THEME_256
 from kagan.tui.ui.screens.kanban import KanbanScreen
@@ -41,6 +37,7 @@ if TYPE_CHECKING:
     from textual.worker import Worker
 
     from kagan.core.adapters.db.schema import Project, Repo
+    from kagan.core.bootstrap import AppContext
     from kagan.core.ipc.client import IPCClient
     from kagan.tui.ui.screens.planner.state import PersistentPlannerState
 
@@ -76,7 +73,7 @@ class KaganApp(App):
         self.db_path = Path(db_path)
         self.config_path = Path(config_path)
         self.project_root = Path(project_root) if project_root else Path.cwd()
-        self._ctx: AppContext | None = None
+        self._ctx: Any | None = None
         self._core_client: IPCClient | None = None
         self.config: KaganConfig = KaganConfig()
         self.planner_state: PersistentPlannerState | None = None
@@ -132,49 +129,36 @@ class KaganApp(App):
         self.config = KaganConfig.load(self.config_path)
         self.log("Config loaded", path=str(self.config_path))
 
-        from kagan.core.ipc.discovery import discover_core_endpoint
+        from kagan.core.ipc.client import IPCClient
+        from kagan.core.launcher import ensure_core_running
 
-        endpoint = discover_core_endpoint()
-        if endpoint is not None:
-            from kagan.core.ipc.client import IPCClient
+        endpoint = await ensure_core_running(
+            config=self.config,
+            config_path=self.config_path,
+            db_path=self.db_path,
+        )
+        client = IPCClient(endpoint)
+        await client.connect()
 
-            try:
-                client = IPCClient(endpoint)
-                await client.connect()
-                self._core_client = client
-                self._core_status = "CONNECTED"
-                self.log(
-                    "Attached to running core",
-                    transport=endpoint.transport,
-                    address=endpoint.address,
-                )
-            except Exception as exc:
-                self.log(
-                    "Could not attach to core, using direct context",
-                    error=str(exc),
-                )
+        self._core_client = client
+        self._core_status = "CONNECTED"
+        self.log(
+            "Attached to core",
+            transport=endpoint.transport,
+            address=endpoint.address,
+        )
 
-        if self._ctx is None:
-            self._ctx = await create_app_context(
-                self.config_path,
-                self.db_path,
-                config=self.config,
-                project_root=self.project_root,
-                agent_factory=self._agent_factory,
-            )
-            ctx = self._ctx
+        session_id = f"{SessionNamespace.TUI.value}:{os.getpid()}-{id(self):x}"
+        self._ctx = CoreBackedContext(
+            config=self.config,
+            config_path=self.config_path,
+            db_path=self.db_path,
+            api=CoreBackedApi(client, session_id=session_id),
+        )
+        self.log("Core-backed context initialized", session_id=session_id)
 
-            bridge = create_signal_bridge(ctx.event_bus)
-            wire_default_signals(bridge, self)
-            ctx.signal_bridge = bridge
-            self.log("AppContext initialized with SignalBridge")
-
-            await self._reconcile_worktrees()
-            await self._reconcile_sessions()
-            await self._run_janitor()
-
-            await ctx.api.start_automation()
-            self.log("Automation service initialized (reactive mode)")
+        await self._reconcile_worktrees()
+        await self._run_janitor()
 
         await self._startup_screen_decision()
 
@@ -405,8 +389,6 @@ class KaganApp(App):
             repo_id=repo.id,
         )
 
-        self.ctx.api.bootstrap_session_service(self.project_root, self.config)
-
         if not (repo.scripts or {}).get(KAGAN_BRANCH_CONFIGURED_KEY):
             await self._first_time_branch_setup(repo)
 
@@ -511,15 +493,6 @@ class KaganApp(App):
             await self.planner_state.agent.stop()
         if self.planner_state and self.planner_state.refiner:
             await self.planner_state.refiner.stop()
-
-        if self._ctx:
-            # Mark repo closing early so any still-running worker gets a clean
-            # RepositoryClosing error instead of an opaque OperationalError.
-            if self._ctx._task_repo is not None:
-                self._ctx._task_repo.mark_closing()
-            # Unbind signals so no new workers are scheduled.
-            if self._ctx.signal_bridge:
-                self._ctx.signal_bridge.unbind_all()
 
         # Cancel in-flight workers and wait for them to settle before
         # disposing the DB engine.  During shutdown, workers that were

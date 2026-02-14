@@ -93,6 +93,50 @@ class TestApiDispatchIntegration:
         assert response.error is not None
         assert response.error.code == "AUTHORIZATION_DENIED"
 
+    async def test_tui_api_call_submit_job_dispatches_to_real_api(
+        self,
+        handle_host: tuple,
+    ) -> None:
+        host, api = handle_host
+        task = await api.create_task("TUI submit job")
+
+        response = await _dispatch(
+            host,
+            CoreRequest(
+                session_id="maintainer-session",
+                capability="tui",
+                method="api_call",
+                params={
+                    "method": "submit_job",
+                    "kwargs": {"task_id": task.id, "action": "start_agent"},
+                },
+            ),
+        )
+
+        assert response.ok
+        assert response.result is not None
+        assert response.result["success"] is True
+        payload = response.result["value"]
+        assert payload["action"] == "start_agent"
+        assert payload["job_id"]
+
+    async def test_viewer_denied_for_tui_api_dispatch(self, handle_host: tuple) -> None:
+        host, _api = handle_host
+
+        response = await _dispatch(
+            host,
+            CoreRequest(
+                session_id="viewer-session",
+                capability="tui",
+                method="api_call",
+                params={"method": "list_tasks", "kwargs": {}},
+            ),
+        )
+
+        assert not response.ok
+        assert response.error is not None
+        assert response.error.code == "AUTHORIZATION_DENIED"
+
 
 class TestNoApi:
     """Built-in dispatch map requires an API boundary on AppContext."""

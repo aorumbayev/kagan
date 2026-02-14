@@ -60,9 +60,7 @@ if TYPE_CHECKING:
     from textual.timer import Timer
 
     from kagan.core.acp import messages
-    from kagan.core.adapters.db.repositories.auxiliary import PlannerRepository
     from kagan.core.adapters.db.schema import Task
-    from kagan.core.services.queued_messages import QueuedMessageService
     from kagan.tui.ui.utils.slash_registry import SlashCommand
 
 
@@ -609,9 +607,6 @@ class PlannerScreen(KaganScreen):
         todos: Sequence[object] | None,
     ) -> None:
         """Save the proposal as a draft in the DB before UI rendering."""
-        repo = self._get_planner_repo()
-        if repo is None:
-            return
         project_id = self.ctx.active_project_id
         if project_id is None:
             return
@@ -637,33 +632,31 @@ class PlannerScreen(KaganScreen):
                     )
                 elif isinstance(entry, dict):
                     todos_json.append(entry)
-        proposal = await repo.save_proposal(
+        proposal = await self.ctx.api.save_planner_draft(
             project_id=project_id,
             repo_id=self.ctx.active_repo_id,
             tasks_json=tasks_json,
             todos_json=todos_json,
         )
-        self._pending_proposal_id = proposal.id
+        if proposal is not None:
+            self._pending_proposal_id = proposal.id
 
     async def _update_proposal_status(self, status: ProposalStatus) -> None:
         """Update the persisted proposal status (approved / rejected)."""
         if self._pending_proposal_id is None:
             return
-        repo = self._get_planner_repo()
-        if repo is None:
-            return
-        await repo.update_status(self._pending_proposal_id, status)
+        await self.ctx.api.update_planner_draft_status(self._pending_proposal_id, status)
         self._pending_proposal_id = None
 
     async def _load_pending_proposals(self) -> None:
         """Load draft proposals from DB and display the most recent one."""
-        repo = self._get_planner_repo()
-        if repo is None:
-            return
         project_id = self.ctx.active_project_id
         if project_id is None:
             return
-        proposals = await repo.list_pending(project_id, repo_id=self.ctx.active_repo_id)
+        proposals = await self.ctx.api.list_pending_planner_drafts(
+            project_id,
+            repo_id=self.ctx.active_repo_id,
+        )
         if not proposals:
             return
         latest = proposals[0]
@@ -723,21 +716,15 @@ class PlannerScreen(KaganScreen):
     async def _refresh_planner_queue_messages(self) -> None:
         with suppress(NoMatches):
             container = self.query_one("#planner-queued-messages", QueuedMessagesContainer)
-            service = self._get_queue_service()
-            if service is None:
-                container.display = False
-                self._planner_queue_pending = False
-                return
-            queue_messages = await service.get_queued(self._planner_queue_key(), lane="planner")
+            queue_messages = await self.ctx.api.get_queued_messages(
+                self._planner_queue_key(),
+                lane="planner",
+            )
             container.update_messages(queue_messages)
             self._planner_queue_pending = bool(queue_messages)
 
     async def _queue_planner_message(self, content: str) -> None:
-        service = self._get_queue_service()
-        if service is None:
-            self.notify("Planner queue unavailable", severity="error")
-            return
-        await service.queue_message(self._planner_queue_key(), content, lane="planner")
+        await self.ctx.api.queue_message(self._planner_queue_key(), content, lane="planner")
         await self._refresh_planner_queue_messages()
         await self._get_output().post_note("Queued message for next planner turn.", classes="info")
         self._update_status("queued", "Planner follow-up queued")
@@ -747,10 +734,7 @@ class PlannerScreen(KaganScreen):
             return
         if self._state.has_pending_plan:
             return
-        service = self._get_queue_service()
-        if service is None:
-            return
-        queued = await service.take_queued(self._planner_queue_key(), lane="planner")
+        queued = await self.ctx.api.take_queued_message(self._planner_queue_key(), lane="planner")
         await self._refresh_planner_queue_messages()
         if queued is None:
             return
@@ -1125,10 +1109,7 @@ class PlannerScreen(KaganScreen):
     # ------------------------------------------------------------------
 
     async def _handle_queue_remove_requested(self, event: QueuedMessageRow.RemoveRequested) -> None:
-        service = self._get_queue_service()
-        if service is None:
-            return
-        await service.remove_message(
+        await self.ctx.api.remove_queued_message(
             self._planner_queue_key(),
             event.index,
             lane="planner",
@@ -1138,12 +1119,6 @@ class PlannerScreen(KaganScreen):
     def _planner_queue_key(self) -> str:
         repo_id = self.ctx.active_repo_id or "global"
         return f"planner:{repo_id}"
-
-    def _get_queue_service(self) -> QueuedMessageService | None:
-        return self.ctx.api.ctx.automation_service
-
-    def _get_planner_repo(self) -> PlannerRepository | None:
-        return self.ctx.api.ctx.planner_repository
 
     # ------------------------------------------------------------------
     # Control actions

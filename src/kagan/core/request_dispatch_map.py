@@ -49,6 +49,7 @@ def build_request_dispatch_map() -> dict[tuple[str, str], RequestHandler]:
         handle_task_update,
         handle_task_update_scratchpad,
         handle_task_wait,
+        handle_tui_api_call,
     )
 
     return {
@@ -98,6 +99,8 @@ def build_request_dispatch_map() -> dict[tuple[str, str], RequestHandler]:
         ("audit", "list"): handle_audit_list,
         # Diagnostics (1)
         ("diagnostics", "instrumentation"): handle_diagnostics_instrumentation,
+        # TUI client (1)
+        ("tui", "api_call"): handle_tui_api_call,
     }
 
 

@@ -1,7 +1,8 @@
 # GH-001 - Official Plugin Scaffold and Operation Contract
 
-Status: Backlog
+Status: Done
 Owner: Codex
+Completion: Merged in `35a301a54fae3a0d4ed78a150025b65015ee441a` on 2026-02-14.
 Depends On: -
 Note: Not started in current repo state; implementation details below are draft planning notes.
 

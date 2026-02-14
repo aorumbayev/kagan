@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.exc import OperationalError
 from textual.css.query import NoMatches
@@ -177,6 +178,33 @@ class KanbanBoardController:
     def __init__(self, screen: KanbanScreen) -> None:
         self.screen = screen
 
+    @staticmethod
+    def _runtime_attr(runtime_view: object | None, name: str, default: Any = None) -> Any:
+        if runtime_view is None:
+            return default
+        if isinstance(runtime_view, dict):
+            return runtime_view.get(name, default)
+        return getattr(runtime_view, name, default)
+
+    @classmethod
+    def _runtime_bool(cls, runtime_view: object | None, name: str) -> bool:
+        return bool(cls._runtime_attr(runtime_view, name, False))
+
+    @classmethod
+    def _runtime_timestamp(cls, runtime_view: object | None, name: str) -> float:
+        value = cls._runtime_attr(runtime_view, name)
+        if value is None:
+            return 0.0
+        if hasattr(value, "timestamp"):
+            try:
+                return float(value.timestamp())
+            except (TypeError, ValueError):
+                return 0.0
+        if isinstance(value, str):
+            with suppress(ValueError):
+                return datetime.fromisoformat(value).timestamp()
+        return 0.0
+
     def check_agent_health(self) -> None:
         """Check agent health."""
         if not self.screen.ctx.api.is_agent_available():
@@ -286,14 +314,14 @@ class KanbanBoardController:
             view = api.get_runtime_view(tid)
             indicators[tid] = (
                 CardIndicator.REVIEWING
-                if view is not None and view.is_reviewing
+                if self._runtime_bool(view, "is_reviewing")
                 else CardIndicator.RUNNING
             )
         for task in self.screen._tasks:
             if task.id in indicators:
                 continue
             runtime = api.get_runtime_view(task.id)
-            if runtime is not None and runtime.is_blocked:
+            if self._runtime_bool(runtime, "is_blocked"):
                 indicators[task.id] = CardIndicator.BLOCKED
                 continue
             if task.id in self.screen._merge_failed_tasks:
@@ -334,12 +362,10 @@ class KanbanBoardController:
             if task.status is not TaskStatus.BACKLOG or task.task_type is not TaskType.AUTO:
                 continue
             runtime = self.screen.ctx.api.get_runtime_view(task.id)
-            if runtime is None or not runtime.is_blocked:
+            if not self._runtime_bool(runtime, "is_blocked"):
                 continue
             blocked_ids.add(task.id)
-            blocked_timestamps[task.id] = (
-                runtime.blocked_at.timestamp() if runtime.blocked_at is not None else 0.0
-            )
+            blocked_timestamps[task.id] = self._runtime_timestamp(runtime, "blocked_at")
         return blocked_ids, blocked_timestamps
 
     def _build_refresh_model(self, new_tasks: list[Task]) -> BoardRefreshModel:

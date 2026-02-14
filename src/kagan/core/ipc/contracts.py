@@ -36,7 +36,7 @@ class CoreRequest(BaseModel):
     session_origin: str | None = Field(
         default=None,
         description=(
-            "Origin lane for this session (legacy|kagan|kagan_admin). "
+            "Origin lane for this session (legacy|kagan|kagan_admin|tui). "
             "Used for server-side capability ceilings and namespace constraints."
         ),
     )

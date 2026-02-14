@@ -40,6 +40,7 @@ Expected result:
 
 - You see the Kagan welcome screen.
 - You can open or create a project.
+- Kagan auto-starts/attaches to the core backend; TUI and MCP both operate through core.
 
 ## 3. Open or create a project
 

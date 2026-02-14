@@ -505,6 +505,54 @@ class TestCoreHostAuthorization:
         assert call_log == ["TASK-405"]
 
     @pytest.mark.asyncio()
+    async def test_tui_origin_requires_tui_namespace(self, host):
+        """TUI lane is restricted to tui:* session namespace."""
+        host._ctx = SimpleNamespace(api=object())
+        host._runtime_version = "test-version"
+
+        request = CoreRequest(
+            session_id="default-session",
+            session_profile="maintainer",
+            session_origin="tui",
+            client_version="test-version",
+            capability="tasks",
+            method="list",
+        )
+        response = await _dispatch_request(host, request)
+
+        assert not response.ok
+        assert response.error is not None
+        assert response.error.code == "SESSION_NAMESPACE_DENIED"
+
+    @pytest.mark.asyncio()
+    async def test_tui_origin_tui_namespace_allows_maintainer_ops(self, host, monkeypatch):
+        """TUI lane can run maintainer operations from tui:* sessions."""
+        call_log = []
+
+        async def mock_handler(api, params):
+            del api
+            call_log.append(params["task_id"])
+            return {"success": True}
+
+        _set_request_handler(monkeypatch, "tasks", "delete", mock_handler)
+        host._ctx = SimpleNamespace(api=object())
+        host._runtime_version = "test-version"
+
+        request = CoreRequest(
+            session_id="tui:instance-1",
+            session_profile="maintainer",
+            session_origin="tui",
+            client_version="test-version",
+            capability="tasks",
+            method="delete",
+            params={"task_id": "TASK-406"},
+        )
+        response = await _dispatch_request(host, request)
+
+        assert response.ok
+        assert call_log == ["TASK-406"]
+
+    @pytest.mark.asyncio()
     async def test_kagan_origin_rejects_missing_client_version(self, host, monkeypatch):
         """Kagan-origin requests must include a client version for compatibility checks."""
         call_log = []
