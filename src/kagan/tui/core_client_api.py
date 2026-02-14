@@ -47,6 +47,20 @@ def _task_id_from_input(value: object) -> str:
     raise ValueError("task_id is required")
 
 
+def _clean_project_repo_args(project_id: str, repo_id: str | None) -> tuple[str, str | None]:
+    cleaned_project_id = project_id.strip()
+    if not cleaned_project_id:
+        raise ValueError("project_id is required")
+
+    cleaned_repo_id: str | None = None
+    if repo_id is not None:
+        normalized_repo_id = repo_id.strip()
+        if not normalized_repo_id:
+            raise ValueError("repo_id must be a non-empty string when provided")
+        cleaned_repo_id = normalized_repo_id
+    return cleaned_project_id, cleaned_repo_id
+
+
 def _parse_datetime(value: object) -> datetime:
     if isinstance(value, datetime):
         return value
@@ -500,15 +514,10 @@ class CoreBackedApi:
         project_id: str,
         repo_id: str | None = None,
     ) -> dict[str, Any]:
-        cleaned_project_id = project_id.strip()
-        if not cleaned_project_id:
-            raise ValueError("project_id is required")
+        cleaned_project_id, cleaned_repo_id = _clean_project_repo_args(project_id, repo_id)
 
         kwargs: dict[str, Any] = {"project_id": cleaned_project_id}
-        if repo_id is not None:
-            cleaned_repo_id = repo_id.strip()
-            if not cleaned_repo_id:
-                raise ValueError("repo_id must be a non-empty string when provided")
+        if cleaned_repo_id is not None:
             kwargs["repo_id"] = cleaned_repo_id
 
         raw = await self._call_core("github_connect_repo", kwargs=kwargs)
@@ -522,15 +531,10 @@ class CoreBackedApi:
         project_id: str,
         repo_id: str | None = None,
     ) -> dict[str, Any]:
-        cleaned_project_id = project_id.strip()
-        if not cleaned_project_id:
-            raise ValueError("project_id is required")
+        cleaned_project_id, cleaned_repo_id = _clean_project_repo_args(project_id, repo_id)
 
         kwargs: dict[str, Any] = {"project_id": cleaned_project_id}
-        if repo_id is not None:
-            cleaned_repo_id = repo_id.strip()
-            if not cleaned_repo_id:
-                raise ValueError("repo_id must be a non-empty string when provided")
+        if cleaned_repo_id is not None:
             kwargs["repo_id"] = cleaned_repo_id
 
         raw = await self._call_core("github_sync_issues", kwargs=kwargs)

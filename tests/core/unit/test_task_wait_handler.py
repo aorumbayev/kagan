@@ -162,20 +162,36 @@ async def test_task_wait_status_filter_waits_for_target(api_env):
 
 async def test_task_wait_handler_cleanup_on_timeout(api_env):
     """Handler removes event listener after timeout."""
-    from kagan.core.bootstrap import InMemoryEventBus
     from kagan.core.request_handlers import handle_task_wait
 
     _, api, ctx = api_env
     task = await api.create_task("Wait test", "desc")
 
     bus = ctx.event_bus
-    assert isinstance(bus, InMemoryEventBus)
-    handlers_before = len(bus._handlers)
+    added_handlers: list[object] = []
+    removed_handlers: list[object] = []
+    original_add_handler = bus.add_handler
+    original_remove_handler = bus.remove_handler
 
-    await handle_task_wait(api, {"task_id": task.id, "timeout_seconds": 0.05})
+    def _track_add(handler: object) -> None:
+        added_handlers.append(handler)
+        original_add_handler(handler)
 
-    handlers_after = len(bus._handlers)
-    assert handlers_after == handlers_before, "Event handler was not cleaned up"
+    def _track_remove(handler: object) -> None:
+        removed_handlers.append(handler)
+        original_remove_handler(handler)
+
+    bus.add_handler = _track_add  # type: ignore[method-assign]
+    bus.remove_handler = _track_remove  # type: ignore[method-assign]
+    try:
+        result = await handle_task_wait(api, {"task_id": task.id, "timeout_seconds": 0.05})
+    finally:
+        bus.add_handler = original_add_handler  # type: ignore[method-assign]
+        bus.remove_handler = original_remove_handler  # type: ignore[method-assign]
+
+    assert result["timed_out"] is True
+    assert len(added_handlers) == 1
+    assert removed_handlers == added_handlers
 
 
 async def test_task_wait_task_deleted_during_wait(api_env):

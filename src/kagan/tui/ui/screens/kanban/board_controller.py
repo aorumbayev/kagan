@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +19,7 @@ from kagan.core.constants import (
 )
 from kagan.core.models.enums import CardIndicator, TaskStatus, TaskType
 from kagan.tui.ui.screens.kanban.hints import build_kanban_hints
+from kagan.tui.ui.utils import state_attr, state_timestamp
 from kagan.tui.ui.widgets.card import TaskCard
 from kagan.tui.ui.widgets.column import KanbanColumn
 from kagan.tui.ui.widgets.keybinding_hint import KanbanHintBar
@@ -180,11 +180,7 @@ class KanbanBoardController:
 
     @staticmethod
     def _runtime_attr(runtime_view: object | None, name: str, default: Any = None) -> Any:
-        if runtime_view is None:
-            return default
-        if isinstance(runtime_view, dict):
-            return runtime_view.get(name, default)
-        return getattr(runtime_view, name, default)
+        return state_attr(runtime_view, name, default)
 
     @classmethod
     def _runtime_bool(cls, runtime_view: object | None, name: str) -> bool:
@@ -192,18 +188,8 @@ class KanbanBoardController:
 
     @classmethod
     def _runtime_timestamp(cls, runtime_view: object | None, name: str) -> float:
-        value = cls._runtime_attr(runtime_view, name)
-        if value is None:
-            return 0.0
-        if hasattr(value, "timestamp"):
-            try:
-                return float(value.timestamp())
-            except (TypeError, ValueError):
-                return 0.0
-        if isinstance(value, str):
-            with suppress(ValueError):
-                return datetime.fromisoformat(value).timestamp()
-        return 0.0
+        del cls
+        return state_timestamp(runtime_view, name)
 
     def check_agent_health(self) -> None:
         """Check agent health."""

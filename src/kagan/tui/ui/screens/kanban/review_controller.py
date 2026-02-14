@@ -13,6 +13,7 @@ from kagan.core.models.enums import (
 from kagan.core.services.jobs import JobStatus
 from kagan.core.time import utc_now
 from kagan.tui.ui.screen_result import await_screen_result
+from kagan.tui.ui.utils import state_attr, state_bool, state_int, state_tuple
 
 if TYPE_CHECKING:
     from kagan.core.adapters.db.schema import Task
@@ -27,30 +28,19 @@ class KanbanReviewController:
 
     @staticmethod
     def _state_attr(state: object | None, name: str, default: Any = None) -> Any:
-        if state is None:
-            return default
-        if isinstance(state, dict):
-            return state.get(name, default)
-        return getattr(state, name, default)
+        return state_attr(state, name, default)
 
-    @classmethod
-    def _state_bool(cls, state: object | None, name: str) -> bool:
-        return bool(cls._state_attr(state, name, False))
+    @staticmethod
+    def _state_bool(state: object | None, name: str) -> bool:
+        return state_bool(state, name)
 
-    @classmethod
-    def _state_tuple(cls, state: object | None, name: str) -> tuple[str, ...]:
-        value = cls._state_attr(state, name, ())
-        if isinstance(value, (list, tuple)):
-            return tuple(str(item) for item in value if str(item).strip())
-        return ()
+    @staticmethod
+    def _state_tuple(state: object | None, name: str) -> tuple[str, ...]:
+        return state_tuple(state, name)
 
-    @classmethod
-    def _state_int(cls, state: object | None, name: str, default: int = 0) -> int:
-        value = cls._state_attr(state, name, default)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
+    @staticmethod
+    def _state_int(state: object | None, name: str, default: int = 0) -> int:
+        return state_int(state, name, default)
 
     @classmethod
     def _stream_target(cls, state: object | None, name: str) -> object | None:

@@ -36,7 +36,7 @@ from kagan.tui.ui.screens.kanban.session_controller import KanbanSessionControll
 from kagan.tui.ui.screens.kanban.state import KanbanUiState
 from kagan.tui.ui.screens.kanban.task_controller import KanbanTaskController
 from kagan.tui.ui.screens.planner import PlannerScreen
-from kagan.tui.ui.utils import copy_with_notification
+from kagan.tui.ui.utils import copy_with_notification, state_attr
 from kagan.tui.ui.widgets.column import KanbanColumn
 from kagan.tui.ui.widgets.header import KaganHeader
 from kagan.tui.ui.widgets.keybinding_hint import KanbanHintBar
@@ -186,11 +186,7 @@ class KanbanScreen(KaganScreen):
 
     @staticmethod
     def _runtime_attr(runtime_view: object | None, name: str, default: Any = None) -> Any:
-        if runtime_view is None:
-            return default
-        if isinstance(runtime_view, dict):
-            return runtime_view.get(name, default)
-        return getattr(runtime_view, name, default)
+        return state_attr(runtime_view, name, default)
 
     def _is_runtime_running(self, task_id: str) -> bool:
         runtime_view = self._runtime_view(task_id)

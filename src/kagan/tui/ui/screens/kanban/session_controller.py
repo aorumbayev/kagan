@@ -13,6 +13,7 @@ from kagan.core.services.jobs import JobRecord, JobStatus
 from kagan.core.services.runtime import AutoOutputMode
 from kagan.core.services.workspaces import RepoWorkspaceInput
 from kagan.tui.ui.screen_result import await_screen_result
+from kagan.tui.ui.utils import state_attr, state_bool
 
 if TYPE_CHECKING:
     from kagan.core.adapters.db.schema import Task
@@ -83,15 +84,11 @@ class KanbanSessionController:
 
     @staticmethod
     def _state_attr(state: object | None, name: str, default: Any = None) -> Any:
-        if state is None:
-            return default
-        if isinstance(state, dict):
-            return state.get(name, default)
-        return getattr(state, name, default)
+        return state_attr(state, name, default)
 
-    @classmethod
-    def _state_bool(cls, state: object | None, name: str) -> bool:
-        return bool(cls._state_attr(state, name, False))
+    @staticmethod
+    def _state_bool(state: object | None, name: str) -> bool:
+        return state_bool(state, name)
 
     @staticmethod
     def _is_waiting_output_mode(mode: object) -> bool:

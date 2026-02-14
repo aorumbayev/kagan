@@ -47,6 +47,9 @@ from kagan.tui.ui.utils.helpers import (
     colorize_diff_line,
     copy_with_notification,
     parse_agent_exit_code,
+    state_attr,
+    state_bool,
+    state_tuple,
 )
 from kagan.tui.ui.widgets import ChatPanel, StreamingOutput
 
@@ -153,22 +156,15 @@ class ReviewModal(KaganModalScreen[str | None]):
 
     @staticmethod
     def _state_attr(state: object | None, name: str, default: Any = None) -> Any:
-        if state is None:
-            return default
-        if isinstance(state, dict):
-            return state.get(name, default)
-        return getattr(state, name, default)
+        return state_attr(state, name, default)
 
-    @classmethod
-    def _state_bool(cls, state: object | None, name: str) -> bool:
-        return bool(cls._state_attr(state, name, False))
+    @staticmethod
+    def _state_bool(state: object | None, name: str) -> bool:
+        return state_bool(state, name)
 
-    @classmethod
-    def _state_tuple(cls, state: object | None, name: str) -> tuple[str, ...]:
-        value = cls._state_attr(state, name, ())
-        if isinstance(value, (list, tuple)):
-            return tuple(str(item) for item in value if str(item).strip())
-        return ()
+    @staticmethod
+    def _state_tuple(state: object | None, name: str) -> tuple[str, ...]:
+        return state_tuple(state, name)
 
     @classmethod
     def _execution_metadata(cls, execution: object | None) -> dict[str, Any]:
@@ -823,9 +819,6 @@ class ReviewModal(KaganModalScreen[str | None]):
         if review_log_start_index is not None:
             # Use the boundary marker stored before review began
             review_indices = {i for i in range(review_log_start_index, len(indexed_entries))}
-        elif has_review_result and len(indexed_entries) > 1:
-            # Backward compat: fall back to "last entry = review" heuristic
-            review_indices = {len(indexed_entries) - 1}
 
         rendered_impl_output = False
         has_impl_entries = False

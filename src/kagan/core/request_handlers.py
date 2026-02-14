@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from kagan.core.api_tasks import ReviewGuardrailBlockedError
 from kagan.core.commands.job_action_executor import SUPPORTED_JOB_ACTIONS
 from kagan.core.models.enums import TaskStatus
 from kagan.core.request_handler_support import (
@@ -1090,7 +1091,18 @@ async def handle_review_request(api: KaganAPI, params: dict[str, Any]) -> dict[s
     f = _assert_api(api)
     task_id = params["task_id"]
     summary = params.get("summary", "")
-    task = await f.request_review(task_id, summary)
+    try:
+        task = await f.request_review(task_id, summary)
+    except ReviewGuardrailBlockedError as exc:
+        response: dict[str, Any] = {
+            "success": False,
+            "task_id": task_id,
+            "code": exc.code,
+            "message": exc.message,
+        }
+        if exc.hint is not None and exc.hint.strip():
+            response["hint"] = exc.hint
+        return response
     if task is None:
         return _task_not_found_response(task_id)
     return {

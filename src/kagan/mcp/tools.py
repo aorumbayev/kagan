@@ -41,6 +41,21 @@ _FULL_LOG_FETCH_BUDGET = 18_000
 _QUERY_UNAVAILABLE_CODES = {"UNKNOWN_METHOD", "UNAUTHORIZED"}
 _TASK_WAIT_IPC_DEFAULT_TIMEOUT_SECONDS = 900.0
 _TASK_WAIT_IPC_TIMEOUT_BUFFER_SECONDS = 5.0
+_LOG_ENTRY_OVERHEAD_CHARS = 256
+_COMPACT_ACCEPTANCE_ITEMS_FULL = 20
+_COMPACT_ACCEPTANCE_ITEMS_SUMMARY = 8
+_COMPACT_ACCEPTANCE_ITEM_LIMIT_FULL = 320
+_COMPACT_ACCEPTANCE_ITEM_LIMIT_SUMMARY = 160
+_COMPACT_RUNTIME_REASON_LIMIT_FULL = 600
+_COMPACT_RUNTIME_REASON_LIMIT_SUMMARY = 240
+_COMPACT_RUNTIME_HINT_LIMIT_FULL = 240
+_COMPACT_RUNTIME_HINT_LIMIT_SUMMARY = 120
+_COMPACT_RUNTIME_BLOCKED_IDS_FULL = 16
+_COMPACT_RUNTIME_BLOCKED_IDS_SUMMARY = 8
+_COMPACT_RUNTIME_OVERLAP_HINTS_FULL = 12
+_COMPACT_RUNTIME_OVERLAP_HINTS_SUMMARY = 6
+_MINIMAL_TITLE_LIMIT = 120
+_MINIMAL_TITLE_HARD_LIMIT = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,9 +167,8 @@ class CoreClientBridge:
 
         trimmed_newest_first: list[dict[str, Any]] = []
         used = 0
-        per_entry_overhead = 256
         for log in reversed(logs):
-            remaining = budget_chars - used - per_entry_overhead
+            remaining = budget_chars - used - _LOG_ENTRY_OVERHEAD_CHARS
             if remaining <= 0:
                 break
 
@@ -169,7 +183,7 @@ class CoreClientBridge:
                     "created_at": str(log["created_at"]),
                 }
             )
-            used += len(content) + per_entry_overhead
+            used += len(content) + _LOG_ENTRY_OVERHEAD_CHARS
 
         return list(reversed(trimmed_newest_first))
 
@@ -247,11 +261,11 @@ class CoreClientBridge:
 
         if isinstance(trimmed.get("acceptance_criteria"), list):
             if mode == "full":
-                max_items = 20
-                item_limit = 320
+                max_items = _COMPACT_ACCEPTANCE_ITEMS_FULL
+                item_limit = _COMPACT_ACCEPTANCE_ITEM_LIMIT_FULL
             else:
-                max_items = 8
-                item_limit = 160
+                max_items = _COMPACT_ACCEPTANCE_ITEMS_SUMMARY
+                item_limit = _COMPACT_ACCEPTANCE_ITEM_LIMIT_SUMMARY
             trimmed["acceptance_criteria"] = cls._compact_string_list(
                 trimmed["acceptance_criteria"],
                 max_items=max_items,
@@ -282,14 +296,14 @@ class CoreClientBridge:
             "task_id": str(trimmed.get("task_id", "")),
             "title": cls._truncate_text(
                 str(title_value) if title_value is not None else "",
-                limit=120,
+                limit=_MINIMAL_TITLE_LIMIT,
             )
             or "",
             "status": str(status_value) if status_value is not None else "",
         }
         if cls._serialized_size(minimal) <= budget:
             return minimal
-        minimal["title"] = minimal["title"][:32]
+        minimal["title"] = minimal["title"][:_MINIMAL_TITLE_HARD_LIMIT]
         return minimal
 
     @staticmethod
@@ -314,10 +328,26 @@ class CoreClientBridge:
     @classmethod
     def _compact_runtime(cls, runtime: dict[str, Any], *, mode: str) -> dict[str, Any]:
         compact = dict(runtime)
-        reason_limit = 600 if mode == "full" else 240
-        hint_limit = 240 if mode == "full" else 120
-        blocked_ids = 16 if mode == "full" else 8
-        overlap_hints = 12 if mode == "full" else 6
+        reason_limit = (
+            _COMPACT_RUNTIME_REASON_LIMIT_FULL
+            if mode == "full"
+            else _COMPACT_RUNTIME_REASON_LIMIT_SUMMARY
+        )
+        hint_limit = (
+            _COMPACT_RUNTIME_HINT_LIMIT_FULL
+            if mode == "full"
+            else _COMPACT_RUNTIME_HINT_LIMIT_SUMMARY
+        )
+        blocked_ids = (
+            _COMPACT_RUNTIME_BLOCKED_IDS_FULL
+            if mode == "full"
+            else _COMPACT_RUNTIME_BLOCKED_IDS_SUMMARY
+        )
+        overlap_hints = (
+            _COMPACT_RUNTIME_OVERLAP_HINTS_FULL
+            if mode == "full"
+            else _COMPACT_RUNTIME_OVERLAP_HINTS_SUMMARY
+        )
 
         for key in ("blocked_reason", "pending_reason"):
             value = compact.get(key)

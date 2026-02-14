@@ -315,12 +315,16 @@ class GitHubPluginUseCases:
             return resolve_error
         assert repo is not None
 
-        repo_context, connection_error = self._resolve_connected_repo_context(repo)
+        lease_enforced = load_lease_enforcement_state(repo.scripts)
+        repo_context, connection_error = self._resolve_connected_repo_context(
+            repo,
+            require_owner_repo=lease_enforced,
+        )
         if connection_error is not None:
             return connection_error
         assert repo_context is not None
 
-        if not load_lease_enforcement_state(repo.scripts):
+        if not lease_enforced:
             return {
                 "success": True,
                 "code": LEASE_ENFORCEMENT_DISABLED,
@@ -331,14 +335,6 @@ class GitHubPluginUseCases:
                 ),
                 "holder": None,
             }
-
-        repo_context, connection_error = self._resolve_connected_repo_context(
-            repo,
-            require_owner_repo=True,
-        )
-        if connection_error is not None:
-            return connection_error
-        assert repo_context is not None
 
         gh_path, gh_error = self._gh.resolve_gh_cli_path()
         if gh_error is not None:
@@ -408,25 +404,21 @@ class GitHubPluginUseCases:
             return resolve_error
         assert repo is not None
 
-        repo_context, connection_error = self._resolve_connected_repo_context(repo)
+        lease_enforced = load_lease_enforcement_state(repo.scripts)
+        repo_context, connection_error = self._resolve_connected_repo_context(
+            repo,
+            require_owner_repo=lease_enforced,
+        )
         if connection_error is not None:
             return connection_error
         assert repo_context is not None
 
-        if not load_lease_enforcement_state(repo.scripts):
+        if not lease_enforced:
             return {
                 "success": True,
                 "code": LEASE_ENFORCEMENT_DISABLED,
                 "message": "Lease enforcement disabled for this repository; skipping release.",
             }
-
-        repo_context, connection_error = self._resolve_connected_repo_context(
-            repo,
-            require_owner_repo=True,
-        )
-        if connection_error is not None:
-            return connection_error
-        assert repo_context is not None
 
         gh_path, gh_error = self._gh.resolve_gh_cli_path()
         if gh_error is not None:
@@ -471,12 +463,16 @@ class GitHubPluginUseCases:
             return resolve_error
         assert repo is not None
 
-        repo_context, connection_error = self._resolve_connected_repo_context(repo)
+        lease_enforced = load_lease_enforcement_state(repo.scripts)
+        repo_context, connection_error = self._resolve_connected_repo_context(
+            repo,
+            require_owner_repo=lease_enforced,
+        )
         if connection_error is not None:
             return connection_error
         assert repo_context is not None
 
-        if not load_lease_enforcement_state(repo.scripts):
+        if not lease_enforced:
             return {
                 "success": True,
                 "code": LEASE_STATE_OK,
@@ -489,14 +485,6 @@ class GitHubPluginUseCases:
                     "enforcement_enabled": False,
                 },
             }
-
-        repo_context, connection_error = self._resolve_connected_repo_context(
-            repo,
-            require_owner_repo=True,
-        )
-        if connection_error is not None:
-            return connection_error
-        assert repo_context is not None
 
         gh_path, gh_error = self._gh.resolve_gh_cli_path()
         if gh_error is not None:

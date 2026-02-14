@@ -7,11 +7,13 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from kagan.core.api import KaganAPI
+from kagan.core.api_tasks import ReviewGuardrailBlockedError
 from kagan.core.models.enums import TaskStatus, TaskType
 from kagan.core.request_handlers import (
     handle_review_approve,
     handle_review_merge,
     handle_review_rebase,
+    handle_review_request,
 )
 
 
@@ -29,6 +31,25 @@ async def test_review_merge_returns_not_found_when_task_missing() -> None:
     assert result["task_id"] == "task-1"
     assert "not found" in result["message"]
     assert result["code"] == "MERGE_FAILED"
+
+
+async def test_review_request_returns_structured_guardrail_block() -> None:
+    f = _api(task_service=SimpleNamespace(get_task=AsyncMock(return_value=None)))
+    f.request_review = AsyncMock(  # type: ignore[method-assign]
+        side_effect=ReviewGuardrailBlockedError(
+            code="REVIEW_BLOCKED_NO_PR",
+            message="REVIEW transition blocked: no linked PR.",
+            hint="Use create_pr_for_task first.",
+        )
+    )
+
+    result = await handle_review_request(f, {"task_id": "task-1"})
+
+    assert result["success"] is False
+    assert result["task_id"] == "task-1"
+    assert result["code"] == "REVIEW_BLOCKED_NO_PR"
+    assert result["message"] == "REVIEW transition blocked: no linked PR."
+    assert result["hint"] == "Use create_pr_for_task first."
 
 
 async def test_review_merge_requires_approval_when_enabled() -> None:

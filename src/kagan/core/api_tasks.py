@@ -28,6 +28,16 @@ _DONE_TRANSITION_ERROR = (
 )
 
 
+class ReviewGuardrailBlockedError(ValueError):
+    """Structured REVIEW guardrail failure with machine-readable fields."""
+
+    def __init__(self, *, code: str, message: str, hint: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
+
+
 class TaskApiMixin:
     """Mixin providing task-related API methods.
 
@@ -377,7 +387,15 @@ class TaskApiMixin:
         # Check REVIEW transition guardrails for GitHub-connected repos
         guardrail_result = await self._check_review_guardrails(task)
         if not guardrail_result["allowed"]:
-            raise ValueError(guardrail_result["message"])
+            raise ReviewGuardrailBlockedError(
+                code=str(guardrail_result.get("code", "REVIEW_BLOCKED")),
+                message=str(guardrail_result.get("message", "REVIEW transition blocked")),
+                hint=(
+                    str(guardrail_result["hint"])
+                    if isinstance(guardrail_result.get("hint"), str)
+                    else None
+                ),
+            )
 
         task = await self._ctx.task_service.set_status(
             task_id, TaskStatus.REVIEW, reason="Review requested"

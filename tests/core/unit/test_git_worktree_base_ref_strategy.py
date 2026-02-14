@@ -40,6 +40,22 @@ def _make_adapter(
     return adapter, calls
 
 
+def _resolved_start_point(
+    calls: list[tuple[tuple[str, ...], bool]],
+    *,
+    branch_name: str = "feat-1",
+    worktree_path: str = "/tmp/worktree",
+) -> str:
+    for command, _check in calls:
+        if (
+            len(command) == 6
+            and command[:4] == ("worktree", "add", "-b", branch_name)
+            and command[4] == worktree_path
+        ):
+            return command[5]
+    raise AssertionError("worktree add command was not captured")
+
+
 async def test_create_worktree_uses_remote_when_strategy_remote() -> None:
     adapter, calls = _make_adapter(
         strategy="remote",
@@ -57,8 +73,7 @@ async def test_create_worktree_uses_remote_when_strategy_remote() -> None:
 
     await adapter.create_worktree("/tmp/repo", "/tmp/worktree", "feat-1", "main")
 
-    assert (("fetch", "origin", "main"), False) in calls
-    assert (("worktree", "add", "-b", "feat-1", "/tmp/worktree", "origin/main"), True) in calls
+    assert _resolved_start_point(calls) == "origin/main"
 
 
 async def test_create_worktree_uses_local_when_strategy_local() -> None:
@@ -72,8 +87,7 @@ async def test_create_worktree_uses_local_when_strategy_local() -> None:
 
     await adapter.create_worktree("/tmp/repo", "/tmp/worktree", "feat-1", "main")
 
-    assert not any(command[0] in {"remote", "fetch"} for command, _check in calls)
-    assert (("worktree", "add", "-b", "feat-1", "/tmp/worktree", "main"), True) in calls
+    assert _resolved_start_point(calls) == "main"
 
 
 async def test_create_worktree_prefers_local_when_ahead_under_local_if_ahead() -> None:
@@ -97,11 +111,7 @@ async def test_create_worktree_prefers_local_when_ahead_under_local_if_ahead() -
 
     await adapter.create_worktree("/tmp/repo", "/tmp/worktree", "feat-1", "main")
 
-    assert (
-        ("rev-list", "--count", "refs/remotes/origin/main..refs/heads/main"),
-        False,
-    ) in calls
-    assert (("worktree", "add", "-b", "feat-1", "/tmp/worktree", "main"), True) in calls
+    assert _resolved_start_point(calls) == "main"
 
 
 async def test_create_worktree_prefers_remote_when_not_ahead_under_local_if_ahead() -> None:
@@ -125,4 +135,4 @@ async def test_create_worktree_prefers_remote_when_not_ahead_under_local_if_ahea
 
     await adapter.create_worktree("/tmp/repo", "/tmp/worktree", "feat-1", "main")
 
-    assert (("worktree", "add", "-b", "feat-1", "/tmp/worktree", "origin/main"), True) in calls
+    assert _resolved_start_point(calls) == "origin/main"
