@@ -14,12 +14,12 @@ from kagan.core.plugins.github import (
     register_github_plugin,
 )
 from kagan.core.plugins.github.contract import GITHUB_METHOD_SYNC_ISSUES
+from kagan.core.plugins.github.entrypoints.plugin_handlers import GH_NOT_CONNECTED
 from kagan.core.plugins.github.gh_adapter import (
     GITHUB_CONNECTION_KEY,
     GhIssue,
     parse_gh_issue_list,
 )
-from kagan.core.plugins.github.operations.common import GH_NOT_CONNECTED
 from kagan.core.plugins.github.sync import (
     GITHUB_DEFAULT_MODE_KEY,
     GITHUB_ISSUE_MAPPING_KEY,
@@ -407,7 +407,7 @@ class TestSyncIssuesHandler:
 
     @pytest.mark.asyncio()
     async def test_returns_error_when_repo_not_connected(self) -> None:
-        from kagan.core.plugins.github.operations.sync import handle_sync_issues
+        from kagan.core.plugins.github.entrypoints.plugin_handlers import handle_sync_issues
 
         ctx = MagicMock()
 
@@ -433,7 +433,7 @@ class TestSyncIssuesHandler:
     @pytest.mark.asyncio()
     async def test_idempotent_sync_produces_no_churn(self) -> None:
         """Re-running sync without remote changes produces no task changes."""
-        from kagan.core.plugins.github.operations.sync import handle_sync_issues
+        from kagan.core.plugins.github.entrypoints.plugin_handlers import handle_sync_issues
 
         ctx = MagicMock()
 
@@ -466,8 +466,6 @@ class TestSyncIssuesHandler:
         ctx.project_service.get_project = get_project_async
         ctx.project_service.get_project_repos = get_repos_async
         ctx.task_service.get_task = get_task_async
-        ctx._task_repo = MagicMock()
-        ctx._task_repo._session_factory = MagicMock()
 
         params = {"project_id": "project-1"}
 
@@ -484,14 +482,17 @@ class TestSyncIssuesHandler:
 
         with (
             patch(
-                "kagan.core.plugins.github.operations.sync.resolve_gh_cli_path",
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.resolve_gh_cli_path",
                 return_value=("/usr/bin/gh", None),
             ),
             patch(
-                "kagan.core.plugins.github.operations.sync.run_gh_issue_list",
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.run_gh_issue_list",
                 return_value=(mock_issues, None),
             ),
-            patch("kagan.core.plugins.github.operations.sync.upsert_repo_sync_state"),
+            patch(
+                "kagan.core.plugins.github.adapters.core_gateway.AppContextCoreGateway.update_repo_scripts",
+                new_callable=AsyncMock,
+            ),
         ):
             result = await handle_sync_issues(ctx, params)
 
@@ -503,7 +504,7 @@ class TestSyncIssuesHandler:
     @pytest.mark.asyncio()
     async def test_sync_recreates_mapping_without_stale_reverse_entry(self) -> None:
         """Drift recovery should replace stale task_to_issue entries for recreated tasks."""
-        from kagan.core.plugins.github.operations.sync import handle_sync_issues
+        from kagan.core.plugins.github.entrypoints.plugin_handlers import handle_sync_issues
 
         ctx = MagicMock()
         existing_mapping = {
@@ -537,8 +538,6 @@ class TestSyncIssuesHandler:
         ctx.task_service.get_task = get_task_async
         ctx.task_service.create_task = create_task_async
         ctx.task_service.update_fields = AsyncMock(return_value=None)
-        ctx._task_repo = MagicMock()
-        ctx._task_repo._session_factory = MagicMock()
 
         mock_issues = [
             {
@@ -552,20 +551,22 @@ class TestSyncIssuesHandler:
 
         with (
             patch(
-                "kagan.core.plugins.github.operations.sync.resolve_gh_cli_path",
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.resolve_gh_cli_path",
                 return_value=("/usr/bin/gh", None),
             ),
             patch(
-                "kagan.core.plugins.github.operations.sync.run_gh_issue_list",
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.run_gh_issue_list",
                 return_value=(mock_issues, None),
             ),
             patch(
-                "kagan.core.plugins.github.operations.sync.upsert_repo_sync_state"
-            ) as upsert_state,
+                "kagan.core.plugins.github.adapters.core_gateway.AppContextCoreGateway.update_repo_scripts",
+                new_callable=AsyncMock,
+            ) as update_repo_scripts,
         ):
             result = await handle_sync_issues(ctx, {"project_id": "project-1"})
 
         assert result["success"] is True
-        mapping = upsert_state.await_args.args[3]
-        assert mapping.issue_to_task[1] == "task-new"
-        assert mapping.task_to_issue == {"task-new": 1}
+        updates = update_repo_scripts.await_args.args[-1]
+        mapping_payload = json.loads(updates[GITHUB_ISSUE_MAPPING_KEY])
+        assert mapping_payload["issue_to_task"] == {"1": "task-new"}
+        assert mapping_payload["task_to_issue"] == {"task-new": 1}

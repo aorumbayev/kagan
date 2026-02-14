@@ -27,9 +27,9 @@ from kagan.core.plugins.sdk import (
 from kagan.core.security import CapabilityProfile
 
 
-def _operations_module() -> Any:
-    """Load operations module lazily to avoid eager plugin side effects."""
-    return import_module("kagan.core.plugins.github.operations")
+def _plugin_handlers_module() -> Any:
+    """Load handler module lazily to avoid eager plugin side effects."""
+    return import_module("kagan.core.plugins.github.entrypoints.plugin_handlers")
 
 
 class GitHubPlugin:
@@ -147,48 +147,48 @@ class GitHubPlugin:
 
 async def _contract_probe(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
     del ctx
-    operations_module = _operations_module()
-    return operations_module.build_contract_probe_payload(params)
+    handlers_module = _plugin_handlers_module()
+    return handlers_module.build_contract_probe_payload(params)
 
 
 async def _connect_repo(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
-    operations_module = _operations_module()
-    return await operations_module.handle_connect_repo(ctx, params)
+    handlers_module = _plugin_handlers_module()
+    return await handlers_module.handle_connect_repo(ctx, params)
 
 
 async def _sync_issues(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
-    operations_module = _operations_module()
-    return await operations_module.handle_sync_issues(ctx, params)
+    handlers_module = _plugin_handlers_module()
+    return await handlers_module.handle_sync_issues(ctx, params)
 
 
 async def _acquire_lease(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
-    operations_module = _operations_module()
-    return await operations_module.handle_acquire_lease(ctx, params)
+    handlers_module = _plugin_handlers_module()
+    return await handlers_module.handle_acquire_lease(ctx, params)
 
 
 async def _release_lease(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
-    operations_module = _operations_module()
-    return await operations_module.handle_release_lease(ctx, params)
+    handlers_module = _plugin_handlers_module()
+    return await handlers_module.handle_release_lease(ctx, params)
 
 
 async def _get_lease_state(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
-    operations_module = _operations_module()
-    return await operations_module.handle_get_lease_state(ctx, params)
+    handlers_module = _plugin_handlers_module()
+    return await handlers_module.handle_get_lease_state(ctx, params)
 
 
 async def _create_pr_for_task(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
-    operations_module = _operations_module()
-    return await operations_module.handle_create_pr_for_task(ctx, params)
+    handlers_module = _plugin_handlers_module()
+    return await handlers_module.handle_create_pr_for_task(ctx, params)
 
 
 async def _link_pr_to_task(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
-    operations_module = _operations_module()
-    return await operations_module.handle_link_pr_to_task(ctx, params)
+    handlers_module = _plugin_handlers_module()
+    return await handlers_module.handle_link_pr_to_task(ctx, params)
 
 
 async def _reconcile_pr_status(ctx: Any, params: dict[str, Any]) -> dict[str, Any]:
-    operations_module = _operations_module()
-    return await operations_module.handle_reconcile_pr_status(ctx, params)
+    handlers_module = _plugin_handlers_module()
+    return await handlers_module.handle_reconcile_pr_status(ctx, params)
 
 
 def register_github_plugin(registry: PluginRegistry) -> None:
