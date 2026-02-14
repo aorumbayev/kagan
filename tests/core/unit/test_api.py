@@ -5,14 +5,18 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _api_helpers import build_api
 
 from kagan.core.models.enums import TaskPriority, TaskStatus, TaskType
 from kagan.core.plugins.github.gh_adapter import GITHUB_CONNECTION_KEY
-from kagan.core.plugins.github.sync import GITHUB_TASK_PR_MAPPING_KEY
+from kagan.core.plugins.github.sync import (
+    GITHUB_ISSUE_MAPPING_KEY,
+    GITHUB_LEASE_ENFORCEMENT_KEY,
+    GITHUB_TASK_PR_MAPPING_KEY,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -242,6 +246,50 @@ class TestReviewOperations:
 
         with pytest.raises(ValueError, match="failed to verify GitHub guardrails"):
             await api.request_review(task.id)
+
+    async def test_request_review_skips_lease_check_when_repo_disables_enforcement(
+        self,
+        handle_env: tuple,
+    ) -> None:
+        """Lease guardrail checks must be skipped when repo opts out explicitly."""
+        _repo, api, ctx = handle_env
+        task = await api.create_task("Lease opt-out")
+        pr_mapping = {
+            "task_to_pr": {
+                task.id: {
+                    "pr_number": 7,
+                    "pr_url": "https://github.com/acme/repo-a/pull/7",
+                    "pr_state": "OPEN",
+                    "head_branch": "feature/lease-opt-out",
+                    "base_branch": "main",
+                    "linked_at": "2026-01-01T00:00:00+00:00",
+                }
+            }
+        }
+        issue_mapping = {
+            "issue_to_task": {"123": task.id},
+            "task_to_issue": {task.id: 123},
+        }
+        repo_a = SimpleNamespace(
+            id="repo-a",
+            path="/tmp/repo-a",
+            scripts={
+                GITHUB_CONNECTION_KEY: json.dumps({"owner": "acme", "repo": "repo-a"}),
+                GITHUB_TASK_PR_MAPPING_KEY: json.dumps(pr_mapping),
+                GITHUB_ISSUE_MAPPING_KEY: json.dumps(issue_mapping),
+                GITHUB_LEASE_ENFORCEMENT_KEY: "false",
+            },
+        )
+        ctx.project_service.get_project_repos = AsyncMock(return_value=[repo_a])
+
+        with patch(
+            "kagan.core.plugins.github.gh_adapter.resolve_gh_cli",
+            side_effect=RuntimeError("should not resolve gh when lease enforcement is disabled"),
+        ):
+            reviewed = await api.request_review(task.id)
+
+        assert reviewed is not None
+        assert reviewed.status == TaskStatus.REVIEW
 
     async def test_reject_task(self, handle_env: tuple) -> None:
         _repo, api, ctx = handle_env

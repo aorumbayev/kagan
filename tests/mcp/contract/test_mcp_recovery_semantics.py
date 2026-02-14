@@ -353,7 +353,7 @@ async def test_job_poll_derives_wait_followup_for_non_terminal_states(
     }
 
 
-async def test_job_poll_derives_blocked_recovery_when_missing(monkeypatch) -> None:
+async def test_job_poll_derives_pending_recovery_when_missing(monkeypatch) -> None:
     class _BridgeStub:
         async def get_job(self, *, job_id: str, task_id: str) -> dict[str, object]:
             return {
@@ -363,12 +363,8 @@ async def test_job_poll_derives_blocked_recovery_when_missing(monkeypatch) -> No
                 "status": "failed",
                 "result": {
                     "success": False,
-                    "code": "START_BLOCKED",
-                    "message": "blocked",
-                    "runtime": {
-                        "is_blocked": True,
-                        "blocked_by_task_ids": ["B1"],
-                    },
+                    "code": "START_PENDING",
+                    "message": "pending scheduler admission",
                 },
             }
 
@@ -379,9 +375,14 @@ async def test_job_poll_derives_blocked_recovery_when_missing(monkeypatch) -> No
     result = await tool.fn(job_id="J1", task_id="T1", wait=False, ctx=None)
 
     assert result.success is True
-    assert result.code == "START_BLOCKED"
-    assert result.next_tool == "task_get"
-    assert result.next_arguments == {"task_id": "B1", "mode": "summary"}
+    assert result.code == "START_PENDING"
+    assert result.next_tool == "job_poll"
+    assert result.next_arguments == {
+        "job_id": "J1",
+        "task_id": "T1",
+        "wait": True,
+        "timeout_seconds": 1.5,
+    }
 
 
 async def test_job_cancel_derives_poll_followup_when_missing(monkeypatch) -> None:

@@ -418,17 +418,15 @@ class TaskApiMixin:
 
         Returns dict with 'allowed' bool and optional 'message'/'code'/'hint'.
         """
-        from kagan.core.plugins.github.gh_adapter import (
-            GITHUB_CONNECTION_KEY,
-            load_connection_metadata,
-            resolve_connection_repo_name,
-            resolve_gh_cli,
+        from kagan.core.plugins.github.domain.repo_state import (
+            load_connection_state,
+            load_issue_mapping_state,
+            load_lease_enforcement_state,
+            load_pr_mapping_state,
+            resolve_owner_repo,
         )
+        from kagan.core.plugins.github.gh_adapter import resolve_gh_cli
         from kagan.core.plugins.github.lease import get_lease_state
-        from kagan.core.plugins.github.sync import (
-            load_mapping,
-            load_task_pr_mapping,
-        )
 
         def _guardrail_check_failed(detail: str) -> dict[str, Any]:
             return {
@@ -452,11 +450,11 @@ class TaskApiMixin:
 
         # Collect connected repos with parsed connection and mappings.
         for repo in repos:
-            connection_raw = repo.scripts.get(GITHUB_CONNECTION_KEY) if repo.scripts else None
-            if not connection_raw:
+            connection_state = load_connection_state(repo.scripts)
+            if not connection_state.raw_value:
                 continue
 
-            connection = load_connection_metadata(connection_raw)
+            connection = connection_state.normalized
             if connection is None:
                 return _guardrail_check_failed("invalid GitHub connection metadata")
 
@@ -464,8 +462,9 @@ class TaskApiMixin:
                 {
                     "repo": repo,
                     "connection": connection,
-                    "pr_mapping": load_task_pr_mapping(repo.scripts),
-                    "issue_mapping": load_mapping(repo.scripts),
+                    "pr_mapping": load_pr_mapping_state(repo.scripts),
+                    "issue_mapping": load_issue_mapping_state(repo.scripts),
+                    "lease_enforced": load_lease_enforcement_state(repo.scripts),
                 }
             )
 
@@ -517,6 +516,7 @@ class TaskApiMixin:
         owner_connection = owner_repo_ctx["connection"]
         owner_pr_mapping = owner_repo_ctx["pr_mapping"]
         owner_issue_mapping = owner_repo_ctx["issue_mapping"]
+        owner_lease_enforced = bool(owner_repo_ctx.get("lease_enforced", True))
 
         # Enforce PR linkage for the owning connected repo.
         if not owner_pr_mapping.has_pr(task.id):
@@ -532,11 +532,11 @@ class TaskApiMixin:
 
         # Enforce lease ownership if the task is mapped to a GitHub issue.
         issue_number = owner_issue_mapping.get_issue_number(task.id)
-        if issue_number is not None:
-            owner = str(owner_connection.get("owner") or "").strip()
-            repo_name = resolve_connection_repo_name(owner_connection)
-            if not owner or not repo_name:
+        if issue_number is not None and owner_lease_enforced:
+            owner_repo_tuple = resolve_owner_repo(owner_connection)
+            if owner_repo_tuple is None:
                 return _guardrail_check_failed("GitHub connection metadata missing owner/repo")
+            owner, repo_name = owner_repo_tuple
 
             cli_info = resolve_gh_cli()
             if not cli_info.available or not cli_info.path:

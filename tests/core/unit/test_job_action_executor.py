@@ -64,23 +64,26 @@ async def test_execute_start_agent_rejects_non_auto_task() -> None:
     automation_service.spawn_for_task.assert_not_awaited()
 
 
-async def test_execute_start_agent_reports_blocked_runtime_state() -> None:
+async def test_execute_start_agent_reports_pending_runtime_state() -> None:
     task = SimpleNamespace(id="task-1", task_type=TaskType.AUTO, status=TaskStatus.IN_PROGRESS)
-    blocked_view = SimpleNamespace(
+    pending_view = SimpleNamespace(
         is_running=False,
         is_reviewing=False,
-        is_blocked=True,
-        blocked_reason="Waiting on #deadbeef before starting",
-        blocked_by_task_ids=("deadbeef",),
-        overlap_hints=("src/core.py",),
+        is_blocked=False,
+        blocked_reason=None,
+        blocked_by_task_ids=(),
+        overlap_hints=(),
         blocked_at=None,
+        is_pending=True,
+        pending_reason="Queued for capacity: waiting for an available agent slot.",
+        pending_at=None,
     )
     task_service = SimpleNamespace(get_task=AsyncMock(return_value=task))
     automation_service = SimpleNamespace(
         spawn_for_task=AsyncMock(return_value=True),
         is_running=lambda _task_id: False,
     )
-    runtime_service = SimpleNamespace(get=lambda _task_id: blocked_view)
+    runtime_service = SimpleNamespace(get=lambda _task_id: pending_view)
     ctx = _ctx(
         task_service=task_service,
         automation_service=automation_service,
@@ -94,9 +97,9 @@ async def test_execute_start_agent_reports_blocked_runtime_state() -> None:
     )
 
     assert result["success"] is True
-    assert result["code"] == "START_BLOCKED"
-    assert "Waiting on #deadbeef" in result["message"]
-    assert result["runtime"]["is_blocked"] is True
+    assert result["code"] == "START_PENDING"
+    assert "Queued for capacity" in result["message"]
+    assert result["runtime"]["is_pending"] is True
 
 
 async def test_execute_start_agent_reports_started_when_runtime_is_running() -> None:

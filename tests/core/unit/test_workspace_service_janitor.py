@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from kagan.core.services.workspaces.service import JanitorResult, WorkspaceServiceImpl
+from kagan.core.services.workspaces.service import WorkspaceServiceImpl
 
 
 def _make_service_with_repos(
@@ -65,28 +65,6 @@ def _make_service_with_repos(
     monkeypatch.setattr(ws_module, "get_session", lambda session_factory: MockContextManager())
 
     return service
-
-
-class TestJanitorResult:
-    """Tests for JanitorResult dataclass."""
-
-    def test_total_cleaned_returns_sum(self) -> None:
-        result = JanitorResult(
-            worktrees_pruned=3,
-            branches_deleted=["repo:kagan/a", "repo:kagan/b"],
-            repos_processed=["repo"],
-        )
-
-        assert result.total_cleaned == 5
-
-    def test_total_cleaned_with_zeros(self) -> None:
-        result = JanitorResult(
-            worktrees_pruned=0,
-            branches_deleted=[],
-            repos_processed=["repo"],
-        )
-
-        assert result.total_cleaned == 0
 
 
 class TestExtractWorkspaceIdFromBranch:

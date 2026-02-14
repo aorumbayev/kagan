@@ -96,7 +96,6 @@ async def _execute_start_agent(ctx: AppContext, params: dict[str, Any]) -> dict[
     started = await ctx.automation_service.spawn_for_task(task)
     runtime = _runtime_snapshot(ctx, task_id)
     runtime_is_running = bool(runtime.get("is_running"))
-    runtime_is_blocked = bool(runtime.get("is_blocked"))
     runtime_is_pending = bool(runtime.get("is_pending"))
 
     if runtime_is_running or ctx.automation_service.is_running(task_id):
@@ -105,17 +104,6 @@ async def _execute_start_agent(ctx: AppContext, params: dict[str, Any]) -> dict[
             "task_id": task_id,
             "message": "Agent running",
             "code": "STARTED",
-            "runtime": runtime,
-        }
-
-    if runtime_is_blocked:
-        return {
-            "success": True,
-            "task_id": task_id,
-            "message": runtime.get("blocked_reason")
-            or "Agent start is conflict-blocked and queued for auto-resume",
-            "code": "START_BLOCKED",
-            "hint": "Task will auto-resume when blocking tasks are no longer active.",
             "runtime": runtime,
         }
 

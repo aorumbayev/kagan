@@ -202,6 +202,7 @@ Default and max timeouts are server-side configurable via settings:
 ## Task field semantics
 
 - `status` is Kanban state: `BACKLOG`, `IN_PROGRESS`, `REVIEW`, `DONE`.
+- `status=AUTO` and `status=PAIR` are rejected with `TASK_TYPE_VALUE_IN_STATUS`.
 - Do not set `status=DONE` via generic task patch/move workflows.
   Use review completion flows to reach `DONE`.
 - `task_type` is execution mode: `AUTO`, `PAIR`.

@@ -87,14 +87,10 @@ TaskStatusInput: TypeAlias = Literal[
     "IN_PROGRESS",
     "REVIEW",
     "DONE",
-    "AUTO",
-    "PAIR",
     "backlog",
     "in_progress",
     "review",
     "done",
-    "auto",
-    "pair",
 ]
 TaskPriorityInput: TypeAlias = Literal[
     "LOW",
@@ -119,7 +115,6 @@ TASK_TYPE_AUTO: Final[str] = TaskType.AUTO.value
 TASK_TYPE_PAIR: Final[str] = TaskType.PAIR.value
 TASK_TYPE_VALUES: Final[frozenset[str]] = frozenset({TASK_TYPE_AUTO, TASK_TYPE_PAIR})
 
-TASK_CODE_STATUS_WAS_TASK_TYPE: Final[str] = "STATUS_WAS_TASK_TYPE"
 TASK_CODE_TASK_TYPE_VALUE_IN_STATUS: Final[str] = "TASK_TYPE_VALUE_IN_STATUS"
 
 STATUS_ERROR: Final[str] = "error"
@@ -130,13 +125,14 @@ JOB_TERMINAL_STATUSES: Final[frozenset[str]] = frozenset({"succeeded", "failed",
 JOB_CODE_UNSUPPORTED_ACTION: Final[str] = "UNSUPPORTED_ACTION"
 JOB_CODE_JOB_TIMEOUT: Final[str] = "JOB_TIMEOUT"
 JOB_CODE_TASK_TYPE_MISMATCH: Final[str] = "TASK_TYPE_MISMATCH"
-JOB_CODE_START_BLOCKED: Final[str] = "START_BLOCKED"
 JOB_CODE_START_PENDING: Final[str] = "START_PENDING"
 JOB_CODE_NOT_RUNNING: Final[str] = "NOT_RUNNING"
+DEFAULT_JOB_POLL_WAIT_TIMEOUT_SECONDS: Final[float] = 1.5
 
 TOOL_TASK_GET: Final[str] = "task_get"
 TOOL_TASK_WAIT: Final[str] = "task_wait"
 TOOL_TASK_PATCH: Final[str] = "task_patch"
+TOOL_TASK_CREATE: Final[str] = "task_create"
 TOOL_JOB_START: Final[str] = "job_start"
 TOOL_JOB_POLL: Final[str] = "job_poll"
 TOOL_SESSION_MANAGE: Final[str] = "session_manage"
@@ -198,7 +194,6 @@ class ToolRegistrationContext:
 
     require_bridge: Callable[[MCPContext | None], CoreClientBridge]
     runtime_state_from_raw: Callable[[dict[str, Any] | None], TaskRuntimeState | None]
-    normalize_status_task_type_inputs: Callable[..., tuple[str | None, str | None, str | None]]
     envelope_fields: Callable[..., Any]
     envelope_with_code_override: Callable[..., Any]
     envelope_status_fields: Callable[[Any], Any]
@@ -536,9 +531,7 @@ def register_task_tools(
 ) -> None:
     """Register task and project MCP tools."""
     _require_bridge = helpers.require_bridge
-    _normalize_status_task_type_inputs = helpers.normalize_status_task_type_inputs
     _envelope_fields = helpers.envelope_fields
-    _envelope_with_code_override = helpers.envelope_with_code_override
     _envelope_recovery_fields = helpers.envelope_recovery_fields
     _normalized_mode = helpers.normalized_mode
     _MUTATING = mutating_annotation
@@ -569,17 +562,42 @@ def register_task_tools(
         ) -> TaskCreateResponse:
             """Create a new task."""
             bridge = _require_bridge(ctx)
-            normalized_status, normalized_task_type, normalization_message = (
-                _normalize_status_task_type_inputs(status=status, task_type=task_type)
-            )
+            mode_from_status = _normalized_mode(str(status) if status is not None else None)
+            if mode_from_status is not None:
+                return TaskCreateResponse(
+                    success=False,
+                    message=(
+                        f"Invalid status value {status!r}. "
+                        "AUTO/PAIR are task_type values, not status values."
+                    ),
+                    code=TASK_CODE_TASK_TYPE_VALUE_IN_STATUS,
+                    hint="Pass task_type explicitly and keep status in Kanban states.",
+                    next_tool=TOOL_TASK_CREATE,
+                    next_arguments={
+                        "title": title,
+                        "description": description,
+                        "project_id": project_id,
+                        "task_type": mode_from_status,
+                        "priority": priority,
+                        "terminal_backend": terminal_backend,
+                        "agent_backend": agent_backend,
+                        "parent_id": parent_id,
+                        "base_branch": base_branch,
+                        "acceptance_criteria": acceptance_criteria,
+                        "created_by": created_by,
+                    },
+                    task_id="",
+                    title=title,
+                    status=TaskStatus.BACKLOG.value,
+                )
 
             raw = await bridge.create_task(
                 title=title,
                 description=description,
                 project_id=project_id,
-                status=normalized_status,
+                status=status,
                 priority=priority,
-                task_type=normalized_task_type,
+                task_type=task_type,
                 terminal_backend=terminal_backend,
                 agent_backend=agent_backend,
                 parent_id=parent_id,
@@ -587,12 +605,7 @@ def register_task_tools(
                 acceptance_criteria=acceptance_criteria,
                 created_by=created_by,
             )
-            envelope = _envelope_with_code_override(
-                raw,
-                default_success=True,
-                default_message=normalization_message,
-                fallback_code=TASK_CODE_STATUS_WAS_TASK_TYPE if normalization_message else None,
-            )
+            envelope = _envelope_fields(raw, default_success=True)
             return TaskCreateResponse(
                 task_id=raw["task_id"],
                 title=raw.get("title", title),
@@ -1033,7 +1046,7 @@ def register_job_tools(
                     "job_id": job_id,
                     "task_id": returned_task_id,
                     "wait": True,
-                    "timeout_seconds": 1.5,
+                    "timeout_seconds": DEFAULT_JOB_POLL_WAIT_TIMEOUT_SECONDS,
                 }
                 if hint is None:
                     hint = (
@@ -1062,7 +1075,7 @@ def register_job_tools(
             job_id: str,
             task_id: str,
             wait: bool = False,
-            timeout_seconds: float = 1.5,
+            timeout_seconds: float = DEFAULT_JOB_POLL_WAIT_TIMEOUT_SECONDS,
             events: bool = False,
             limit: int = 50,
             offset: int = 0,
@@ -1179,7 +1192,7 @@ def register_job_tools(
                     "job_id": job_id,
                     "task_id": task_id,
                     "wait": True,
-                    "timeout_seconds": 1.5,
+                    "timeout_seconds": DEFAULT_JOB_POLL_WAIT_TIMEOUT_SECONDS,
                 }
                 if hint is None:
                     hint = "Use job_poll(wait=true) to confirm terminal status."

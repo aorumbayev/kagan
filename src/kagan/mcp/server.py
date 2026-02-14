@@ -44,9 +44,9 @@ from kagan.mcp.models import (
     TaskRuntimeState,
 )
 from kagan.mcp.registrars import (
+    DEFAULT_JOB_POLL_WAIT_TIMEOUT_SECONDS,
     JOB_CODE_JOB_TIMEOUT,
     JOB_CODE_NOT_RUNNING,
-    JOB_CODE_START_BLOCKED,
     JOB_CODE_START_PENDING,
     JOB_CODE_TASK_TYPE_MISMATCH,
     JOB_NON_TERMINAL_STATUSES,
@@ -57,8 +57,6 @@ from kagan.mcp.registrars import (
     TOOL_TASK_GET,
     TOOL_TASK_PATCH,
     SharedToolRegistrationContext,
-    TaskStatusInput,
-    TaskTypeInput,
     ToolRegistrationContext,
     register_full_mode_tools,
     register_shared_tools,
@@ -458,35 +456,6 @@ def _normalized_mode(value: str | None) -> str | None:
     return None
 
 
-def _normalize_status_task_type_inputs(
-    *,
-    status: TaskStatusInput | None,
-    task_type: TaskTypeInput | None,
-) -> tuple[str | None, str | None, str | None]:
-    """Normalize common status-vs-task_type confusion.
-
-    When callers pass status=AUTO/PAIR, interpret that as task_type if possible.
-    Returns: (normalized_status, normalized_task_type, normalization_message).
-    """
-    mode_from_status = _normalized_mode(str(status) if status is not None else None)
-    normalized_task_type = _normalized_mode(str(task_type) if task_type is not None else None)
-    if mode_from_status is None:
-        normalized_status = str(status) if status is not None else None
-        normalized_task_type_str = str(task_type) if task_type is not None else None
-        return normalized_status, normalized_task_type_str, None
-    if normalized_task_type and normalized_task_type != mode_from_status:
-        message = (
-            f"Ignored status={status!r} because task_type={task_type!r} is already set. "
-            "Use status for BACKLOG/IN_PROGRESS/REVIEW/DONE only."
-        )
-        return None, normalized_task_type, message
-    message = (
-        f"Interpreted status={status!r} as task_type={mode_from_status!r}. "
-        "Use status for BACKLOG/IN_PROGRESS/REVIEW/DONE only."
-    )
-    return None, mode_from_status, message
-
-
 def _envelope_fields(
     raw: dict[str, object],
     *,
@@ -617,13 +586,23 @@ def _derive_job_get_recovery(
     if timed_out or code == JOB_CODE_JOB_TIMEOUT:
         return (
             TOOL_JOB_POLL,
-            {"job_id": job_id, "task_id": task_id, "wait": True, "timeout_seconds": 1.5},
+            {
+                "job_id": job_id,
+                "task_id": task_id,
+                "wait": True,
+                "timeout_seconds": DEFAULT_JOB_POLL_WAIT_TIMEOUT_SECONDS,
+            },
             "Wait timed out before terminal status. Call job_poll(wait=true) again.",
         )
     if normalized_status in JOB_NON_TERMINAL_STATUSES:
         return (
             TOOL_JOB_POLL,
-            {"job_id": job_id, "task_id": task_id, "wait": True, "timeout_seconds": 1.5},
+            {
+                "job_id": job_id,
+                "task_id": task_id,
+                "wait": True,
+                "timeout_seconds": DEFAULT_JOB_POLL_WAIT_TIMEOUT_SECONDS,
+            },
             "Job is still in progress. Call job_poll(wait=true) until terminal.",
         )
     if code == JOB_CODE_TASK_TYPE_MISMATCH:
@@ -636,28 +615,15 @@ def _derive_job_get_recovery(
             },
             "Set task_type to AUTO before resubmitting job_start.",
         )
-    if code == JOB_CODE_START_BLOCKED:
-        blocked_ids_raw: list[object] = []
-        if runtime is not None:
-            raw_value = runtime.get("blocked_by_task_ids", [])
-            if isinstance(raw_value, list | tuple):
-                blocked_ids_raw = list(raw_value)
-        blocked_ids = [str(value) for value in blocked_ids_raw if str(value).strip()]
-        if blocked_ids:
-            return (
-                TOOL_TASK_GET,
-                {"task_id": blocked_ids[0], "mode": "summary"},
-                "Resolve the blocking task first, then resubmit job_start.",
-            )
-        return (
-            TOOL_TASK_GET,
-            {"task_id": task_id, "mode": "summary"},
-            "Inspect runtime details and retry after the blocking condition clears.",
-        )
     if code == JOB_CODE_START_PENDING:
         return (
             TOOL_JOB_POLL,
-            {"job_id": job_id, "task_id": task_id, "wait": True, "timeout_seconds": 1.5},
+            {
+                "job_id": job_id,
+                "task_id": task_id,
+                "wait": True,
+                "timeout_seconds": DEFAULT_JOB_POLL_WAIT_TIMEOUT_SECONDS,
+            },
             "Start is pending scheduler admission. Keep calling job_poll(wait=true).",
         )
     if code == JOB_CODE_NOT_RUNNING:
@@ -758,7 +724,6 @@ def _register_full_mode_tools(
         helpers=ToolRegistrationContext(
             require_bridge=_require_bridge,
             runtime_state_from_raw=_runtime_state_from_raw,
-            normalize_status_task_type_inputs=_normalize_status_task_type_inputs,
             envelope_fields=_envelope_fields,
             envelope_with_code_override=_envelope_with_code_override,
             envelope_status_fields=_envelope_status_fields,
