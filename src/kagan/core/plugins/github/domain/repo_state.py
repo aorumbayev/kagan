@@ -13,12 +13,14 @@ from kagan.core.plugins.github.gh_adapter import (
 )
 from kagan.core.plugins.github.sync import (
     GITHUB_ISSUE_MAPPING_KEY,
+    GITHUB_LEASE_ENFORCEMENT_KEY,
     GITHUB_SYNC_CHECKPOINT_KEY,
     GITHUB_TASK_PR_MAPPING_KEY,
     IssueMapping,
     SyncCheckpoint,
     TaskPRMapping,
     load_checkpoint,
+    load_lease_enforcement,
     load_mapping,
     load_repo_default_mode,
     load_task_pr_mapping,
@@ -84,6 +86,11 @@ def load_repo_default_mode_state(scripts: Mapping[str, object] | None) -> TaskTy
     return load_repo_default_mode(scripts)
 
 
+def load_lease_enforcement_state(scripts: Mapping[str, object] | None) -> bool:
+    """Load repo-level lease enforcement policy from persisted repo scripts."""
+    return load_lease_enforcement(scripts)
+
+
 def load_pr_mapping_state(scripts: Mapping[str, object] | None) -> TaskPRMapping:
     """Load PR mapping from persisted repo scripts."""
     return load_task_pr_mapping(scripts)
@@ -110,13 +117,20 @@ def encode_pr_mapping_update(mapping: TaskPRMapping) -> dict[str, str]:
     return {GITHUB_TASK_PR_MAPPING_KEY: json.dumps(mapping.to_dict())}
 
 
+def encode_lease_enforcement_update(enabled: bool) -> dict[str, str]:
+    """Encode lease enforcement policy update payload."""
+    return {GITHUB_LEASE_ENFORCEMENT_KEY: json.dumps(enabled)}
+
+
 __all__ = [
     "ConnectionState",
     "encode_connection_update",
+    "encode_lease_enforcement_update",
     "encode_pr_mapping_update",
     "encode_sync_state_update",
     "load_connection_state",
     "load_issue_mapping_state",
+    "load_lease_enforcement_state",
     "load_pr_mapping_state",
     "load_repo_default_mode_state",
     "load_sync_checkpoint_state",

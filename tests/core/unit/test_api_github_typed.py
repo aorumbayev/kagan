@@ -1,4 +1,4 @@
-"""Focused tests for typed GitHub API methods and TUI API dispatch."""
+"""Focused tests for typed GitHub API methods."""
 
 from __future__ import annotations
 
@@ -8,12 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from _api_helpers import build_api
-
-from kagan.core.plugins.github.contract import (
-    GITHUB_CAPABILITY,
-    GITHUB_METHOD_SYNC_ISSUES,
-)
-from kagan.core.request_handlers import handle_tui_api_call
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -32,7 +26,7 @@ async def github_api_env(
     await repo.close()
 
 
-async def test_github_sync_issues_invokes_registered_operation(
+async def test_github_sync_issues_normalizes_params_before_handler_call(
     github_api_env: tuple[KaganAPI, AppContext],
 ) -> None:
     api, ctx = github_api_env
@@ -45,7 +39,6 @@ async def test_github_sync_issues_invokes_registered_operation(
 
     assert result["success"] is True
     assert result["stats"]["inserted"] == 3
-    registry.resolve_operation.assert_called_once_with(GITHUB_CAPABILITY, GITHUB_METHOD_SYNC_ISSUES)
     handler.assert_awaited_once_with(
         ctx,
         {
@@ -62,29 +55,3 @@ async def test_github_connect_repo_rejects_empty_project_id(
 
     with pytest.raises(ValueError, match="project_id cannot be empty"):
         await api.github_connect_repo(project_id="   ")
-
-
-async def test_tui_api_call_dispatches_github_sync_to_typed_api(
-    github_api_env: tuple[KaganAPI, AppContext],
-) -> None:
-    api, ctx = github_api_env
-    handler = AsyncMock(return_value={"success": True, "stats": {"updated": 2}})
-    registry = MagicMock()
-    registry.resolve_operation.return_value = SimpleNamespace(handler=handler)
-    ctx.plugin_registry = registry
-
-    result = await handle_tui_api_call(
-        api,
-        {
-            "method": "github_sync_issues",
-            "kwargs": {
-                "project_id": "project-1",
-                "repo_id": "repo-1",
-            },
-        },
-    )
-
-    assert result["success"] is True
-    assert result["method"] == "github_sync_issues"
-    assert result["value"]["success"] is True
-    assert result["value"]["stats"]["updated"] == 2

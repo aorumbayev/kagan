@@ -327,22 +327,7 @@ def register_shared_tools(
             if include_logs:
                 raw_logs = raw.get("logs")
                 if isinstance(raw_logs, list):
-                    normalized_logs: list[AgentLogEntry] = []
-                    for log in raw_logs:
-                        if not isinstance(log, dict):
-                            continue
-                        run = log.get("run")
-                        content = log.get("content")
-                        created_at = log.get("created_at")
-                        if (
-                            isinstance(run, int)
-                            and isinstance(content, str)
-                            and isinstance(created_at, str)
-                        ):
-                            normalized_logs.append(
-                                AgentLogEntry(run=run, content=content, created_at=created_at)
-                            )
-                    raw["logs"] = normalized_logs
+                    raw["logs"] = _normalize_agent_log_entries(raw_logs)
             return raw
 
     if allows_all(_TASKS_LOGS):
@@ -357,23 +342,7 @@ def register_shared_tools(
             """Get paginated task logs."""
             bridge = _require_bridge(ctx)
             raw = await bridge.list_task_logs(task_id=task_id, limit=limit, offset=offset)
-            raw_logs = raw.get("logs")
-            normalized_logs: list[AgentLogEntry] = []
-            if isinstance(raw_logs, list):
-                for log in raw_logs:
-                    if not isinstance(log, dict):
-                        continue
-                    run = log.get("run")
-                    content = log.get("content")
-                    created_at = log.get("created_at")
-                    if (
-                        isinstance(run, int)
-                        and isinstance(content, str)
-                        and isinstance(created_at, str)
-                    ):
-                        normalized_logs.append(
-                            AgentLogEntry(run=run, content=content, created_at=created_at)
-                        )
+            normalized_logs = _normalize_agent_log_entries(raw.get("logs"))
 
             total_runs = _int_or_none(raw.get("total_runs"))
             returned_runs = _int_or_none(raw.get("returned_runs"))
@@ -873,6 +842,21 @@ def _job_timed_out(
         if isinstance(val, bool):
             return val
     return None
+
+
+def _normalize_agent_log_entries(raw_logs: object) -> list[AgentLogEntry]:
+    if not isinstance(raw_logs, list):
+        return []
+    normalized_logs: list[AgentLogEntry] = []
+    for log in raw_logs:
+        if not isinstance(log, dict):
+            continue
+        run = log.get("run")
+        content = log.get("content")
+        created_at = log.get("created_at")
+        if isinstance(run, int) and isinstance(content, str) and isinstance(created_at, str):
+            normalized_logs.append(AgentLogEntry(run=run, content=content, created_at=created_at))
+    return normalized_logs
 
 
 def _int_or_none(v: object) -> int | None:

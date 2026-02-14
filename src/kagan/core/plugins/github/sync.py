@@ -20,6 +20,7 @@ GITHUB_SYNC_CHECKPOINT_KEY: Final = "kagan.github.sync_checkpoint"
 GITHUB_ISSUE_MAPPING_KEY: Final = "kagan.github.issue_mapping"
 GITHUB_DEFAULT_MODE_KEY: Final = "kagan.github.default_mode"
 GITHUB_TASK_PR_MAPPING_KEY: Final = "kagan.github.task_pr_mapping"
+GITHUB_LEASE_ENFORCEMENT_KEY: Final = "kagan.github.lease_enforcement"
 
 # Mode labels for deterministic task type resolution
 MODE_LABEL_AUTO: Final = "kagan:mode:auto"
@@ -275,7 +276,6 @@ class SyncOutcome:
 class SyncResult:
     """Aggregate result of a full sync operation."""
 
-    success: bool
     outcomes: list[SyncOutcome] = field(default_factory=list)
     inserted: int = 0
     updated: int = 0
@@ -385,6 +385,29 @@ def load_repo_default_mode(scripts: dict[str, str] | None) -> TaskType | None:
         return None
 
 
+def load_lease_enforcement(scripts: dict[str, str] | None) -> bool:
+    """Load repo-level lease enforcement policy from Repo.scripts.
+
+    Backward-compatible default is enabled when unset or invalid.
+    """
+    if not scripts:
+        return True
+    raw = scripts.get(GITHUB_LEASE_ENFORCEMENT_KEY)
+    if raw is None:
+        return True
+
+    if isinstance(raw, bool):
+        return raw
+
+    if isinstance(raw, int):
+        return raw != 0
+
+    normalized = str(raw).strip().lower()
+    if normalized in {"true", "1", "yes", "on", "enabled", "enforced"}:
+        return True
+    return normalized not in {"false", "0", "no", "off", "disabled", "unenforced"}
+
+
 def load_task_pr_mapping(scripts: dict[str, str] | None) -> TaskPRMapping:
     """Load task-to-PR mapping from Repo.scripts.
 
@@ -485,6 +508,7 @@ def compute_issue_changes(
 __all__ = [
     "GITHUB_DEFAULT_MODE_KEY",
     "GITHUB_ISSUE_MAPPING_KEY",
+    "GITHUB_LEASE_ENFORCEMENT_KEY",
     "GITHUB_SYNC_CHECKPOINT_KEY",
     "GITHUB_TASK_PR_MAPPING_KEY",
     "MODE_LABEL_AUTO",
@@ -501,6 +525,7 @@ __all__ = [
     "compute_issue_changes",
     "filter_issues_since_checkpoint",
     "load_checkpoint",
+    "load_lease_enforcement",
     "load_mapping",
     "load_repo_default_mode",
     "load_task_pr_mapping",

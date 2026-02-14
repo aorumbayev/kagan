@@ -394,9 +394,8 @@ def acquire_lease(
 
     if state.requires_takeover and not force_takeover:
         # Another instance holds the lease
-        if state.holder:
-            return LeaseAcquireResult.blocked(state.holder)
-        return LeaseAcquireResult.failed("Lease held by another instance")
+        assert state.holder is not None
+        return LeaseAcquireResult.blocked(state.holder)
 
     # Can acquire (either free, stale, or force takeover)
     new_holder = create_lease_holder(github_user=github_user)

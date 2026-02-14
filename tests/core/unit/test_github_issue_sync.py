@@ -14,6 +14,10 @@ from kagan.core.plugins.github import (
     register_github_plugin,
 )
 from kagan.core.plugins.github.contract import GITHUB_METHOD_SYNC_ISSUES
+from kagan.core.plugins.github.domain.repo_state import (
+    encode_lease_enforcement_update,
+    load_lease_enforcement_state,
+)
 from kagan.core.plugins.github.entrypoints.plugin_handlers import GH_NOT_CONNECTED
 from kagan.core.plugins.github.gh_adapter import (
     GITHUB_CONNECTION_KEY,
@@ -23,11 +27,13 @@ from kagan.core.plugins.github.gh_adapter import (
 from kagan.core.plugins.github.sync import (
     GITHUB_DEFAULT_MODE_KEY,
     GITHUB_ISSUE_MAPPING_KEY,
+    GITHUB_LEASE_ENFORCEMENT_KEY,
     IssueMapping,
     SyncCheckpoint,
     build_task_title_from_issue,
     compute_issue_changes,
     filter_issues_since_checkpoint,
+    load_lease_enforcement,
     load_repo_default_mode,
     resolve_task_status_from_issue_state,
     resolve_task_type_from_labels,
@@ -179,6 +185,23 @@ class TestRepoDefaultMode:
 
     def test_load_repo_default_mode_none_scripts(self) -> None:
         assert load_repo_default_mode(None) is None
+
+
+class TestRepoLeaseEnforcement:
+    """Tests for repo lease enforcement policy parsing and typed adapter behavior."""
+
+    def test_load_lease_enforcement_defaults_to_true(self) -> None:
+        assert load_lease_enforcement(None) is True
+        assert load_lease_enforcement({}) is True
+
+    @pytest.mark.parametrize("raw_value", ["false", "0", "off", "disabled", False, 0])
+    def test_load_lease_enforcement_parses_opt_out_values(self, raw_value: object) -> None:
+        scripts = {GITHUB_LEASE_ENFORCEMENT_KEY: raw_value}
+        assert load_lease_enforcement(scripts) is False
+
+    def test_typed_adapter_round_trip_for_lease_enforcement(self) -> None:
+        scripts = encode_lease_enforcement_update(False)
+        assert load_lease_enforcement_state(scripts) is False
 
 
 class TestIncrementalIssueFiltering:
@@ -570,3 +593,201 @@ class TestSyncIssuesHandler:
         mapping_payload = json.loads(updates[GITHUB_ISSUE_MAPPING_KEY])
         assert mapping_payload["issue_to_task"] == {"1": "task-new"}
         assert mapping_payload["task_to_issue"] == {"task-new": 1}
+
+    @pytest.mark.asyncio()
+    async def test_sync_returns_failure_when_issue_projection_errors_occur(self) -> None:
+        """Per-issue projection errors should fail sync result while preserving stats."""
+        from kagan.core.plugins.github.entrypoints.plugin_handlers import handle_sync_issues
+
+        ctx = MagicMock()
+
+        async def get_project_async(project_id: str) -> MagicMock:
+            return MagicMock(id=project_id)
+
+        async def get_repos_async(project_id: str) -> list:
+            repo = MagicMock()
+            repo.id = "repo-1"
+            repo.path = "/tmp/repo"
+            repo.scripts = {
+                GITHUB_CONNECTION_KEY: json.dumps({"host": "github.com", "repo": "repo-1"}),
+            }
+            return [repo]
+
+        async def create_task_async(*_args: Any, **_kwargs: Any) -> MagicMock:
+            raise RuntimeError("simulated create error")
+
+        ctx.project_service.get_project = get_project_async
+        ctx.project_service.get_project_repos = get_repos_async
+        ctx.task_service.get_task = AsyncMock(return_value=None)
+        ctx.task_service.create_task = create_task_async
+        ctx.task_service.update_fields = AsyncMock(return_value=None)
+
+        mock_issues = [
+            {
+                "number": 1,
+                "title": "Failing issue projection",
+                "state": "OPEN",
+                "labels": [],
+                "updatedAt": "2025-01-10T00:00:00Z",
+            }
+        ]
+
+        with (
+            patch(
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.resolve_gh_cli_path",
+                return_value=("/usr/bin/gh", None),
+            ),
+            patch(
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.run_gh_issue_list",
+                return_value=(mock_issues, None),
+            ),
+            patch(
+                "kagan.core.plugins.github.adapters.core_gateway.AppContextCoreGateway.update_repo_scripts",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result = await handle_sync_issues(ctx, {"project_id": "project-1"})
+
+        assert result["success"] is False
+        assert result["code"] == "GH_SYNC_FAILED"
+        assert "per-issue errors" in result["message"]
+        assert "retry sync" in result["hint"]
+        assert result["stats"]["total"] == 1
+        assert result["stats"]["errors"] == 1
+        assert result["stats"]["inserted"] == 0
+        assert result["stats"]["updated"] == 0
+        assert result["stats"]["reopened"] == 0
+        assert result["stats"]["closed"] == 0
+        assert result["stats"]["no_change"] == 0
+
+
+class TestLeaseEnforcementOptOutHandler:
+    """Tests for repo-level lease enforcement opt-out behavior."""
+
+    @staticmethod
+    def _build_connected_repo_scripts_with_opt_out() -> dict[str, str]:
+        return {
+            GITHUB_CONNECTION_KEY: json.dumps({"host": "github.com", "repo": "repo-1"}),
+            GITHUB_LEASE_ENFORCEMENT_KEY: "false",
+        }
+
+    @pytest.mark.asyncio()
+    async def test_acquire_lease_skips_gh_calls_when_enforcement_disabled(self) -> None:
+        from kagan.core.plugins.github.entrypoints.plugin_handlers import handle_acquire_lease
+
+        ctx = MagicMock()
+
+        async def get_project_async(project_id: str) -> MagicMock:
+            return MagicMock(id=project_id)
+
+        async def get_repos_async(project_id: str) -> list:
+            repo = MagicMock()
+            repo.id = "repo-1"
+            repo.path = "/tmp/repo"
+            repo.scripts = self._build_connected_repo_scripts_with_opt_out()
+            return [repo]
+
+        ctx.project_service.get_project = get_project_async
+        ctx.project_service.get_project_repos = get_repos_async
+
+        with (
+            patch(
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.resolve_gh_cli_path"
+            ) as resolve_gh_cli_path,
+            patch(
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.acquire_lease"
+            ) as acquire_lease,
+        ):
+            result = await handle_acquire_lease(
+                ctx,
+                {"project_id": "project-1", "issue_number": 42},
+            )
+
+        assert result["success"] is True
+        assert result["code"] == "LEASE_ENFORCEMENT_DISABLED"
+        assert "skipping acquire" in result["message"].lower()
+        resolve_gh_cli_path.assert_not_called()
+        acquire_lease.assert_not_called()
+
+    @pytest.mark.asyncio()
+    async def test_release_lease_skips_gh_calls_when_enforcement_disabled(self) -> None:
+        from kagan.core.plugins.github.entrypoints.plugin_handlers import handle_release_lease
+
+        ctx = MagicMock()
+
+        async def get_project_async(project_id: str) -> MagicMock:
+            return MagicMock(id=project_id)
+
+        async def get_repos_async(project_id: str) -> list:
+            repo = MagicMock()
+            repo.id = "repo-1"
+            repo.path = "/tmp/repo"
+            repo.scripts = self._build_connected_repo_scripts_with_opt_out()
+            return [repo]
+
+        ctx.project_service.get_project = get_project_async
+        ctx.project_service.get_project_repos = get_repos_async
+
+        with (
+            patch(
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.resolve_gh_cli_path"
+            ) as resolve_gh_cli_path,
+            patch(
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.release_lease"
+            ) as release_lease,
+        ):
+            result = await handle_release_lease(
+                ctx,
+                {"project_id": "project-1", "issue_number": 42},
+            )
+
+        assert result["success"] is True
+        assert result["code"] == "LEASE_ENFORCEMENT_DISABLED"
+        assert "skipping release" in result["message"].lower()
+        resolve_gh_cli_path.assert_not_called()
+        release_lease.assert_not_called()
+
+    @pytest.mark.asyncio()
+    async def test_get_lease_state_returns_unlocked_when_enforcement_disabled(self) -> None:
+        from kagan.core.plugins.github.entrypoints.plugin_handlers import handle_get_lease_state
+
+        ctx = MagicMock()
+
+        async def get_project_async(project_id: str) -> MagicMock:
+            return MagicMock(id=project_id)
+
+        async def get_repos_async(project_id: str) -> list:
+            repo = MagicMock()
+            repo.id = "repo-1"
+            repo.path = "/tmp/repo"
+            repo.scripts = self._build_connected_repo_scripts_with_opt_out()
+            return [repo]
+
+        ctx.project_service.get_project = get_project_async
+        ctx.project_service.get_project_repos = get_repos_async
+
+        with (
+            patch(
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.resolve_gh_cli_path"
+            ) as resolve_gh_cli_path,
+            patch(
+                "kagan.core.plugins.github.adapters.gh_cli_client.GhCliClientAdapter.get_lease_state"
+            ) as get_lease_state,
+        ):
+            result = await handle_get_lease_state(
+                ctx,
+                {"project_id": "project-1", "issue_number": 42},
+            )
+
+        assert result["success"] is True
+        assert result["code"] == "LEASE_STATE_OK"
+        assert result["state"] == {
+            "is_locked": False,
+            "is_held_by_current_instance": False,
+            "can_acquire": True,
+            "requires_takeover": False,
+            "holder": None,
+            "enforcement_enabled": False,
+        }
+        resolve_gh_cli_path.assert_not_called()
+        get_lease_state.assert_not_called()

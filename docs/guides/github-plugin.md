@@ -75,6 +75,9 @@ Via MCP:
 
 Sync is idempotent and safe to re-run.
 
+If GitHub issues are fetched but one or more task projections fail, `sync_issues` returns
+`success: false` with `code: GH_SYNC_FAILED` while still returning full `stats` counters.
+
 ## Issue-to-Task Mapping
 
 | GitHub Issue State | Kagan Task Status |
@@ -122,6 +125,19 @@ By default, only one Kagan instance can work a GitHub issue at a time.
 - Lease duration: 1 hour (renewable)
 - Stale threshold: 2 hours (takeover allowed after)
 
+### Opt out per repository
+
+Lease enforcement is enabled by default. To disable lease coordination for one repository, store:
+
+```json
+{
+  "kagan.github.lease_enforcement": false
+}
+```
+
+When disabled, `acquire_lease` and `release_lease` return success without calling GitHub lease APIs,
+and `get_lease_state` reports an unlocked state with `enforcement_enabled: false`.
+
 ### MCP exposure
 
 Lease and PR operations are implemented in the bundled GitHub plugin runtime,
@@ -154,7 +170,7 @@ but they are **not** exposed as MCP tools in the frozen V1 contract.
 | `GH_PROJECT_REQUIRED`      | Missing project_id                 | Provide valid project_id               |
 | `GH_REPO_REQUIRED`         | Multi-repo needs repo_id           | Specify repo_id for multi-repo project |
 | `GH_NOT_CONNECTED`         | Repo not connected to GitHub       | Run connect_repo first                 |
-| `GH_SYNC_FAILED`           | Issue fetch failed                 | Check gh CLI auth and repo access      |
+| `GH_SYNC_FAILED`           | Issue fetch or projection failed   | Check gh access or inspect sync stats  |
 
 Connection metadata strictness:
 

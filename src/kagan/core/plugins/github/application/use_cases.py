@@ -19,6 +19,7 @@ from kagan.core.plugins.github.domain.repo_state import (
     encode_sync_state_update,
     load_connection_state,
     load_issue_mapping_state,
+    load_lease_enforcement_state,
     load_pr_mapping_state,
     load_repo_default_mode_state,
     load_sync_checkpoint_state,
@@ -67,6 +68,7 @@ GH_WORKSPACE_REQUIRED: Final = "GH_WORKSPACE_REQUIRED"
 GH_PR_NUMBER_REQUIRED: Final = "GH_PR_NUMBER_REQUIRED"
 GH_NO_LINKED_PR: Final = "GH_NO_LINKED_PR"
 PR_STATUS_RECONCILED: Final = "PR_STATUS_RECONCILED"
+LEASE_ENFORCEMENT_DISABLED: Final = "LEASE_ENFORCEMENT_DISABLED"
 
 
 class GitHubPluginUseCases:
@@ -179,7 +181,7 @@ class GitHubPluginUseCases:
         repo_default_mode = load_repo_default_mode_state(repo.scripts)
         existing_tasks = await self._load_mapped_tasks(mapping)
 
-        result = SyncResult(success=True)
+        result = SyncResult()
         new_mapping = IssueMapping(
             issue_to_task=dict(mapping.issue_to_task),
             task_to_issue=dict(mapping.task_to_issue),
@@ -252,19 +254,33 @@ class GitHubPluginUseCases:
             encode_sync_state_update(new_checkpoint, new_mapping),
         )
 
+        stats = {
+            "total": len(issues),
+            "inserted": result.inserted,
+            "updated": result.updated,
+            "reopened": result.reopened,
+            "closed": result.closed,
+            "no_change": result.no_change,
+            "errors": result.errors,
+        }
+
+        if result.errors > 0:
+            return {
+                "success": False,
+                "code": GH_SYNC_FAILED,
+                "message": f"Synced {len(issues)} issues with {result.errors} per-issue errors",
+                "hint": (
+                    "Review failing issue mappings and retry sync after fixing task create/update "
+                    "errors."
+                ),
+                "stats": stats,
+            }
+
         return {
             "success": True,
             "code": "SYNCED",
             "message": f"Synced {len(issues)} issues",
-            "stats": {
-                "total": len(issues),
-                "inserted": result.inserted,
-                "updated": result.updated,
-                "reopened": result.reopened,
-                "closed": result.closed,
-                "no_change": result.no_change,
-                "errors": result.errors,
-            },
+            "stats": stats,
         }
 
     async def acquire_lease(self, request: AcquireLeaseInput) -> dict[str, Any]:
@@ -283,6 +299,23 @@ class GitHubPluginUseCases:
         if resolve_error is not None:
             return resolve_error
         assert repo is not None
+
+        repo_context, connection_error = self._resolve_connected_repo_context(repo)
+        if connection_error is not None:
+            return connection_error
+        assert repo_context is not None
+
+        if not load_lease_enforcement_state(repo.scripts):
+            return {
+                "success": True,
+                "code": LEASE_ENFORCEMENT_DISABLED,
+                "message": "Lease enforcement disabled for this repository; skipping acquire.",
+                "hint": (
+                    "Set kagan.github.lease_enforcement=true in repo scripts to re-enable lease "
+                    "coordination."
+                ),
+                "holder": None,
+            }
 
         repo_context, connection_error = self._resolve_connected_repo_context(
             repo,
@@ -346,6 +379,18 @@ class GitHubPluginUseCases:
             return resolve_error
         assert repo is not None
 
+        repo_context, connection_error = self._resolve_connected_repo_context(repo)
+        if connection_error is not None:
+            return connection_error
+        assert repo_context is not None
+
+        if not load_lease_enforcement_state(repo.scripts):
+            return {
+                "success": True,
+                "code": LEASE_ENFORCEMENT_DISABLED,
+                "message": "Lease enforcement disabled for this repository; skipping release.",
+            }
+
         repo_context, connection_error = self._resolve_connected_repo_context(
             repo,
             require_owner_repo=True,
@@ -388,6 +433,25 @@ class GitHubPluginUseCases:
         if resolve_error is not None:
             return resolve_error
         assert repo is not None
+
+        repo_context, connection_error = self._resolve_connected_repo_context(repo)
+        if connection_error is not None:
+            return connection_error
+        assert repo_context is not None
+
+        if not load_lease_enforcement_state(repo.scripts):
+            return {
+                "success": True,
+                "code": "LEASE_STATE_OK",
+                "state": {
+                    "is_locked": False,
+                    "is_held_by_current_instance": False,
+                    "can_acquire": True,
+                    "requires_takeover": False,
+                    "holder": None,
+                    "enforcement_enabled": False,
+                },
+            }
 
         repo_context, connection_error = self._resolve_connected_repo_context(
             repo,
