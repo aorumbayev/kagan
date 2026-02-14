@@ -9,16 +9,16 @@ Tests exist to catch regressions in user-observable behavior, not to restate imp
 ### What to Test
 
 1. **User-facing behavior**: Actions that produce visible outcomes
-2. **API/contract guarantees**: Documented interfaces and response shapes
-3. **Real regressions**: Bugs that actually happened and could recur
-4. **Boundary conditions**: Edge cases at system interfaces
+1. **API/contract guarantees**: Documented interfaces and response shapes
+1. **Real regressions**: Bugs that actually happened and could recur
+1. **Boundary conditions**: Edge cases at system interfaces
 
 ### What NOT to Test
 
 1. **Tautologies**: Tests that only verify implementation calls implementation
-2. **Pass-through wiring**: Tests that mock everything and verify mocks were called
-3. **Internal structure**: Tests coupled to private method signatures
-4. **Already-covered paths**: Duplicates of existing test cases
+1. **Pass-through wiring**: Tests that mock everything and verify mocks were called
+1. **Internal structure**: Tests coupled to private method signatures
+1. **Already-covered paths**: Duplicates of existing test cases
 
 ## Tautology Detection
 
@@ -43,12 +43,14 @@ def test_sync_issues_calls_adapter():
 
 ```python
 def test_sync_issues_creates_tasks_from_open_issues():
-    adapter = FakeGitHubAdapter(issues=[
-        Issue(number=1, title="Bug", state="OPEN"),
-    ])
+    adapter = FakeGitHubAdapter(
+        issues=[
+            Issue(number=1, title="Bug", state="OPEN"),
+        ]
+    )
     service = SyncService(adapter=adapter)
     result = service.sync(project_id="p1")
-    
+
     assert result.stats.inserted == 1  # ✅ Observable outcome
     task = get_task_by_issue(1)
     assert task.title == "[GH-1] Bug"  # ✅ User-visible attribute
@@ -120,12 +122,12 @@ Skip adding a test when:
 
 ## Test Location Guide
 
-| Test Type | Directory |
-| --------- | --------- |
+| Test Type              | Directory               |
+| ---------------------- | ----------------------- |
 | GitHub plugin contract | `tests/plugins/github/` |
-| MCP tool integration | `tests/mcp/contract/` |
-| Core service unit | `tests/core/unit/` |
-| TUI snapshot | `tests/tui/snapshot/` |
+| MCP tool integration   | `tests/mcp/contract/`   |
+| Core service unit      | `tests/core/unit/`      |
+| TUI snapshot           | `tests/tui/snapshot/`   |
 
 Plugin tests live under `tests/plugins/` to maintain domain isolation.
 

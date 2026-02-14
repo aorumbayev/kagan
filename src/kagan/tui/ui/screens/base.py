@@ -84,9 +84,7 @@ class KaganScreen(Screen):
             repo = repos[0]
         return repo.display_name or repo.name
 
-    async def _get_active_repo_info(
-        self, project: Project
-    ) -> tuple[str | None, dict[str, bool]]:
+    async def _get_active_repo_info(self, project: Project) -> tuple[str | None, dict[str, bool]]:
         """Get active repo name and GitHub connection status.
 
         Returns:
@@ -125,9 +123,7 @@ class KaganScreen(Screen):
         # Parse connection to verify it's valid
         try:
             connection = (
-                json.loads(connection_raw)
-                if isinstance(connection_raw, str)
-                else connection_raw
+                json.loads(connection_raw) if isinstance(connection_raw, str) else connection_raw
             )
             if not isinstance(connection, dict) or not connection.get("full_name"):
                 return {"connected": False, "synced": False}

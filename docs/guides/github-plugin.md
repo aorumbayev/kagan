@@ -24,6 +24,17 @@ gh auth status
 
 Expected output shows authenticated user and active scopes.
 
+### Runtime Call Flow (TUI)
+
+GitHub actions in TUI use the typed core boundary:
+
+1. `CoreBackedApi.github_*` typed methods
+1. Core request `("tui", "api_call")`
+1. `handle_tui_api_call` allowlisted dispatch
+1. `KaganAPI.github_*` (`GitHubApiMixin`)
+1. `PluginRegistry` operation resolution (`kagan_github.*`)
+1. GitHub plugin runtime handler execution
+
 ### 2. Connect a repository
 
 From TUI: `Ctrl+G` (or action palette `.` → "Connect GitHub")
@@ -44,8 +55,8 @@ Single-repo projects auto-resolve. Multi-repo projects require `repo_id`.
 Preflight checks:
 
 1. gh CLI availability
-2. Authentication status
-3. Repository access and metadata
+1. Authentication status
+1. Repository access and metadata
 
 ### 3. Sync issues to board
 
@@ -77,16 +88,16 @@ Task titles include issue attribution: `[GH-123] Original Title`
 
 Task execution mode is resolved from issue labels:
 
-| Label               | Task Type |
-| ------------------- | --------- |
-| `kagan:mode:auto`   | AUTO      |
-| `kagan:mode:pair`   | PAIR      |
+| Label             | Task Type |
+| ----------------- | --------- |
+| `kagan:mode:auto` | AUTO      |
+| `kagan:mode:pair` | PAIR      |
 
 Resolution order:
 
 1. Issue labels (if present)
-2. Repo default (if configured)
-3. V1 default: **PAIR**
+1. Repo default (if configured)
+1. V1 default: **PAIR**
 
 Conflicting labels (both present): PAIR wins deterministically.
 
@@ -134,16 +145,21 @@ but they are **not** exposed as MCP tools in the frozen V1 contract.
 
 ## Error Codes
 
-| Code                    | Meaning                               | Fix                                    |
-| ----------------------- | ------------------------------------- | -------------------------------------- |
-| `GH_CLI_NOT_AVAILABLE`  | gh CLI not installed                  | `brew install gh`                      |
-| `GH_AUTH_REQUIRED`      | Not authenticated                     | `gh auth login`                        |
-| `GH_REPO_ACCESS_DENIED` | Cannot access repository              | Check repo permissions                 |
+| Code                       | Meaning                            | Fix                                    |
+| -------------------------- | ---------------------------------- | -------------------------------------- |
+| `GH_CLI_NOT_AVAILABLE`     | gh CLI not installed               | `brew install gh`                      |
+| `GH_AUTH_REQUIRED`         | Not authenticated                  | `gh auth login`                        |
+| `GH_REPO_ACCESS_DENIED`    | Cannot access repository           | Check repo permissions                 |
 | `GH_REPO_METADATA_INVALID` | Stored/fetched metadata is invalid | Reconnect repo and retry               |
-| `GH_PROJECT_REQUIRED`   | Missing project_id                    | Provide valid project_id               |
-| `GH_REPO_REQUIRED`      | Multi-repo needs repo_id              | Specify repo_id for multi-repo project |
-| `GH_NOT_CONNECTED`      | Repo not connected to GitHub          | Run connect_repo first                 |
-| `GH_SYNC_FAILED`        | Issue fetch failed                    | Check gh CLI auth and repo access      |
+| `GH_PROJECT_REQUIRED`      | Missing project_id                 | Provide valid project_id               |
+| `GH_REPO_REQUIRED`         | Multi-repo needs repo_id           | Specify repo_id for multi-repo project |
+| `GH_NOT_CONNECTED`         | Repo not connected to GitHub       | Run connect_repo first                 |
+| `GH_SYNC_FAILED`           | Issue fetch failed                 | Check gh CLI auth and repo access      |
+
+Connection metadata strictness:
+
+- Stored connection metadata must use canonical `repo`.
+- Legacy `name`-only metadata is rejected and returns `GH_REPO_METADATA_INVALID`.
 
 ## MCP Tool Reference
 

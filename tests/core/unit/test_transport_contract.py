@@ -78,6 +78,7 @@ async def test_tcp_loopback_transport_handles_large_line_payload() -> None:
 
     writer.close()
     await writer.wait_closed()
+    assert handle.close is not None
     await handle.close()
 
 
@@ -143,6 +144,7 @@ async def test_unix_socket_transport_handles_large_line_payload() -> None:
 
         writer.close()
         await writer.wait_closed()
+        assert handle.close is not None
         await handle.close()
     finally:
         rmtree(short_tmp, ignore_errors=True)

@@ -105,28 +105,34 @@ def _run_gh_command(
 
 
 def resolve_connection_repo_name(connection: Mapping[str, Any]) -> str:
-    """Return repository name from metadata (`repo` preferred, legacy `name` fallback)."""
+    """Return repository name from metadata (`repo` key only)."""
     repo_name = connection.get("repo")
     if isinstance(repo_name, str) and repo_name.strip():
         return repo_name.strip()
-    legacy_name = connection.get("name")
-    if isinstance(legacy_name, str):
-        return legacy_name.strip()
     return ""
 
 
 def normalize_connection_metadata(connection: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize connection metadata to canonical V1 keys."""
     normalized = dict(connection)
-    repo_name = resolve_connection_repo_name(normalized)
-    if repo_name:
-        normalized["repo"] = repo_name
+    repo_name = normalized.get("repo")
+    if isinstance(repo_name, str):
+        stripped_repo = repo_name.strip()
+        if stripped_repo:
+            normalized["repo"] = stripped_repo
+        else:
+            normalized.pop("repo", None)
+    else:
+        normalized.pop("repo", None)
     normalized.pop("name", None)
     return normalized
 
 
 def load_connection_metadata(connection_raw: object) -> dict[str, Any] | None:
-    """Load and normalize connection metadata from Repo.scripts value."""
+    """Load and normalize connection metadata from Repo.scripts value.
+
+    Canonical metadata requires a non-empty `repo` key.
+    """
     data: object = connection_raw
     if isinstance(connection_raw, str):
         try:
@@ -135,7 +141,10 @@ def load_connection_metadata(connection_raw: object) -> dict[str, Any] | None:
             return None
     if not isinstance(data, dict):
         return None
-    return normalize_connection_metadata(data)
+    normalized = normalize_connection_metadata(data)
+    if not resolve_connection_repo_name(normalized):
+        return None
+    return normalized
 
 
 def resolve_gh_cli() -> GhCliAdapterInfo:

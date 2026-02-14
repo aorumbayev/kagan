@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from _api_helpers import build_api
 
 from kagan.core.host import CoreHost
 from kagan.core.ipc.contracts import CoreRequest
+from kagan.core.plugins.github.contract import GITHUB_CAPABILITY, GITHUB_METHOD_SYNC_ISSUES
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -119,6 +122,43 @@ class TestApiDispatchIntegration:
         payload = response.result["value"]
         assert payload["action"] == "start_agent"
         assert payload["job_id"]
+
+    async def test_tui_api_call_github_sync_dispatches_to_typed_api(
+        self,
+        handle_host: tuple,
+    ) -> None:
+        host, _api = handle_host
+        handler = AsyncMock(return_value={"success": True, "stats": {"inserted": 2}})
+        registry = MagicMock()
+        registry.resolve_operation.return_value = SimpleNamespace(handler=handler)
+        host._ctx.plugin_registry = registry
+
+        response = await _dispatch(
+            host,
+            CoreRequest(
+                session_id="maintainer-session",
+                capability="tui",
+                method="api_call",
+                params={
+                    "method": "github_sync_issues",
+                    "kwargs": {"project_id": "project-1", "repo_id": "repo-1"},
+                },
+            ),
+        )
+
+        assert response.ok
+        assert response.result is not None
+        assert response.result["success"] is True
+        assert response.result["value"]["success"] is True
+        assert response.result["value"]["stats"]["inserted"] == 2
+        registry.resolve_operation.assert_called_once_with(
+            GITHUB_CAPABILITY,
+            GITHUB_METHOD_SYNC_ISSUES,
+        )
+        handler.assert_awaited_once_with(
+            host._ctx,
+            {"project_id": "project-1", "repo_id": "repo-1"},
+        )
 
     async def test_viewer_denied_for_tui_api_dispatch(self, handle_host: tuple) -> None:
         host, _api = handle_host

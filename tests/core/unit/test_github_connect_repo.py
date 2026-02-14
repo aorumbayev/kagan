@@ -339,7 +339,7 @@ class TestConnectRepoHandler:
         params = {"project_id": "project-1"}
 
         with patch(
-            "kagan.core.plugins.github.runtime.run_preflight_checks",
+            "kagan.core.plugins.github.service.run_preflight_checks",
             return_value=(
                 None,
                 PreflightError(

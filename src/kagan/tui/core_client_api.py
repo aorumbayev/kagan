@@ -483,6 +483,61 @@ class CoreBackedApi:
         )
         return success, message, updated, settings
 
+    async def github_contract_probe(self, *, echo: str | None = None) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        if echo is not None:
+            cleaned_echo = echo.strip()
+            if cleaned_echo:
+                kwargs["echo"] = cleaned_echo
+        raw = await self._call_core("github_contract_probe", kwargs=kwargs)
+        if not isinstance(raw, dict):
+            raise RuntimeError("Core returned invalid GitHub contract probe payload")
+        return dict(raw)
+
+    async def github_connect_repo(
+        self,
+        *,
+        project_id: str,
+        repo_id: str | None = None,
+    ) -> dict[str, Any]:
+        cleaned_project_id = project_id.strip()
+        if not cleaned_project_id:
+            raise ValueError("project_id is required")
+
+        kwargs: dict[str, Any] = {"project_id": cleaned_project_id}
+        if repo_id is not None:
+            cleaned_repo_id = repo_id.strip()
+            if not cleaned_repo_id:
+                raise ValueError("repo_id must be a non-empty string when provided")
+            kwargs["repo_id"] = cleaned_repo_id
+
+        raw = await self._call_core("github_connect_repo", kwargs=kwargs)
+        if not isinstance(raw, dict):
+            raise RuntimeError("Core returned invalid GitHub connect payload")
+        return dict(raw)
+
+    async def github_sync_issues(
+        self,
+        *,
+        project_id: str,
+        repo_id: str | None = None,
+    ) -> dict[str, Any]:
+        cleaned_project_id = project_id.strip()
+        if not cleaned_project_id:
+            raise ValueError("project_id is required")
+
+        kwargs: dict[str, Any] = {"project_id": cleaned_project_id}
+        if repo_id is not None:
+            cleaned_repo_id = repo_id.strip()
+            if not cleaned_repo_id:
+                raise ValueError("repo_id must be a non-empty string when provided")
+            kwargs["repo_id"] = cleaned_repo_id
+
+        raw = await self._call_core("github_sync_issues", kwargs=kwargs)
+        if not isinstance(raw, dict):
+            raise RuntimeError("Core returned invalid GitHub sync payload")
+        return dict(raw)
+
     async def submit_job(
         self,
         task_id: str,

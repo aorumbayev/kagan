@@ -1,269 +1,153 @@
-"""Tests for GitHub PR operations and REVIEW transition guardrails (GH-005).
-
-These tests verify:
-- TaskPRMapping storage helpers work correctly
-- PR linkage persistence roundtrips
-- REVIEW transition guardrails block when PR is missing (for connected repos)
-- REVIEW transition guardrails block when lease is held by another instance
-"""
+"""Behavior-focused tests for GitHub PR reconciliation flows."""
 
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from kagan.core.models.enums import TaskStatus
+from kagan.core.plugins.github.gh_adapter import GITHUB_CONNECTION_KEY, GhPullRequest
+from kagan.core.plugins.github.service import GitHubPluginService
 from kagan.core.plugins.github.sync import (
     GITHUB_TASK_PR_MAPPING_KEY,
-    TaskPRLink,
     TaskPRMapping,
     load_task_pr_mapping,
 )
 
-# ---------------------------------------------------------------------------
-# TaskPRLink Tests
-# ---------------------------------------------------------------------------
+
+def _connected_repo_with_pr(task_id: str, *, pr_state: str = "OPEN") -> SimpleNamespace:
+    mapping = TaskPRMapping()
+    mapping.link_pr(
+        task_id=task_id,
+        pr_number=42,
+        pr_url="https://github.com/acme/widgets/pull/42",
+        pr_state=pr_state,
+        head_branch="feature/task",
+        base_branch="main",
+        linked_at="2025-01-01T00:00:00Z",
+    )
+    return SimpleNamespace(
+        id="repo-1",
+        path="/tmp/repo",
+        scripts={
+            GITHUB_CONNECTION_KEY: json.dumps({"owner": "acme", "repo": "widgets"}),
+            GITHUB_TASK_PR_MAPPING_KEY: json.dumps(mapping.to_dict()),
+        },
+    )
 
 
-class TestTaskPRLink:
-    """Tests for TaskPRLink data structure."""
-
-    def test_task_pr_link_fields_accessible(self) -> None:
-        """TaskPRLink fields are accessible after construction."""
-        link = TaskPRLink(
-            pr_number=42,
-            pr_url="https://github.com/owner/repo/pull/42",
-            pr_state="OPEN",
-            head_branch="feature/my-feature",
-            base_branch="main",
-            linked_at="2024-01-15T10:30:00Z",
-        )
-        assert link.pr_number == 42
-        assert link.pr_url == "https://github.com/owner/repo/pull/42"
-        assert link.pr_state == "OPEN"
-        assert link.head_branch == "feature/my-feature"
-        assert link.base_branch == "main"
-        assert link.linked_at == "2024-01-15T10:30:00Z"
-
-    def test_task_pr_link_is_frozen(self) -> None:
-        """TaskPRLink is immutable."""
-        link = TaskPRLink(
-            pr_number=42,
-            pr_url="https://github.com/owner/repo/pull/42",
-            pr_state="OPEN",
-            head_branch="feature",
-            base_branch="main",
-            linked_at="2024-01-15T10:30:00Z",
-        )
-        with pytest.raises(AttributeError):
-            link.pr_number = 99  # type: ignore[misc]
+def _connected_repo_without_pr() -> SimpleNamespace:
+    return SimpleNamespace(
+        id="repo-1",
+        path="/tmp/repo",
+        scripts={
+            GITHUB_CONNECTION_KEY: json.dumps({"owner": "acme", "repo": "widgets"}),
+            GITHUB_TASK_PR_MAPPING_KEY: json.dumps(TaskPRMapping().to_dict()),
+        },
+    )
 
 
-# ---------------------------------------------------------------------------
-# TaskPRMapping Tests
-# ---------------------------------------------------------------------------
+def _build_ctx(
+    repo: SimpleNamespace,
+    task_status: TaskStatus = TaskStatus.REVIEW,
+) -> SimpleNamespace:
+    task = SimpleNamespace(id="task-1", status=task_status)
+    project_service = SimpleNamespace(
+        get_project=AsyncMock(return_value=SimpleNamespace(id="project-1")),
+        get_project_repos=AsyncMock(return_value=[repo]),
+    )
+    task_service = SimpleNamespace(
+        get_task=AsyncMock(return_value=task),
+        update_fields=AsyncMock(return_value=None),
+    )
+    return SimpleNamespace(project_service=project_service, task_service=task_service)
 
 
-class TestTaskPRMapping:
-    """Tests for TaskPRMapping operations."""
+@pytest.mark.asyncio()
+async def test_reconcile_pr_status_moves_task_to_done_on_merge() -> None:
+    repo = _connected_repo_with_pr("task-1", pr_state="OPEN")
+    ctx = _build_ctx(repo)
+    service = GitHubPluginService(ctx)
+    merged_pr = GhPullRequest(
+        number=42,
+        title="Ship feature",
+        state="MERGED",
+        url="https://github.com/acme/widgets/pull/42",
+        head_branch="feature/task",
+        base_branch="main",
+        is_draft=False,
+        mergeable="MERGEABLE",
+    )
 
-    def test_empty_mapping_has_no_prs(self) -> None:
-        """Empty mapping reports no PRs."""
-        mapping = TaskPRMapping()
-        assert not mapping.has_pr("task123")
-        assert mapping.get_pr("task123") is None
+    with (
+        patch(
+            "kagan.core.plugins.github.service.resolve_gh_cli",
+            return_value=SimpleNamespace(available=True, path="/usr/bin/gh"),
+        ),
+        patch("kagan.core.plugins.github.service.run_gh_pr_view", return_value=(merged_pr, None)),
+        patch.object(service, "_upsert_repo_pr_mapping", AsyncMock(return_value=None)),
+    ):
+        result = await service.reconcile_pr_status({"project_id": "project-1", "task_id": "task-1"})
 
-    def test_link_pr_creates_mapping(self) -> None:
-        """link_pr creates a task-to-PR mapping."""
-        mapping = TaskPRMapping()
-        mapping.link_pr(
-            task_id="task123",
-            pr_number=42,
-            pr_url="https://github.com/owner/repo/pull/42",
-            pr_state="OPEN",
-            head_branch="feature",
-            base_branch="main",
-            linked_at="2024-01-15T10:30:00Z",
-        )
-        assert mapping.has_pr("task123")
-        link = mapping.get_pr("task123")
-        assert link is not None
-        assert link.pr_number == 42
-        assert link.pr_state == "OPEN"
-
-    def test_unlink_pr_removes_mapping(self) -> None:
-        """unlink_pr removes the task-to-PR mapping."""
-        mapping = TaskPRMapping()
-        mapping.link_pr(
-            task_id="task123",
-            pr_number=42,
-            pr_url="https://github.com/owner/repo/pull/42",
-            pr_state="OPEN",
-            head_branch="feature",
-            base_branch="main",
-            linked_at="2024-01-15T10:30:00Z",
-        )
-        assert mapping.has_pr("task123")
-        mapping.unlink_pr("task123")
-        assert not mapping.has_pr("task123")
-
-    def test_update_pr_state_changes_state_only(self) -> None:
-        """update_pr_state changes only the PR state."""
-        mapping = TaskPRMapping()
-        mapping.link_pr(
-            task_id="task123",
-            pr_number=42,
-            pr_url="https://github.com/owner/repo/pull/42",
-            pr_state="OPEN",
-            head_branch="feature",
-            base_branch="main",
-            linked_at="2024-01-15T10:30:00Z",
-        )
-        mapping.update_pr_state("task123", "MERGED")
-        link = mapping.get_pr("task123")
-        assert link is not None
-        assert link.pr_state == "MERGED"
-        assert link.pr_number == 42  # Other fields unchanged
-
-    def test_to_dict_and_from_dict_roundtrip(self) -> None:
-        """TaskPRMapping serialization roundtrips correctly."""
-        mapping = TaskPRMapping()
-        mapping.link_pr(
-            task_id="task123",
-            pr_number=42,
-            pr_url="https://github.com/owner/repo/pull/42",
-            pr_state="OPEN",
-            head_branch="feature",
-            base_branch="main",
-            linked_at="2024-01-15T10:30:00Z",
-        )
-        mapping.link_pr(
-            task_id="task456",
-            pr_number=99,
-            pr_url="https://github.com/owner/repo/pull/99",
-            pr_state="MERGED",
-            head_branch="fix",
-            base_branch="develop",
-            linked_at="2024-01-16T11:00:00Z",
-        )
-
-        # Serialize and deserialize
-        data = mapping.to_dict()
-        restored = TaskPRMapping.from_dict(data)
-
-        # Verify roundtrip
-        assert restored.has_pr("task123")
-        assert restored.has_pr("task456")
-        link1 = restored.get_pr("task123")
-        link2 = restored.get_pr("task456")
-        assert link1 is not None
-        assert link2 is not None
-        assert link1.pr_number == 42
-        assert link1.pr_state == "OPEN"
-        assert link2.pr_number == 99
-        assert link2.pr_state == "MERGED"
-
-    def test_from_dict_handles_none(self) -> None:
-        """from_dict returns empty mapping for None input."""
-        mapping = TaskPRMapping.from_dict(None)
-        assert not mapping.has_pr("any_task")
-
-    def test_from_dict_handles_empty_dict(self) -> None:
-        """from_dict returns empty mapping for empty dict."""
-        mapping = TaskPRMapping.from_dict({})
-        assert not mapping.has_pr("any_task")
+    assert result["success"] is True
+    assert result["code"] == "PR_STATUS_RECONCILED"
+    assert result["pr"]["state"] == "MERGED"
+    assert result["task"]["status_changed"] is True
+    ctx.task_service.update_fields.assert_awaited_once_with("task-1", status=TaskStatus.DONE)
 
 
-# ---------------------------------------------------------------------------
-# load_task_pr_mapping Tests
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio()
+async def test_reconcile_pr_status_moves_task_to_in_progress_when_closed_without_merge() -> None:
+    repo = _connected_repo_with_pr("task-1", pr_state="OPEN")
+    ctx = _build_ctx(repo, task_status=TaskStatus.REVIEW)
+    service = GitHubPluginService(ctx)
+    closed_pr = GhPullRequest(
+        number=42,
+        title="Ship feature",
+        state="CLOSED",
+        url="https://github.com/acme/widgets/pull/42",
+        head_branch="feature/task",
+        base_branch="main",
+        is_draft=False,
+        mergeable="UNKNOWN",
+    )
+
+    with (
+        patch(
+            "kagan.core.plugins.github.service.resolve_gh_cli",
+            return_value=SimpleNamespace(available=True, path="/usr/bin/gh"),
+        ),
+        patch("kagan.core.plugins.github.service.run_gh_pr_view", return_value=(closed_pr, None)),
+        patch.object(service, "_upsert_repo_pr_mapping", AsyncMock(return_value=None)),
+    ):
+        result = await service.reconcile_pr_status({"project_id": "project-1", "task_id": "task-1"})
+
+    assert result["success"] is True
+    assert result["pr"]["state"] == "CLOSED"
+    assert result["task"]["status"] == TaskStatus.IN_PROGRESS.value
+    assert result["task"]["status_changed"] is True
+    ctx.task_service.update_fields.assert_awaited_once_with(
+        "task-1",
+        status=TaskStatus.IN_PROGRESS,
+    )
 
 
-class TestLoadTaskPRMapping:
-    """Tests for load_task_pr_mapping helper."""
+@pytest.mark.asyncio()
+async def test_reconcile_pr_status_returns_error_when_no_linked_pr() -> None:
+    repo = _connected_repo_without_pr()
+    ctx = _build_ctx(repo)
+    service = GitHubPluginService(ctx)
 
-    def test_load_from_none_scripts_returns_empty(self) -> None:
-        """load_task_pr_mapping returns empty mapping for None scripts."""
-        mapping = load_task_pr_mapping(None)
-        assert not mapping.has_pr("any_task")
+    result = await service.reconcile_pr_status({"project_id": "project-1", "task_id": "task-1"})
 
-    def test_load_from_empty_scripts_returns_empty(self) -> None:
-        """load_task_pr_mapping returns empty mapping for empty scripts."""
-        mapping = load_task_pr_mapping({})
-        assert not mapping.has_pr("any_task")
-
-    def test_load_from_scripts_with_mapping(self) -> None:
-        """load_task_pr_mapping loads mapping from scripts."""
-        pr_data = {
-            "task_to_pr": {
-                "task123": {
-                    "pr_number": 42,
-                    "pr_url": "https://github.com/owner/repo/pull/42",
-                    "pr_state": "OPEN",
-                    "head_branch": "feature",
-                    "base_branch": "main",
-                    "linked_at": "2024-01-15T10:30:00Z",
-                }
-            }
-        }
-        scripts = {GITHUB_TASK_PR_MAPPING_KEY: json.dumps(pr_data)}
-        mapping = load_task_pr_mapping(scripts)
-        assert mapping.has_pr("task123")
-        link = mapping.get_pr("task123")
-        assert link is not None
-        assert link.pr_number == 42
-
-    def test_load_handles_invalid_json_gracefully(self) -> None:
-        """load_task_pr_mapping returns empty mapping for invalid JSON."""
-        scripts = {GITHUB_TASK_PR_MAPPING_KEY: "not valid json"}
-        mapping = load_task_pr_mapping(scripts)
-        assert not mapping.has_pr("any_task")
+    assert result["success"] is False
+    assert result["code"] == "GH_NO_LINKED_PR"
+    assert "no linked PR" in result["message"]
 
 
-# ---------------------------------------------------------------------------
-# PR Reconcile Message Builder Tests (GH-006)
-# ---------------------------------------------------------------------------
-
-
-class TestBuildReconcileMessage:
-    """Tests for _build_reconcile_message helper."""
-
-    def test_merged_pr_with_task_transition(self) -> None:
-        """Merged PR with task status change produces correct message."""
-        from kagan.core.plugins.github.runtime import _build_reconcile_message
-
-        msg = _build_reconcile_message(pr_number=42, pr_state="MERGED", task_changed=True)
-        assert "PR #42 merged" in msg
-        assert "Task moved to DONE" in msg
-
-    def test_merged_pr_without_task_transition(self) -> None:
-        """Merged PR without task status change (already DONE) produces correct message."""
-        from kagan.core.plugins.github.runtime import _build_reconcile_message
-
-        msg = _build_reconcile_message(pr_number=42, pr_state="MERGED", task_changed=False)
-        assert "PR #42 merged" in msg
-        assert "Task already DONE" in msg
-
-    def test_closed_pr_with_task_transition(self) -> None:
-        """Closed (unmerged) PR with task status change produces correct message."""
-        from kagan.core.plugins.github.runtime import _build_reconcile_message
-
-        msg = _build_reconcile_message(pr_number=99, pr_state="CLOSED", task_changed=True)
-        assert "PR #99 closed without merge" in msg
-        assert "Task moved to IN_PROGRESS" in msg
-
-    def test_closed_pr_without_task_transition(self) -> None:
-        """Closed (unmerged) PR without task status change produces correct message."""
-        from kagan.core.plugins.github.runtime import _build_reconcile_message
-
-        msg = _build_reconcile_message(pr_number=99, pr_state="CLOSED", task_changed=False)
-        assert "PR #99 closed without merge" in msg
-        assert "Task status unchanged" in msg
-
-    def test_open_pr_no_task_change(self) -> None:
-        """Open PR produces no task change message."""
-        from kagan.core.plugins.github.runtime import _build_reconcile_message
-
-        msg = _build_reconcile_message(pr_number=55, pr_state="OPEN", task_changed=False)
-        assert "PR #55 is open" in msg
-        assert "No task status change" in msg
+def test_load_task_pr_mapping_ignores_invalid_payload() -> None:
+    mapping = load_task_pr_mapping({GITHUB_TASK_PR_MAPPING_KEY: "invalid-json"})
+    assert mapping.get_pr("task-1") is None

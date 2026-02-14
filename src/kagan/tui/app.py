@@ -124,10 +124,42 @@ class KaganApp(App):
             exit_on_error=False,
         )
 
+    @staticmethod
+    def _use_local_context() -> bool:
+        """Return whether local in-process AppContext mode is explicitly enabled."""
+        value = os.environ.get("KAGAN_TUI_USE_LOCAL_CONTEXT", "").strip().lower()
+        return value in {"1", "true", "yes", "on"}
+
     async def _initialize_app(self) -> None:
         """Initialize all app components."""
         self.config = KaganConfig.load(self.config_path)
         self.log("Config loaded", path=str(self.config_path))
+
+        if self._use_local_context():
+            from kagan.core.bootstrap import (
+                create_app_context,
+                create_signal_bridge,
+                wire_default_signals,
+            )
+
+            self._ctx = await create_app_context(
+                config_path=self.config_path,
+                db_path=self.db_path,
+                config=self.config,
+                project_root=self.project_root,
+                agent_factory=self._agent_factory,
+            )
+            signal_bridge = create_signal_bridge(self._ctx.event_bus)
+            wire_default_signals(signal_bridge, self)
+            self._ctx.signal_bridge = signal_bridge
+            self._core_client = None
+            self._core_status = "DISCONNECTED"
+            self.log("Local AppContext initialized (core bypass enabled)")
+
+            await self._reconcile_worktrees()
+            await self._run_janitor()
+            await self._startup_screen_decision()
+            return
 
         from kagan.core.ipc.client import IPCClient
         from kagan.core.launcher import ensure_core_running

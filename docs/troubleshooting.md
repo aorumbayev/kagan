@@ -203,7 +203,7 @@ Cause:
 Fix:
 
 1. Run `kagan_github_connect_repo` via MCP.
-2. Or use TUI action palette: `.` → "Connect GitHub".
+1. Or use TUI action palette: `.` → "Connect GitHub".
 
 ### `LEASE_HELD_BY_OTHER`
 
@@ -214,8 +214,8 @@ Cause:
 Fix:
 
 1. Check holder info in error response.
-2. If holder instance is gone, use `force_takeover: true`.
-3. If lease is over 2 hours old, takeover is automatic.
+1. If holder instance is gone, use `force_takeover: true`.
+1. If lease is over 2 hours old, takeover is automatic.
 
 ### Sync shows zero issues but GitHub has issues
 
@@ -226,8 +226,8 @@ Cause:
 Fix:
 
 1. Verify: `gh issue list --repo owner/repo`
-2. Check GitHub App permissions if using automation.
-3. Re-authenticate: `gh auth login`
+1. Check GitHub App permissions if using automation.
+1. Re-authenticate: `gh auth login`
 
 ## Nuclear cleanup
 

@@ -21,7 +21,7 @@ Operational procedures for GitHub-connected Kagan deployments.
 
 - [ ] Run `kagan_github_connect_repo` for each managed repo
 - [ ] Verify response: `code: "CONNECTED"` or `code: "ALREADY_CONNECTED"`
-- [ ] Confirm `connection` metadata includes correct `owner`, `repo`, `default_branch`
+- [ ] Confirm `connection` metadata includes canonical `repo` (not legacy `name`), plus correct `owner` and `default_branch`
 
 ### Initial Sync
 
@@ -69,15 +69,16 @@ The frozen MCP V1 contract for the GitHub plugin currently exposes only:
 If tasks and issues become desynchronized:
 
 1. Re-run `kagan_github_sync_issues`
-2. Sync will reconcile mappings based on issue numbers
+1. Sync will reconcile mappings based on issue numbers
 
 ### Connection Reset
 
 To re-establish GitHub connection:
 
 1. `kagan_github_connect_repo` is idempotent
-2. Returns `ALREADY_CONNECTED` if valid connection exists
-3. Will refresh if underlying metadata changed
+1. Returns `ALREADY_CONNECTED` if valid connection exists
+1. Will refresh if underlying metadata changed
+1. If metadata lacks canonical `repo`, reconnect (legacy `name`-only metadata is invalid)
 
 ## Rate Limit Awareness
 

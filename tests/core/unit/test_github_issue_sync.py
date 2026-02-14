@@ -28,8 +28,6 @@ from kagan.core.plugins.github.sync import (
     build_task_title_from_issue,
     compute_issue_changes,
     filter_issues_since_checkpoint,
-    load_checkpoint,
-    load_mapping,
     load_repo_default_mode,
     resolve_task_status_from_issue_state,
     resolve_task_type_from_labels,
@@ -158,49 +156,8 @@ class TestIssueMapping:
         assert restored.get_issue_number("task-a") == 1
 
 
-class TestSyncCheckpoint:
-    """Tests for sync checkpoint persistence."""
-
-    def test_serialization_round_trip(self) -> None:
-        checkpoint = SyncCheckpoint(last_sync_at="2025-01-01T00:00:00Z", issue_count=10)
-        data = checkpoint.to_dict()
-        restored = SyncCheckpoint.from_dict(data)
-
-        assert restored.last_sync_at == "2025-01-01T00:00:00Z"
-        assert restored.issue_count == 10
-
-    def test_from_dict_handles_none(self) -> None:
-        restored = SyncCheckpoint.from_dict(None)
-        assert restored.last_sync_at is None
-        assert restored.issue_count == 0
-
-
-class TestLoadHelpers:
-    """Tests for loading checkpoint and mapping from scripts."""
-
-    def test_load_checkpoint_parses_json_and_defaults(self) -> None:
-        scripts = {
-            "kagan.github.sync_checkpoint": json.dumps(
-                {"last_sync_at": "2025-01-01T00:00:00Z"}
-            )
-        }
-        checkpoint = load_checkpoint(scripts)
-        assert checkpoint.last_sync_at == "2025-01-01T00:00:00Z"
-        assert checkpoint.issue_count == 0
-
-    def test_load_checkpoint_returns_empty_when_missing(self) -> None:
-        checkpoint = load_checkpoint({})
-        assert checkpoint.last_sync_at is None
-        assert checkpoint.issue_count == 0
-
-    def test_load_mapping_from_json_string(self) -> None:
-        scripts = {
-            "kagan.github.issue_mapping": json.dumps(
-                {"issue_to_task": {"1": "task-a"}, "task_to_issue": {"task-a": 1}}
-            )
-        }
-        mapping = load_mapping(scripts)
-        assert mapping.get_task_id(1) == "task-a"
+class TestRepoDefaultMode:
+    """Tests for repo default mode behavior used by sync outcome policy."""
 
     @pytest.mark.parametrize(
         ("raw_mode", "expected"),
@@ -491,7 +448,7 @@ class TestSyncIssuesHandler:
             repo.id = "repo-1"
             repo.path = "/tmp/repo"
             repo.scripts = {
-                GITHUB_CONNECTION_KEY: json.dumps({"host": "github.com"}),
+                GITHUB_CONNECTION_KEY: json.dumps({"host": "github.com", "repo": "repo-1"}),
                 GITHUB_ISSUE_MAPPING_KEY: json.dumps(existing_mapping),
             }
             return [repo]
@@ -527,14 +484,14 @@ class TestSyncIssuesHandler:
 
         with (
             patch(
-                "kagan.core.plugins.github.runtime.resolve_gh_cli",
+                "kagan.core.plugins.github.service.resolve_gh_cli",
                 return_value=MagicMock(available=True, path="/usr/bin/gh"),
             ),
             patch(
-                "kagan.core.plugins.github.runtime.run_gh_issue_list",
+                "kagan.core.plugins.github.service.run_gh_issue_list",
                 return_value=(mock_issues, None),
             ),
-            patch("kagan.core.plugins.github.runtime._upsert_repo_sync_state"),
+            patch("kagan.core.plugins.github.service.GitHubPluginService._upsert_repo_sync_state"),
         ):
             result = await handle_sync_issues(ctx, params)
 
@@ -562,7 +519,7 @@ class TestSyncIssuesHandler:
             repo.id = "repo-1"
             repo.path = "/tmp/repo"
             repo.scripts = {
-                GITHUB_CONNECTION_KEY: json.dumps({"host": "github.com"}),
+                GITHUB_CONNECTION_KEY: json.dumps({"host": "github.com", "repo": "repo-1"}),
                 GITHUB_ISSUE_MAPPING_KEY: json.dumps(existing_mapping),
             }
             return [repo]
@@ -595,18 +552,20 @@ class TestSyncIssuesHandler:
 
         with (
             patch(
-                "kagan.core.plugins.github.runtime.resolve_gh_cli",
+                "kagan.core.plugins.github.service.resolve_gh_cli",
                 return_value=MagicMock(available=True, path="/usr/bin/gh"),
             ),
             patch(
-                "kagan.core.plugins.github.runtime.run_gh_issue_list",
+                "kagan.core.plugins.github.service.run_gh_issue_list",
                 return_value=(mock_issues, None),
             ),
-            patch("kagan.core.plugins.github.runtime._upsert_repo_sync_state") as upsert_state,
+            patch(
+                "kagan.core.plugins.github.service.GitHubPluginService._upsert_repo_sync_state"
+            ) as upsert_state,
         ):
             result = await handle_sync_issues(ctx, {"project_id": "project-1"})
 
         assert result["success"] is True
-        mapping = upsert_state.await_args.args[3]
+        mapping = upsert_state.await_args.args[2]
         assert mapping.issue_to_task[1] == "task-new"
         assert mapping.task_to_issue == {"task-new": 1}

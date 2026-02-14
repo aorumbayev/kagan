@@ -797,33 +797,10 @@ class KanbanScreen(KaganScreen):
         # Find the active repo
         repo = next((r for r in repos if r.id == repo_id), repos[0]) if repo_id else repos[0]
 
-        # Check if connected to GitHub
-        from kagan.core.plugins.github.gh_adapter import GITHUB_CONNECTION_KEY
-
-        scripts = repo.scripts or {}
-        if not scripts.get(GITHUB_CONNECTION_KEY):
-            self.notify(
-                "Repository not connected to GitHub. Use MCP tools to connect first.",
-                severity="warning",
-            )
-            return
-
-        # Call sync via plugin operation
+        # Call sync through typed TUI API boundary.
         self.notify("Syncing GitHub issues...", severity="information")
         try:
-            from kagan.core.plugins.github.contract import (
-                GITHUB_CAPABILITY,
-                GITHUB_METHOD_SYNC_ISSUES,
-            )
-
-            result = await self.ctx.api._call_core(
-                "invoke_plugin_operation",
-                kwargs={
-                    "capability": GITHUB_CAPABILITY,
-                    "method": GITHUB_METHOD_SYNC_ISSUES,
-                    "params": {"project_id": project_id, "repo_id": repo.id},
-                },
-            )
+            result = await self.ctx.api.github_sync_issues(project_id=project_id, repo_id=repo.id)
 
             if isinstance(result, dict):
                 if result.get("success"):
@@ -839,8 +816,16 @@ class KanbanScreen(KaganScreen):
                     # Update header to show synced status
                     self.header.update_github_status(connected=True, synced=True)
                 else:
-                    msg = result.get("message", "Sync failed")
-                    self.notify(msg, severity="error")
+                    message = str(result.get("message") or "Sync failed")
+                    hint = result.get("hint")
+                    if isinstance(hint, str) and hint.strip():
+                        message = f"{message} ({hint.strip()})"
+                    severity = (
+                        "warning"
+                        if str(result.get("code") or "") == "GH_NOT_CONNECTED"
+                        else "error"
+                    )
+                    self.notify(message, severity=severity)
             else:
                 self.notify("Unexpected sync response", severity="error")
         except Exception as e:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from acp import RequestError
 from sqlalchemy.exc import OperationalError
@@ -890,6 +890,8 @@ class ReviewModal(KaganModalScreen[str | None]):
         if self._live_output_agent is None:
             if not wait_for_agent:
                 return
+            automation_service = getattr(self.ctx, "automation_service", None)
+            wait_for_running_agent = getattr(automation_service, "wait_for_running_agent", None)
             loop = asyncio.get_running_loop()
             deadline = loop.time() + self._LIVE_ATTACH_TIMEOUT_SECONDS
             while loop.time() < deadline and self._live_output_agent is None:
@@ -899,6 +901,13 @@ class ReviewModal(KaganModalScreen[str | None]):
                 self._live_output_agent = self._stream_resolve_live_handle(
                     runtime_view, "running_agent"
                 )
+                if self._live_output_agent is None and callable(wait_for_running_agent):
+                    wait_for_running = cast("Any", wait_for_running_agent)
+                    with contextlib.suppress(*_SHUTDOWN_ERRORS, TimeoutError):
+                        self._live_output_agent = await wait_for_running(
+                            self._task_model.id,
+                            timeout=0.1,
+                        )
                 if self._live_output_agent is None:
                     await asyncio.sleep(0.1)
             if self._live_output_agent is None:

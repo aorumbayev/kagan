@@ -71,6 +71,9 @@ _TUI_ALLOWED_API_METHODS: frozenset[str] = frozenset(
         "get_project_repo_details",
         "get_project_repos",
         "get_queue_status",
+        "github_connect_repo",
+        "github_contract_probe",
+        "github_sync_issues",
         "get_queued_messages",
         "get_running_task_ids",
         "get_runtime_view",
@@ -1946,6 +1949,17 @@ async def _dispatch_tui_api_call(
                 branch,
                 mark_configured=mark_configured,
             )
+        case "github_contract_probe":
+            echo = _non_empty_str(kwargs.get("echo"))
+            return await f.github_contract_probe(echo=echo)
+        case "github_connect_repo":
+            project_id = _required_non_empty(kwargs, "project_id")
+            repo_id = _non_empty_str(kwargs.get("repo_id"))
+            return await f.github_connect_repo(project_id=project_id, repo_id=repo_id)
+        case "github_sync_issues":
+            project_id = _required_non_empty(kwargs, "project_id")
+            repo_id = _non_empty_str(kwargs.get("repo_id"))
+            return await f.github_sync_issues(project_id=project_id, repo_id=repo_id)
         case _:
             method = getattr(f, method_name, None)
             if method is None or not callable(method):
