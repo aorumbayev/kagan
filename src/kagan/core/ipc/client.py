@@ -7,6 +7,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from kagan.core.ipc.constants import MAX_LINE_BYTES
 from kagan.core.ipc.contracts import CoreRequest, CoreResponse
 from kagan.core.ipc.transports import DefaultTransport, TCPLoopbackTransport, UnixSocketTransport
 
@@ -15,7 +16,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_MAX_LINE_BYTES = 4 * 1024 * 1024  # 4 MiB per JSON line
 _DEFAULT_TIMEOUT = 30.0
 
 
@@ -176,6 +176,10 @@ class IPCClient:
                     self._reader.readline(),
                     timeout=effective_timeout,
                 )
+            except ValueError as exc:
+                await self.close()
+                msg = "IPC response exceeded stream framing limit"
+                raise ConnectionError(msg) from exc
             except TimeoutError:
                 await self.close()
                 raise
@@ -183,6 +187,10 @@ class IPCClient:
         if not raw:
             await self.close()
             msg = "Connection closed by server"
+            raise ConnectionError(msg)
+        if len(raw) > MAX_LINE_BYTES:
+            await self.close()
+            msg = "IPC response exceeded max line size"
             raise ConnectionError(msg)
 
         try:
